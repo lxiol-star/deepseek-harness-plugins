@@ -1,0 +1,13 @@
+# Bundle patch layer for dsh-session-board.
+#
+# The row loads this package's main entry as the host half (a plain Cordis
+# plugin: it owns a storage domain and a small HTTP surface for the
+# acknowledged/attention state). The `dsh.client` declaration in package.json
+# makes the web application load ./lib/client.js as the browser half, which is
+# where all rendering lives.
+#
+# This plugin is purely additive: it patches no official bundle, and removing
+# the row (plus the package dependency) is a complete uninstall.
+- insert:
+    - id: dsh-session-board
+      name: dsh-session-board

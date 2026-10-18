@@ -1,0 +1,138 @@
+import { describe, it, expect, vi } from 'vitest'
+import { createWikiArchiver, validateWikiIds } from '../src/host/wiki-archive.ts'
+import { createBoardRoutes, BOARD_WIKI_ARCHIVE_PATH } from '../src/host/routes.ts'
+import { EMPTY_FEED } from '../src/shared/types.ts'
+import type { WikiArchiver } from '../src/host/wiki-archive.ts'
+
+const workflow = async (operation: string, value: string) => operation === 'scope' ? { entries: JSON.parse(value).map((session: string) => ({ session, source: `source/${session}`, parent: null, role: 'main', evidence: 'header', snapshot: false })), missing: [] } : operation === 'synthesize' ? { status: 'skipped', pages: [] } : { status: 'updated' }
+
+function output(ids: string[], dry_run: boolean, source = 'source') {
+  return JSON.stringify({ archived: ids.length, skipped: 0, empty: 0, failed: 0, selected: ids.length, dry_run,
+    results: ids.map(id => ({ session: id, source: `${source}/${id}`, action: dry_run ? 'would-archive' : 'archived', ...(dry_run ? {} : { page: `raw/sessions/host/dsh/${id}.md` }) })) })
+}
+
+describe('Wiki archival safety', () => {
+  it('accepts real non-UUID identifiers but not selector delimiters or traversal', () => {
+    expect(validateWikiIds(['session-feishu-watch-lead-0930', 'session-feishu-watch-lead-0930'])).toEqual(['session-feishu-watch-lead-0930'])
+    for (const id of ['a,b', 'a b', '../x', '-x', '', '.','..']) expect(() => validateWikiIds([id])).toThrow('INVALID_SELECTION')
+    expect(() => validateWikiIds([])).toThrow()
+    expect(() => validateWikiIds(Array(51).fill('id'))).toThrow()
+  })
+  it('does not write until explicit single-use token commit', async () => {
+    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(['id'], args.includes('--dry-run')) }))
+    const service = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', home: '/test', execute })
+    const preview = await service.preview(['id'])
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute.mock.calls[0]?.[0]).toContain('--dry-run')
+    expect(execute.mock.calls[0]?.[0]).toContain('--exact-session')
+    expect(execute.mock.calls[0]?.[0]).not.toContain('--sessions')
+    await service.commit(preview.token)
+    expect(execute).toHaveBeenCalledTimes(3)
+    expect(execute.mock.calls[2]?.[0]).not.toContain('--dry-run')
+    await expect(service.commit(preview.token)).rejects.toThrow('PREVIEW_EXPIRED')
+  })
+  it('archives one exact ID at a time with --full, synthesizes full paths, then indexes once', async () => {
+    const order: string[] = []
+    const scoped = { entries: [
+      { session: 'main', source: 'source/main', parent: null, role: 'main', evidence: 'header', snapshot: false },
+      { session: 'child', source: 'source/child', parent: 'main', role: 'child', evidence: 'parentSession', snapshot: true },
+    ], missing: [{ session: 'missing', parent: 'main' }] }
+    const run = vi.fn(async (operation: string, value: string) => {
+      if (operation === 'scope') return scoped
+      order.push(`${operation}:${value}`)
+      return operation === 'index' ? { status: 'updated' } : { status: 'synthesized', pages: ['experience/example.md'] }
+    })
+    const execute = vi.fn(async (args: readonly string[]) => {
+      const id = args[args.indexOf('--exact-session') + 1]!
+      expect(args.filter(arg => arg === '--exact-session')).toHaveLength(1)
+      if (!args.includes('--dry-run')) { expect(args).toContain('--full'); order.push(`archive:${id}`) }
+      return { stdout: output([id], args.includes('--dry-run')) }
+    })
+    const service = createWikiArchiver({ home: '/test', dshHome: '/test/dev', workflow: run, execute })
+    const preview = await service.preview(['main'])
+    expect(preview.summary.scope?.missing).toHaveLength(1)
+    expect(order).toEqual([])
+    const result = await service.commit(preview.token)
+    expect(order).toEqual(['archive:main', 'archive:child', 'synthesize:raw/sessions/host/dsh/main.md', 'synthesize:raw/sessions/host/dsh/child.md', 'index:'])
+    expect(result.workflow?.index).toBe('updated')
+    expect(result.workflow?.synthesis).toHaveLength(2)
+  })
+  it('keeps raw archives and continues other sessions after synthesis fails or detects secrets', async () => {
+    const run = vi.fn(async (operation: string, value: string) => {
+      if (operation === 'scope') return workflow(operation, value)
+      if (value.endsWith('/bad.md')) throw new Error('provider failed')
+      return { status: 'sensitive', pages: [], error: 'SENSITIVE_CONTENT' }
+    })
+    const execute = async (args: readonly string[]) => ({ stdout: output([args[args.indexOf('--exact-session') + 1]!], args.includes('--dry-run')) })
+    const service = createWikiArchiver({ dshHome: '/test/dev', workflow: run, execute })
+    const result = await service.commit((await service.preview(['bad', 'sensitive'])).token)
+    expect(result.archived).toBe(2)
+    expect(result.workflow?.synthesis.map(row => row.status)).toEqual(['failed', 'sensitive'])
+    expect(result.workflow?.index).toBe('not-needed')
+    expect(run.mock.calls.some(([operation]) => operation === 'index')).toBe(false)
+  })
+  it('rejects source mismatch with zero archive writes', async () => {
+    let calls = 0
+    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(['id'], args.includes('--dry-run'), ++calls === 1 ? 'a' : 'b') }))
+    const service = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', home: '/test', execute })
+    const plan = await service.preview(['id'])
+    await expect(service.commit(plan.token)).rejects.toThrow('SELECTION_MISMATCH')
+    expect(execute.mock.calls.every(([args]) => args.includes('--dry-run'))).toBe(true)
+  })
+  it('rejects unknown rows and malformed responses', async () => {
+    const service = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', execute: async () => ({ stdout: output(['other'], true) }) })
+    await expect(service.preview(['id'])).rejects.toThrow('SELECTION_MISMATCH')
+    const invalid = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', execute: async () => ({ stdout: '{"results":[]}' }) })
+    await expect(invalid.preview(['id'])).rejects.toThrow('INVALID_RESULT')
+  })
+  it('expires preview tokens and aborts on unload', async () => {
+    let now = 0
+    const service = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', now: () => now, execute: async () => ({ stdout: output(['id'], true) }) })
+    const plan = await service.preview(['id']); now = plan.expiresAt + 1
+    await expect(service.commit(plan.token)).rejects.toThrow('PREVIEW_EXPIRED')
+    service.close(); await expect(service.preview(['id'])).rejects.toThrow('CANCELLED')
+  })
+  it('rejects simultaneous requests instead of creating unbounded queues', async () => {
+    let finish!: () => void
+    const service = createWikiArchiver({ workflow, dshHome: '/test/.dsh-dev', execute: () => new Promise(resolve => { finish = () => resolve({ stdout: output(['id'], true) }) }) })
+    const first = service.preview(['id'])
+    await expect(service.preview(['id'])).rejects.toThrow('BUSY')
+    finish(); await first
+  })
+})
+
+describe('authenticated connection route handler', () => {
+  const fixture = () => {
+    const wikiArchive: WikiArchiver = { preview: vi.fn(async () => ({ token: 'token', expiresAt: 1, summary: JSON.parse(output(['id'], true)) })), commit: vi.fn(async () => JSON.parse(output(['id'], false))), close: vi.fn() }
+    const routes = createBoardRoutes({ snapshot: () => EMPTY_FEED, ack: async () => true, wikiArchive, requestRejection: () => 401, warn: () => {} })
+    return { wikiArchive, route: routes.fetchRoutes.find(route => route.path === BOARD_WIKI_ARCHIVE_PATH)! }
+  }
+  const request = (body: unknown) => new Request(`http://test${BOARD_WIKI_ARCHIVE_PATH}`, { method: 'POST', body: JSON.stringify(body) })
+  it('old unconfirmed POST cannot archive', async () => {
+    const { route, wikiArchive } = fixture()
+    expect((await route.fetch(request({ sessionIds: ['id'] }))).status).toBe(400)
+    expect(wikiArchive.commit).not.toHaveBeenCalled()
+  })
+  it('invalid requests never invoke script service', async () => {
+    const { route, wikiArchive } = fixture()
+    expect((await route.fetch(request({ action: 'preview', sessionIds: ['../x'] }))).status).toBe(400)
+    expect(wikiArchive.preview).not.toHaveBeenCalled()
+  })
+  it('starts a background operation only once and returns the final result by token', async () => {
+    const { route, wikiArchive } = fixture()
+    await route.fetch(request({ action: 'start', token: 'token' }))
+    await route.fetch(request({ action: 'start', token: 'token' }))
+    const response = await route.fetch(request({ action: 'status', token: 'token' }))
+    expect(wikiArchive.commit).toHaveBeenCalledTimes(1)
+    expect((await response.json()).operation).toMatchObject({ state: 'completed', result: { archived: 1 } })
+    expect((await route.fetch(request({ action: 'status', token: 'unknown' }))).status).toBe(409)
+  })
+  it('preview and commit have separate responses', async () => {
+    const { route, wikiArchive } = fixture()
+    expect((await route.fetch(request({ action: 'preview', sessionIds: ['id'] }))).status).toBe(200)
+    expect(wikiArchive.commit).not.toHaveBeenCalled()
+    const response = await route.fetch(request({ action: 'commit', token: 'token' }))
+    expect(response.status).toBe(200)
+    expect((await response.json()).result.archived).toBe(1)
+  })
+})

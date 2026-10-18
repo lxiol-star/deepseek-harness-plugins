@@ -1,0 +1,150 @@
+/**
+ * Durable declarations of the board's two fact stores, plus the one text rule
+ * that belongs to the storage boundary.
+ *
+ * ## Why this file declares its own spec vocabulary
+ *
+ * A plugin installed into a profile is loaded from its own directory, and Node
+ * resolves its bare imports from there. The `@deepseek-ai/*` packages are not
+ * installed into the profile — that is deliberate, since a second copy would be
+ * a version-skew hazard — so a runtime
+ * `import { defineDomain } from '@deepseek-ai/dsh-storage-domain'` fails to
+ * resolve and the whole plugin never loads. That failure is not hypothetical:
+ * it is exactly what the first install of this plugin hit.
+ *
+ * The storage-domain contract is small and stable enough to satisfy directly.
+ * `open()` reads `name`, `version`, `layout`, `compatibleVersions`,
+ * `invalidRecords` and `tables`, and the only thing it ever asks of a table is
+ * `valueSchema.parse(record)`. So a domain spec is a plain object and a
+ * "schema" is anything with a `parse` method. Declaring them here keeps the
+ * host half free of runtime imports, which is what makes a `link:` install
+ * work at all.
+ *
+ * The peer range on `@deepseek-ai/dsh-storage-domain` in `package.json` is a
+ * *contract* gate — it records which host shape this package is written
+ * against — not a runtime import.
+ *
+ * ## Versioning
+ *
+ * `dsh-storage-domain` has no migration: a stored `version` that does not match
+ * the descriptor makes `open()` reject. Both domains therefore start at
+ * `version: 1`, and any later shape change must arrive as a new domain rather
+ * than a bump on these.
+ */
+/**
+ * The slice of a schema object the storage layer actually uses.
+ *
+ * `parse` receives a raw stored record and returns the value callers see;
+ * throwing is what marks a record invalid. The implementations below normalize
+ * instead of throwing, because these records are derived facts: a corrupt
+ * record costs one card's badge, never the domain's availability.
+ */
+export interface RecordSchema<T> {
+    parse(value: unknown): T;
+}
+/** One table declaration, matching `DomainTableSpec` structurally. */
+export interface DomainTableSpec<V> {
+    readonly valueSchema: RecordSchema<V>;
+}
+/** One domain declaration, matching `DomainSpec` structurally. */
+export interface DomainSpec {
+    readonly name: string;
+    readonly version: number;
+    readonly invalidRecords: 'backup-and-skip';
+    readonly tables: Record<string, DomainTableSpec<unknown>>;
+}
+/** Domain holding per-session turn-end facts and the acknowledged cursor. */
+export declare const ACK_DOMAIN_NAME = "dsh_session_board";
+/** Domain holding per-session busy accounting. */
+export declare const TURN_DOMAIN_NAME = "dsh_session_board_turns";
+/** Table of {@link ACK_DOMAIN_NAME}: session id → turn-end facts + ack cursor. */
+export declare const ACK_TABLE_NAME = "acks";
+/** Table of {@link TURN_DOMAIN_NAME}: session id → busy accounting. */
+export declare const TURN_TABLE_NAME = "turn_stats";
+/**
+ * Truncation budget for a stored error note, counted in Unicode code points.
+ * A provider error can be thousands of characters of stack-adjacent prose; the
+ * card shows one line, and the durable record must stay proportional to that.
+ */
+export declare const ERROR_NOTE_MAX = 160;
+/**
+ * Collapse one error message into a single-line note of at most `max` code
+ * points, appending `…` when anything was dropped.
+ *
+ * Whitespace runs collapse because the note renders on one card line, and the
+ * cut walks code points (not UTF-16 units) so it can never split a surrogate
+ * pair — which is also why the ellipsis is appended outside the budget.
+ * @param text - Raw error text as it appeared on the event.
+ * @param max - Code-point budget; defaults to {@link ERROR_NOTE_MAX}.
+ * @returns The collapsed, bounded note.
+ */
+export declare function truncateErrorNote(text: string, max?: number): string;
+/**
+ * Stored turn-end record shape.
+ *
+ * Every field is written on every write and read back through `?? null`, so the
+ * shape handed to the client is always complete. Structurally compatible with
+ * the shared `BoardAckRecord` (whose fields are optional on the wire).
+ */
+export interface StoredAckRecord {
+    lastTurnEnd: number | null;
+    lastTurnEndKind: string | null;
+    lastTurnEndError: string | null;
+    ackedAt: number | null;
+}
+/**
+ * Stored busy-accounting shape; see the shared `BoardTurnStats` for semantics.
+ *
+ * `openWaitKeys` and `lastEventAt` were added after the first release. A record
+ * written before they existed parses with both as null, and the ledger treats
+ * that as "no known open set" / "no known activity bound" rather than as an
+ * error, so the domain never needs a version bump for the extension.
+ */
+export interface StoredTurnRecord {
+    busyMs: number | null;
+    openTurnStart: number | null;
+    waitedMs: number | null;
+    openWaitStart: number | null;
+    openWaitKind: string | null;
+    openWaitId: string | null;
+    openWaitKeys: string[] | null;
+    lastEventAt: number | null;
+}
+/**
+ * Authoritative facts: small, written on every turn boundary.
+ *
+ * `backup-and-skip` is the right policy for records whose loss costs one card's
+ * badge rather than the domain's availability; the normalizing validators above
+ * mean it should rarely be reached at all.
+ */
+export declare const ackDomainSpec: {
+    name: string;
+    version: number;
+    invalidRecords: "backup-and-skip";
+    tables: {
+        acks: DomainTableSpec<StoredAckRecord>;
+    };
+};
+/**
+ * Busy accounting lives in its own domain so a future shape change (extra
+ * timers, `per-record` layout) never touches the authoritative acks medium.
+ */
+export declare const turnDomainSpec: {
+    name: string;
+    version: number;
+    invalidRecords: "backup-and-skip";
+    tables: {
+        turn_stats: DomainTableSpec<StoredTurnRecord>;
+    };
+};
+/** One table handle as the storage layer exposes it (only the members used here). */
+export interface KvTableLike<V> {
+    get(key: string): V | undefined;
+    entries(): IterableIterator<[string, V]>;
+    put(key: string, value: V): Promise<void>;
+    delete(key: string): Promise<boolean>;
+}
+/** Handle on the `acks` table; keys are session ids. */
+export type BoardAckTable = KvTableLike<StoredAckRecord>;
+/** Handle on the `turn_stats` table; keys are session ids. */
+export type BoardTurnTable = KvTableLike<StoredTurnRecord>;
