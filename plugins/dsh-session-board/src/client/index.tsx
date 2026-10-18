@@ -86,6 +86,26 @@ interface SlotRegistry {
   }, component: unknown): () => void
 }
 
+/** The model-catalog gateway, present whenever the remote session namespace is. */
+type SessionGateway = NonNullable<RemoteService['session']>
+
+/** Resolve the model-catalog gateway across the host's remote-service shapes. */
+function remoteSessionGateway(ctx: Context): SessionGateway | null {
+  const candidates: unknown[] = []
+  for (const name of ['remote.session', 'remote']) {
+    const service = ctx.get(name)
+    if (service !== undefined && service !== null) candidates.push(service)
+  }
+  candidates.push(Reflect.get(ctx, 'remote'))
+  for (const candidate of candidates) {
+    const direct = candidate as { modelCatalog?: unknown }
+    if (typeof direct.modelCatalog === 'function') return candidate as SessionGateway
+    const nested = (candidate as { session?: { modelCatalog?: unknown } } | null)?.session
+    if (nested !== undefined && typeof nested.modelCatalog === 'function') return nested as SessionGateway
+  }
+  return null
+}
+
 /** The client remote gateway slice used to read the model catalog. */
 interface RemoteService {
   session?: {
@@ -392,12 +412,19 @@ export function apply(ctx: Context): void {
   // composition without the session services.
   const synthesis = createSynthesisSettings({
     catalog: async () => {
-      // Read the service per call: the remote gateway may activate after this
-      // plugin, and the catalog is only needed when the page opens.
-      const gateway = (ctx.get('remote') as RemoteService | undefined)?.session
-      if (gateway === undefined) throw new Error('CATALOG_UNAVAILABLE')
+      // The remote gateway is exposed both as `remote` (with a `session`
+      // namespace) and as the namespace service `remote.session`; which one
+      // resolves depends on the host build, so read per call and try each.
+      const gateway = remoteSessionGateway(ctx)
+      if (gateway === null) {
+        console.warn('dsh-session-board: remote.session gateway unavailable')
+        throw new Error('CATALOG_UNAVAILABLE')
+      }
       const response = await gateway.modelCatalog()
-      if (response?.ok !== true) throw new Error('CATALOG_UNAVAILABLE')
+      if (response?.ok !== true) {
+        console.warn(`dsh-session-board: model catalog rejected: ${String((response as { error?: { code?: string } } | undefined)?.error?.code)}`)
+        throw new Error('CATALOG_UNAVAILABLE')
+      }
       return response.value?.groups
     },
   })
