@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createWikiArchiver, validateWikiIds, resolveDshHome } from '../src/host/wiki-archive.ts'
+import { createWikiArchiver, validateWikiIds, resolveDshHome, resolveSynthesisProvider } from '../src/host/wiki-archive.ts'
 import { createBoardRoutes, BOARD_WIKI_ARCHIVE_PATH } from '../src/host/routes.ts'
 import { EMPTY_FEED } from '../src/shared/types.ts'
 import type { WikiArchiver } from '../src/host/wiki-archive.ts'
@@ -19,6 +19,18 @@ describe('Wiki home resolution', () => {
     expect(resolveDshHome(undefined, '/env/home')).toBe('/env/home')
     expect(resolveDshHome(undefined, '')).toBe(join(homedir(), '.dsh'))
     expect(resolveDshHome(undefined, undefined)).toBe(join(homedir(), '.dsh'))
+  })
+  it('lets the user file pick the synthesis provider and ignores malformed values', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const { tmpdir } = require('node:os') as typeof import('node:os')
+    const dir = mkdtempSync(join(tmpdir(), 'sb-provider-'))
+    expect(resolveSynthesisProvider(dir)).toBe('stepx-terra')
+    writeFileSync(join(dir, '.dsh-session-board.json'), JSON.stringify({ synthesisProvider: 'gw-flash-auto' }))
+    expect(resolveSynthesisProvider(dir)).toBe('gw-flash-auto')
+    writeFileSync(join(dir, '.dsh-session-board.json'), JSON.stringify({ synthesisProvider: 'bad id; rm -rf' }))
+    expect(resolveSynthesisProvider(dir)).toBe('stepx-terra')
+    writeFileSync(join(dir, '.dsh-session-board.json'), '{not json')
+    expect(resolveSynthesisProvider(dir)).toBe('stepx-terra')
   })
 })
 

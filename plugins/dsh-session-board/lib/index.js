@@ -556,6 +556,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -635,6 +636,18 @@ var WikiArchiveError = class extends Error {
   }
   code;
 };
+function resolveSynthesisProvider(home) {
+  try {
+    const raw = JSON.parse(readFileSync(join(home, ".dsh-session-board.json"), "utf8"));
+    if (typeof raw === "object" && raw !== null && "synthesisProvider" in raw) {
+      const value = raw.synthesisProvider;
+      if (typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) return value;
+    }
+  } catch {
+  }
+  return DEFAULT_SYNTHESIS_PROVIDER;
+}
+var DEFAULT_SYNTHESIS_PROVIDER = "stepx-terra";
 function resolveDshHome(configured, fromEnv) {
   const chosen = configured ?? (fromEnv === void 0 || fromEnv.trim() === "" ? void 0 : fromEnv) ?? join(homedir(), ".dsh");
   if (chosen.trim() === "") return null;
@@ -681,6 +694,7 @@ function createWikiArchiver(options = {}) {
   const home = resolve(options.home ?? homedir());
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME);
   const unavailableHome = dshHome === null;
+  const synthesisProvider = resolveSynthesisProvider(home);
   const now = options.now ?? Date.now;
   const script = join(home, "wiki", "scripts", "wiki-archive.py");
   const execute = options.execute ?? (async (args, signal) => {
@@ -695,6 +709,7 @@ function createWikiArchiver(options = {}) {
   const workflow = options.workflow ?? (async (operation, value, signal) => {
     if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
     try {
+      const providerArguments = operation === "synthesize" ? ["--provider", synthesisProvider] : [];
       const result = await exec(
         "/usr/bin/python3",
         [
@@ -705,7 +720,8 @@ function createWikiArchiver(options = {}) {
           "--dsh-home",
           dshHome,
           "--value",
-          value
+          value,
+          ...providerArguments
         ],
         { timeout: operation === "synthesize" ? 185e4 : 12e4, maxBuffer: 4 * 1024 * 1024, signal }
       );

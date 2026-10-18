@@ -121,7 +121,7 @@ def synthesize(args, archive):
     for attempt in range(2):
         try:
             run = run_child(['/usr/bin/python3', str(root / 'scripts' / 'wiki-synthesize.py'),
-                                  '--wiki-root', str(root), '--provider', 'stepx-terra',
+                                  '--wiki-root', str(root), '--provider', args.provider,
                                   '--session', page, '--limit', '1'], capture_output=True, text=True, timeout=900)
         except subprocess.TimeoutExpired:
             return {'status': 'failed', 'pages': [], 'error': 'SYNTHESIS_TIMEOUT'}
@@ -169,6 +169,7 @@ def main():
     parser.add_argument('--wiki-root', required=True)
     parser.add_argument('--dsh-home', required=True)
     parser.add_argument('--value', default='')
+    parser.add_argument('--provider', default='stepx-terra')
     args = parser.parse_args()
     root = Path(args.wiki_root)
     if not (root / 'SCHEMA.md').is_file() or not (root / 'SCHEMA.md').read_text(encoding='utf-8').strip():

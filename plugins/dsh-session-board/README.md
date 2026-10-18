@@ -34,7 +34,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.2.2.tgz
 - `~/wiki/scripts/wiki-archive.py`
 - `~/wiki/scripts/wiki-synthesize.py`
 - `~/wiki/scripts/wiki-index.py`
-- WikiBar 中名为 `stepx-terra` 的提炼 provider 配置。
+- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。
 - `/usr/bin/python3`，以及 Python `zstandard` 或 `zstd` 可执行程序。
 
 这些脚本和配置属于外部集成，**没有包含在本仓库中**；插件不会下载它们或生成密钥。该工作流根据本地 `wiki-current-session` 技能约定实现，属于需要既有兼容 Wiki 环境的高级功能。

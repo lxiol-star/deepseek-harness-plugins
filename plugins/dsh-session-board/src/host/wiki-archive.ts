@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
@@ -32,6 +33,29 @@ export interface WikiArchiverOptions {
  * @param fromEnv - `DSH_HOME` of the running process, if any.
  * @returns the absolute home, or null when the configured value is unusable.
  */
+/**
+ * Provider id used for synthesis, overridable in the user's own home file so the
+ * published plugin carries no account-specific default. A malformed file falls
+ * back silently: synthesis then uses the configured default provider.
+ * @param home - resolved user home directory.
+ * @returns the provider id to pass to the synthesizer.
+ */
+export function resolveSynthesisProvider(home: string): string {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(home, '.dsh-session-board.json'), 'utf8'))
+    if (typeof raw === 'object' && raw !== null && 'synthesisProvider' in raw) {
+      const value = (raw as { synthesisProvider: unknown }).synthesisProvider
+      if (typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) return value
+    }
+  } catch {
+    // No user file, or unreadable: the documented default applies.
+  }
+  return DEFAULT_SYNTHESIS_PROVIDER
+}
+
+/** Provider used when the user file names none; matches the Wiki skill's default. */
+export const DEFAULT_SYNTHESIS_PROVIDER = 'stepx-terra'
+
 export function resolveDshHome(configured: string | undefined, fromEnv: string | undefined): string | null {
   const chosen = configured ?? (fromEnv === undefined || fromEnv.trim() === '' ? undefined : fromEnv) ?? join(homedir(), '.dsh')
   if (chosen.trim() === '') return null
@@ -77,6 +101,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   // DSH_HOME always wins, which keeps a Dev app pointed at its own home.
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME)
   const unavailableHome = dshHome === null
+  const synthesisProvider = resolveSynthesisProvider(home)
   const now = options.now ?? Date.now
   const script = join(home, 'wiki', 'scripts', 'wiki-archive.py')
   const execute = options.execute ?? (async (args, signal) => {
@@ -93,8 +118,9 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   const workflow = options.workflow ?? (async (operation, value, signal) => {
     if (unavailableHome) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
     try {
+      const providerArguments = operation === 'synthesize' ? ['--provider', synthesisProvider] : []
       const result = await exec('/usr/bin/python3', [fileURLToPath(new URL('./wiki-workflow.py', import.meta.url)), operation,
-        '--wiki-root', join(home, 'wiki'), '--dsh-home', dshHome, '--value', value],
+        '--wiki-root', join(home, 'wiki'), '--dsh-home', dshHome, '--value', value, ...providerArguments],
         { timeout: operation === 'synthesize' ? 1_850_000 : 120_000, maxBuffer: 4 * 1024 * 1024, signal })
       const parsed: unknown = JSON.parse(result.stdout)
       if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && !('status' in parsed)) throw new WikiArchiveError(String(parsed.error))

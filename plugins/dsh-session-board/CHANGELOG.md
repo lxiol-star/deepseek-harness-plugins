@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6 — 2026-10-19
+
+- 提炼 provider 可由用户文件 `~/.dsh-session-board.json` 的 `synthesisProvider` 指定，发布包不含任何账号相关的默认值。
+- 未配置时仍回退到 Wiki 技能默认的 `stepx-terra`；非法值或损坏文件静默回退，不会把任意字符串传给脚本。
+
+
 ## 0.2.5 — 2026-10-19
 
 - 修复正式版 DeepSeek Harness 中归档一律报“本地归档脚本不可用或超时”的问题：应用由 Finder 启动时进程环境没有 `DSH_HOME`，旧实现因此直接判定找不到 home。
