@@ -131,10 +131,18 @@ export function currentSessionId(list: SessionListState): string | null {
   return null
 }
 
+/** Session ids the host currently lists under some Workspace (the sidebar's own inventory). */
+function workspaceMembers(workspaces: WorkspaceSnapshot | null): Set<string> {
+  const ids = new Set<string>()
+  for (const item of workspaces?.items ?? []) for (const id of item.sessionIds ?? []) ids.add(id)
+  return ids
+}
+
 /** Assemble every card input, in host list order. */
 export function assembleInputs(input: AssembleInput): BoardSessionInput[] {
   const labels = workspaceLabels(input.workspaces)
   const clientArchived = new Set(input.workspaces?.archivedSessionIds ?? [])
+  const members = workspaceMembers(input.workspaces)
   const currentId = currentSessionId(input.list)
   const out: BoardSessionInput[] = []
   const seen = new Set<string>()
@@ -145,7 +153,14 @@ export function assembleInputs(input: AssembleInput): BoardSessionInput[] {
     if (seen.has(id)) continue
     seen.add(id)
     const row = toInput(input, id, labels, currentId)
-    if (row !== null && !row.isSubagent) out.push(clientArchived.has(row.id) ? { ...row, clientArchived: true } : row)
+    if (row === null || row.isSubagent) continue
+    // Match what the DSH sidebar itself lists: a blank draft appears only while
+    // it is the open conversation, and a session that belongs to no Workspace
+    // yet is not shown as a card.
+    const source = input.list.byId[id]
+    if (source?.blank === true && id !== currentId) continue
+    if (input.workspaces !== null && members.size > 0 && !members.has(id) && id !== currentId) continue
+    out.push(clientArchived.has(row.id) ? { ...row, clientArchived: true } : row)
   }
   return out
 }

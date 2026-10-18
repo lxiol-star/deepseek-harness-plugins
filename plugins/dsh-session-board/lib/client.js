@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.3",
+      "data-session-board-version": "0.2.4",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.3",
+      "data-session-board-version": "0.2.4",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.2.3",
+        "data-session-board-version": "0.2.4",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2693,13 +2693,18 @@ function currentSessionId(list) {
     if ((row.retainedBy?.mainView ?? 0) > 0) return row.id;
   return null;
 }
+function workspaceMembers(workspaces) {
+  let ids = /* @__PURE__ */ new Set();
+  for (let item of workspaces?.items ?? []) for (let id of item.sessionIds ?? []) ids.add(id);
+  return ids;
+}
 function assembleInputs(input) {
-  let labels = workspaceLabels(input.workspaces), clientArchived = new Set(input.workspaces?.archivedSessionIds ?? []), currentId = currentSessionId(input.list), out = [], seen = /* @__PURE__ */ new Set();
+  let labels = workspaceLabels(input.workspaces), clientArchived = new Set(input.workspaces?.archivedSessionIds ?? []), members = workspaceMembers(input.workspaces), currentId = currentSessionId(input.list), out = [], seen = /* @__PURE__ */ new Set();
   for (let id of input.list.ids ?? []) {
     if (seen.has(id)) continue;
     seen.add(id);
     let row = toInput(input, id, labels, currentId);
-    row !== null && !row.isSubagent && out.push(clientArchived.has(row.id) ? { ...row, clientArchived: !0 } : row);
+    row === null || row.isSubagent || input.list.byId[id]?.blank === !0 && id !== currentId || input.workspaces !== null && members.size > 0 && !members.has(id) && id !== currentId || out.push(clientArchived.has(row.id) ? { ...row, clientArchived: !0 } : row);
   }
   return out;
 }

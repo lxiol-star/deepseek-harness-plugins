@@ -97,6 +97,18 @@ describe('client archive parity', () => {
     expect(isArchived(marked, completedArchiveMarks(summary, [entry()], 3000))).toBe(false)
     expect(isArchivedInClient(entry())).toBe(false)
   })
+  it('shows only sessions the DSH workspace lists, keeping the open draft', async () => {
+    const { assembleInputs } = await import('../src/client/source.ts')
+    const row = (id: string, blank = false, mainView = 0) => ({ id, displayTitle: id, running: false, blank, updatedAt: 1, ...(mainView > 0 ? { retainedBy: { mainView } } : {}) })
+    const list = { ids: ['member', 'draft', 'orphan', 'open-draft'], byId: {
+      member: row('member'), draft: row('draft', true), orphan: row('orphan'), 'open-draft': row('open-draft', true, 1),
+    } }
+    const workspaces = { items: [{ workspaceId: 'w', path: '/repo', sessionIds: ['member', 'open-draft'] }], archivedSessionIds: [] }
+    // A blank draft only appears while open; a session with no Workspace membership is not a card.
+    expect(assembleInputs({ list, statuses: new Map(), jobRows: {}, workspaces }).map(entry => entry.id)).toEqual(['member', 'open-draft'])
+    // Without workspace data the board cannot filter membership; the blank-draft rule still applies.
+    expect(assembleInputs({ list, statuses: new Map(), jobRows: {}, workspaces: null }).map(entry => entry.id)).toEqual(['member', 'orphan', 'open-draft'])
+  })
   it('reads the archive set from the workspaces snapshot instead of its own list', async () => {
     const { assembleInputs } = await import('../src/client/source.ts')
     const rows = assembleInputs({ list: { ids: ['one', 'two'], byId: { one: { id: 'one', displayTitle: 'One', running: false, blank: false, updatedAt: 1 }, two: { id: 'two', displayTitle: 'Two', running: false, blank: false, updatedAt: 2 } } }, statuses: new Map(), jobRows: {}, workspaces: { items: [], archivedSessionIds: ['one', 'two'] } })
