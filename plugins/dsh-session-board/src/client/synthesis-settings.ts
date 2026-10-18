@@ -45,10 +45,11 @@ export interface SynthesisSettingsFace {
   /** Load the saved preference and the model catalog once. */
   start(): void
   /**
-   * Persist one picker row.
+   * Persist one picker row and its reasoning effort.
    * @param value - row value; '' selects the Wiki-provider fallback.
+   * @param reasoningEffort - effort id of that row; '' keeps the model default.
    */
-  save(value: string): Promise<void>
+  save(value: string, reasoningEffort?: string): Promise<void>
   /** Reload the client model catalog after it failed to load. */
   reloadCatalog(): Promise<void>
   /** Detach subscribers; the plugin unload path. */
@@ -67,13 +68,14 @@ export interface SynthesisSettingsOptions {
 /**
  * The JSON body of one write request.
  * @param value - picker row value; '' is the fallback row.
+ * @param reasoningEffort - selected effort of that route, '' for the model default.
  * @returns the request body, or null when the value is not a row value.
  */
-function writeBody(value: string): Record<string, unknown> | null {
-  if (value === '') return { action: 'write', model: null, provider: null }
+function writeBody(value: string, reasoningEffort: string): Record<string, unknown> | null {
+  if (value === '') return { action: 'write', model: null, provider: null, reasoningEffort: null }
   const selection = selectionFromOptionValue(value)
   if (selection === null) return null
-  return { action: 'write', model: selection.model, provider: selection.provider }
+  return { action: 'write', model: selection.model, provider: selection.provider, reasoningEffort: reasoningEffort === '' ? null : reasoningEffort }
 }
 
 /**
@@ -178,9 +180,9 @@ export function createSynthesisSettings(options: SynthesisSettingsOptions = {}):
         await loadCatalog()
       })()
     },
-    async save(value: string): Promise<void> {
+    async save(value: string, reasoningEffort = ''): Promise<void> {
       if (disposed) return
-      const body = writeBody(value)
+      const body = writeBody(value, reasoningEffort)
       if (body === null) {
         publish({ saving: false, saved: false, error: 'INVALID_SELECTION' })
         return

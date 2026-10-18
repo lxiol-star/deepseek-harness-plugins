@@ -11,7 +11,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - 支持“隐藏已归档 / 查看已归档 / 全部会话”。Wiki 完成标记与 DSH 原生归档是两种不同来源，分别显示。
 - 归档成功的 Wiki 标记记录当时观察到的内容版本；会话重新运行或出现新内容后重新显示。
 - 中英双语、键盘操作、独立滚动、触控板滚动传递和减少动态效果支持。
-- 设置 → 会话看板 →「归档提炼」可选择归档提炼使用的模型（选项来自当前客户端的模型列表），选择保存到宿主并在提炼时生效；不选择时沿用 Wiki provider。
+- 设置 → 会话看板 →「归档提炼」可选择归档提炼使用的模型（选项来自宿主当前可用的模型列表），模型支持时还可单独选择思考等级；选择保存到宿主并在提炼时生效；不选择时沿用 Wiki provider。
 
 ## 安装与兼容性
 
@@ -35,7 +35,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.2.2.tgz
 - `~/wiki/scripts/wiki-archive.py`
 - `~/wiki/scripts/wiki-synthesize.py`
 - `~/wiki/scripts/wiki-index.py`
-- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。若在设置页选择了模型，则改用所选模型，不再使用该 provider 配置。
+- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。若在设置页选择了模型，则改用所选模型（连同其思考等级），不再使用该 provider 配置。
 - 运行中的 Harness 需提供 `llm` 模型服务与客户端模型目录（0.2.x 正式版均包含）；宿主版本旧于插件时设置页会提示重启，而不是静默保存。
 - `/usr/bin/python3`，以及 Python `zstandard` 或 `zstd` 可执行程序。
 

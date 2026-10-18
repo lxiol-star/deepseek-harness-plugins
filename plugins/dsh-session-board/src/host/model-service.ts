@@ -11,7 +11,13 @@
  * and `stream(GenerateOptions)`, whose ordinary text output arrives as
  * `text-delta` chunks and ends with a `finish` chunk.
  */
-import type { SynthesisModelCatalogGroup, SynthesisModelSelection } from '../shared/synthesis.ts'
+import type {
+  SynthesisModelCatalogGroup,
+  SynthesisModelCatalogModel,
+  SynthesisModelReasoningEffort,
+  SynthesisModelSelection,
+  SynthesisModelVerdict,
+} from '../shared/synthesis.ts'
 
 /** One registered provider route (`LlmProviderInfo`). */
 export interface HostModelProvider {
@@ -24,6 +30,23 @@ export interface HostModelInfo {
   readonly provider: string
   readonly id: string
   readonly name: string
+}
+
+/** One adapter-owned reasoning effort (`LlmReasoningEffortInfo`). */
+export interface HostReasoningEffortInfo {
+  readonly id: string
+  readonly name: string
+}
+
+/** Selectable reasoning efforts of one route (`LlmModelReasoningInfo`). */
+export interface HostModelReasoningInfo {
+  readonly efforts: readonly HostReasoningEffortInfo[]
+  readonly defaultEffort?: string
+}
+
+/** Exact-route metadata resolved by its adapter (`LlmResolvedModelInfo`). */
+export interface HostResolvedModelInfo {
+  readonly reasoning?: HostModelReasoningInfo
 }
 
 /** One text block of a hand-built request. */
@@ -59,6 +82,8 @@ export interface HostStreamChunk {
 export interface HostGenerateOptions {
   readonly provider: string
   readonly model: string
+  /** Adapter-owned reasoning effort selected for this exact model. */
+  readonly reasoningEffort?: string
   readonly system?: string
   readonly messages: readonly HostRequestMessage[]
   readonly maxTokens?: number
@@ -74,6 +99,7 @@ export interface HostGenerateOptions {
 export interface HostLlmService {
   listProviders(): readonly HostModelProvider[]
   listModels(provider: string): Promise<readonly HostModelInfo[]>
+  resolveModelInfo(provider: string, model: string): Promise<HostResolvedModelInfo>
   stream(options: HostGenerateOptions): AsyncIterable<HostStreamChunk>
 }
 
@@ -81,6 +107,8 @@ export interface HostLlmService {
 export interface SynthesisModelRequest {
   readonly provider: string
   readonly model: string
+  /** Reasoning effort of the saved route; null/absent keeps the model default. */
+  readonly reasoningEffort?: string | null
   readonly system: string
   readonly prompt: string
   /**
@@ -114,19 +142,28 @@ export const SYNTHESIS_MAX_TOKENS = 8192
 export async function isKnownSynthesisModel(
   llm: HostLlmService,
   selection: SynthesisModelSelection,
-): Promise<boolean> {
+): Promise<SynthesisModelVerdict> {
   let providers: readonly HostModelProvider[]
   try {
     providers = llm.listProviders()
   } catch {
-    return false
+    return 'UNKNOWN_MODEL'
   }
-  if (!providers.some(provider => provider.id === selection.provider)) return false
+  if (!providers.some(provider => provider.id === selection.provider)) return 'UNKNOWN_MODEL'
   try {
     const models = await llm.listModels(selection.provider)
-    return models.some(model => model.id === selection.model)
+    if (!models.some(model => model.id === selection.model)) return 'UNKNOWN_MODEL'
   } catch {
-    return false
+    return 'UNKNOWN_MODEL'
+  }
+  const effort = selection.reasoningEffort
+  if (effort === undefined || effort === null || effort === '') return 'ok'
+  try {
+    const resolved = await llm.resolveModelInfo(selection.provider, selection.model)
+    const efforts = sanitizeReasoningEfforts(resolved.reasoning)
+    return efforts.some(candidate => candidate.id === effort) ? 'ok' : 'UNKNOWN_EFFORT'
+  } catch {
+    return 'UNKNOWN_EFFORT'
   }
 }
 
@@ -151,13 +188,47 @@ export async function listSynthesisCatalog(llm: HostLlmService): Promise<Synthes
     } catch {
       models = []
     }
-    const rows = models
+    const rows = await Promise.all(models
       .filter(model => typeof model.id === 'string' && model.id !== '')
-      .map(model => ({ id: model.id, name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id }))
+      .map(async (model): Promise<SynthesisModelCatalogModel> => {
+        const row: SynthesisModelCatalogModel = { id: model.id, name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id }
+        let resolved: HostResolvedModelInfo
+        try {
+          resolved = await llm.resolveModelInfo(provider.id, model.id)
+        } catch {
+          return row
+        }
+        const efforts = sanitizeReasoningEfforts(resolved.reasoning)
+        if (efforts.length === 0) return row
+        const declared = typeof resolved.reasoning?.defaultEffort === 'string' ? resolved.reasoning.defaultEffort : null
+        const defaultEffort = declared !== null && efforts.some(effort => effort.id === declared) ? declared : undefined
+        return { ...row, reasoning: { efforts, ...(defaultEffort === undefined ? {} : { defaultEffort }) } }
+      }))
     groups.push({ id: provider.id, name: typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id, models: rows })
   }
   return groups
 }
+
+/**
+ * Normalize one adapter's effort list: non-empty unique ids, display names
+ * falling back to the id, original adapter order preserved.
+ * @param reasoning - adapter-disclosed reasoning info, if any.
+ * @returns sanitized efforts (empty when the route discloses none).
+ */
+function sanitizeReasoningEfforts(reasoning: HostModelReasoningInfo | undefined): SynthesisModelReasoningEffort[] {
+  if (reasoning === undefined || !Array.isArray(reasoning.efforts)) return []
+  const efforts: SynthesisModelReasoningEffort[] = []
+  const seen = new Set<string>()
+  for (const effort of reasoning.efforts) {
+    if (typeof effort.id !== 'string' || effort.id.trim() === '' || seen.has(effort.id)) continue
+    seen.add(effort.id)
+    efforts.push({ id: effort.id, name: typeof effort.name === 'string' && effort.name.trim() !== '' ? effort.name : effort.id })
+  }
+  return efforts
+}
+
+/** Re-export for the host half's own imports. */
+export type { SynthesisModelVerdict }
 
 /**
  * Run one one-shot completion and return its visible text.
@@ -180,6 +251,9 @@ export async function runSynthesisModel(llm: HostLlmService, request: SynthesisM
     maxTokens: SYNTHESIS_MAX_TOKENS,
     sessionId: request.sessionId,
     signal: request.signal,
+    ...(request.reasoningEffort === undefined || request.reasoningEffort === null || request.reasoningEffort === ''
+      ? {}
+      : { reasoningEffort: request.reasoningEffort }),
   }
   let streamed = ''
   let finished: string | undefined

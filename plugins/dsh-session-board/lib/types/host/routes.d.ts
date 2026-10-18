@@ -13,7 +13,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { BoardFeed } from '../shared/types.ts';
-import { type SynthesisModelCatalogGroup, type SynthesisModelPref, type SynthesisModelSelection } from '../shared/synthesis.ts';
+import { type SynthesisModelCatalogGroup, type SynthesisModelPref, type SynthesisModelSelection, type SynthesisModelVerdict } from '../shared/synthesis.ts';
 import { type WikiArchiver } from './wiki-archive.ts';
 /**
  * Physical request paths. `ConnectionFetchRoute.path` is matched against the
@@ -61,7 +61,7 @@ export interface BoardTrustRequest {
 export interface SynthesisModelStore {
     read(): SynthesisModelPref;
     write(pref: SynthesisModelPref): Promise<void>;
-    validate(selection: SynthesisModelSelection): Promise<boolean>;
+    validate(selection: SynthesisModelSelection): Promise<SynthesisModelVerdict>;
     /**
      * The host's currently advertised provider/model groups. The page reads the
      * catalog from this route instead of another plugin's browser-side remote

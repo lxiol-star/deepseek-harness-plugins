@@ -125,6 +125,8 @@ export interface StoredTurnRecord {
 export interface StoredSynthesisPrefRecord {
     model: string | null;
     provider: string | null;
+    /** Saved reasoning effort of the route; absent in 0.3.2 records parses as null. */
+    reasoningEffort: string | null;
 }
 /**
  * Authoritative facts: small, written on every turn boundary.

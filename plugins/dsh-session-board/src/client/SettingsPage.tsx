@@ -13,6 +13,7 @@ import { FALLBACK_OPTION_VALUE } from './synthesis-settings.ts'
 import type { SynthesisSettingsFace } from './synthesis-settings.ts'
 import {
   formatContextWindow,
+  optionByValue,
   optionValueOf,
   selectionOptionValue,
   type SynthesisModelSelection,
@@ -33,6 +34,7 @@ export interface SessionBoardSettingsPageProps {
 function errorText(t: Translate, error: string): string {
   switch (error) {
     case 'UNKNOWN_MODEL': return t('settings.errorUnknownModel')
+    case 'UNKNOWN_EFFORT': return t('settings.errorUnknownEffort')
     case 'HOST_OUTDATED': return t('settings.errorHostOutdated')
     case 'STORE_UNAVAILABLE': return t('settings.errorStoreUnavailable')
     case 'INVALID_SELECTION': return t('settings.errorInvalidSelection')
@@ -44,6 +46,16 @@ function errorText(t: Translate, error: string): string {
 function optionLabel(option: { providerName: string; modelName: string; contextWindow: number | null }, t: Translate): string {
   const base = `${option.providerName} · ${option.modelName}`
   return option.contextWindow === null ? base : `${base} (${t('settings.contextWindow', { value: formatContextWindow(option.contextWindow) })})`
+}
+
+/** Label of the "let the model decide" effort row, naming the disclosed default. */
+function defaultEffortLabel(option: { reasoningEfforts: readonly { id: string; name: string }[]; defaultEffort: string | null } | null, t: Translate): string {
+  const known = option === null || option.defaultEffort === null
+    ? null
+    : option.reasoningEfforts.find(effort => effort.id === option.defaultEffort)
+  return known === null || known === undefined
+    ? t('settings.synthesisEffortDefault')
+    : t('settings.synthesisEffortDefaultNamed', { value: known.name })
 }
 
 /**
@@ -59,6 +71,11 @@ export function SessionBoardSettingsPage({ t, settings }: SessionBoardSettingsPa
   const knownValue = selectedValue === null ? FALLBACK_OPTION_VALUE : optionValueOf(state.options, selectedValue)
   const currentValue = knownValue ?? (selectedValue === null ? FALLBACK_OPTION_VALUE : selectionOptionValue(selectedValue))
   const disabled = state.saving || state.status === 'loading'
+  const currentOption = currentValue === FALLBACK_OPTION_VALUE ? null : optionByValue(state.options, currentValue)
+  const savedEffort = selectedValue?.reasoningEffort ?? null
+  const efforts = currentOption?.reasoningEfforts ?? []
+  const effortKnown = savedEffort !== null && efforts.some(effort => effort.id === savedEffort)
+  const showEffort = knownValue !== null && (efforts.length > 0 || savedEffort !== null)
   const catalogNote = state.catalogStatus === 'loading'
     ? t('settings.synthesisLoading')
     : state.catalogStatus === 'unavailable'
@@ -90,6 +107,29 @@ export function SessionBoardSettingsPage({ t, settings }: SessionBoardSettingsPa
             : null}
         </select>
       </div>
+      {showEffort
+        ? (
+          <div className="sb-settings-row">
+            <label className="sb-settings-label" htmlFor="sb-settings-synthesis-effort">{t('settings.synthesisEffort')}</label>
+            <select
+              id="sb-settings-synthesis-effort"
+              className="sb-settings-select"
+              value={savedEffort ?? ''}
+              disabled={disabled}
+              onChange={(event) => { void settings.save(currentValue, event.target.value) }}
+            >
+              <option value="">{defaultEffortLabel(currentOption, t)}</option>
+              {efforts.map(effort => (
+                <option key={effort.id} value={effort.id}>{effort.name}</option>
+              ))}
+              {savedEffort !== null && !effortKnown
+                ? <option value={savedEffort}>{`${savedEffort} (${t('settings.synthesisUnavailable')})`}</option>
+                : null}
+            </select>
+            <p className="sb-settings-hint">{t('settings.synthesisEffortHint')}</p>
+          </div>
+        )
+        : null}
       {catalogNote !== null && state.options.length === 0
         ? (
           <div className="sb-settings-meta">

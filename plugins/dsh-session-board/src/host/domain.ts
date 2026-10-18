@@ -214,6 +214,8 @@ export interface StoredTurnRecord {
 export interface StoredSynthesisPrefRecord {
   model: string | null
   provider: string | null
+  /** Saved reasoning effort of the route; absent in 0.3.2 records parses as null. */
+  reasoningEffort: string | null
 }
 
 /** Ack record validator; see {@link RecordSchema} for the normalize-not-throw policy. */
@@ -252,8 +254,9 @@ const prefsRecordSchema: RecordSchema<StoredSynthesisPrefRecord> = {
   parse(raw: unknown): StoredSynthesisPrefRecord {
     const model = stringOrNull(fieldOf(raw, 'model'))
     const provider = stringOrNull(fieldOf(raw, 'provider'))
-    if (model === null || provider === null) return { model: null, provider: null }
-    return { model, provider }
+    const reasoningEffort = stringOrNull(fieldOf(raw, 'reasoningEffort'))
+    if (model === null || provider === null) return { model: null, provider: null, reasoningEffort: null }
+    return { model, provider, reasoningEffort }
   },
 }
 

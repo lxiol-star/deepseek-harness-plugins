@@ -34,10 +34,11 @@ export interface SynthesisSettingsFace {
     /** Load the saved preference and the model catalog once. */
     start(): void;
     /**
-     * Persist one picker row.
+     * Persist one picker row and its reasoning effort.
      * @param value - row value; '' selects the Wiki-provider fallback.
+     * @param reasoningEffort - effort id of that row; '' keeps the model default.
      */
-    save(value: string): Promise<void>;
+    save(value: string, reasoningEffort?: string): Promise<void>;
     /** Reload the client model catalog after it failed to load. */
     reloadCatalog(): Promise<void>;
     /** Detach subscribers; the plugin unload path. */

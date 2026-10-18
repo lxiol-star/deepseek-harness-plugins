@@ -23,6 +23,8 @@ export interface SynthesisModelBinding {
     complete(request: {
         provider: string;
         model: string;
+        /** Saved reasoning effort, or null to keep the model's own default. */
+        reasoningEffort: string | null;
         system: string;
         prompt: string;
         sessionId: string;

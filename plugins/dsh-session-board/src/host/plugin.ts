@@ -18,7 +18,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // `session/event` declaration. Erased at build time.
 import type {} from '@deepseek-ai/dsh-session'
 import { EMPTY_FEED } from '../shared/types.ts'
-import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelSelection } from '../shared/synthesis.ts'
+import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelPref, type SynthesisModelSelection } from '../shared/synthesis.ts'
 import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec } from './domain.ts'
 import type { BoardPrefsTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
 import { BoardLedger, describeError, subscribeBoardLedger } from './ledger.ts'
@@ -121,7 +121,7 @@ export function apply(ctx: Context): () => void {
   /** Open only once the preference domain is available; null keeps the fallback. */
   let prefs: BoardPrefsTable | null = null
 
-  const readSynthesisPref = (): { model: string | null; provider: string | null } => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null }
+  const readSynthesisPref = (): SynthesisModelPref => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null, reasoningEffort: null }
 
   const wikiArchive = createWikiArchiver({
     models: {

@@ -147,7 +147,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   return createPortal(
     <div
       className="sb-overlay sb-root"
-      data-session-board-version="0.3.2"
+      data-session-board-version="0.3.3"
       data-density={density}
       data-quiet={hidden ? 'true' : undefined}
       role="dialog"

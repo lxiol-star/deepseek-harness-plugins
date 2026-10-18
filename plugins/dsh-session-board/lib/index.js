@@ -4,7 +4,7 @@ var EMPTY_FEED = { acks: {}, turns: {} };
 // src/shared/synthesis.ts
 var SYNTHESIS_PREFS_KEY = "synthesis";
 var SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
-var SYNTHESIS_MODEL_CAPABILITY = 2;
+var SYNTHESIS_MODEL_CAPABILITY = 3;
 var ROUTE_PART_MAX = 200;
 function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -19,12 +19,13 @@ function parseSynthesisPref(raw) {
   const record2 = asRecord(raw);
   const model = routePart(record2?.model);
   const provider = routePart(record2?.provider);
-  if (model === null || provider === null) return { model: null, provider: null };
-  return { model, provider };
+  const reasoningEffort = routePart(record2?.reasoningEffort);
+  if (model === null || provider === null) return { model: null, provider: null, reasoningEffort: null };
+  return { model, provider, reasoningEffort };
 }
 function selectionOf(pref) {
   if (pref.model === null || pref.provider === null) return null;
-  return { provider: pref.provider, model: pref.model };
+  return { provider: pref.provider, model: pref.model, reasoningEffort: pref.reasoningEffort };
 }
 
 // src/host/domain.ts
@@ -113,8 +114,9 @@ var prefsRecordSchema = {
   parse(raw) {
     const model = stringOrNull(fieldOf(raw, "model"));
     const provider = stringOrNull(fieldOf(raw, "provider"));
-    if (model === null || provider === null) return { model: null, provider: null };
-    return { model, provider };
+    const reasoningEffort = stringOrNull(fieldOf(raw, "reasoningEffort"));
+    if (model === null || provider === null) return { model: null, provider: null, reasoningEffort: null };
+    return { model, provider, reasoningEffort };
   }
 };
 var ackDomainSpec = defineDomain({
@@ -602,14 +604,23 @@ async function isKnownSynthesisModel(llm, selection) {
   try {
     providers = llm.listProviders();
   } catch {
-    return false;
+    return "UNKNOWN_MODEL";
   }
-  if (!providers.some((provider) => provider.id === selection.provider)) return false;
+  if (!providers.some((provider) => provider.id === selection.provider)) return "UNKNOWN_MODEL";
   try {
     const models = await llm.listModels(selection.provider);
-    return models.some((model) => model.id === selection.model);
+    if (!models.some((model) => model.id === selection.model)) return "UNKNOWN_MODEL";
   } catch {
-    return false;
+    return "UNKNOWN_MODEL";
+  }
+  const effort = selection.reasoningEffort;
+  if (effort === void 0 || effort === null || effort === "") return "ok";
+  try {
+    const resolved = await llm.resolveModelInfo(selection.provider, selection.model);
+    const efforts = sanitizeReasoningEfforts(resolved.reasoning);
+    return efforts.some((candidate) => candidate.id === effort) ? "ok" : "UNKNOWN_EFFORT";
+  } catch {
+    return "UNKNOWN_EFFORT";
   }
 }
 async function listSynthesisCatalog(llm) {
@@ -622,10 +633,34 @@ async function listSynthesisCatalog(llm) {
     } catch {
       models = [];
     }
-    const rows = models.filter((model) => typeof model.id === "string" && model.id !== "").map((model) => ({ id: model.id, name: typeof model.name === "string" && model.name !== "" ? model.name : model.id }));
+    const rows = await Promise.all(models.filter((model) => typeof model.id === "string" && model.id !== "").map(async (model) => {
+      const row = { id: model.id, name: typeof model.name === "string" && model.name !== "" ? model.name : model.id };
+      let resolved;
+      try {
+        resolved = await llm.resolveModelInfo(provider.id, model.id);
+      } catch {
+        return row;
+      }
+      const efforts = sanitizeReasoningEfforts(resolved.reasoning);
+      if (efforts.length === 0) return row;
+      const declared = typeof resolved.reasoning?.defaultEffort === "string" ? resolved.reasoning.defaultEffort : null;
+      const defaultEffort = declared !== null && efforts.some((effort) => effort.id === declared) ? declared : void 0;
+      return { ...row, reasoning: { efforts, ...defaultEffort === void 0 ? {} : { defaultEffort } } };
+    }));
     groups.push({ id: provider.id, name: typeof provider.name === "string" && provider.name !== "" ? provider.name : provider.id, models: rows });
   }
   return groups;
+}
+function sanitizeReasoningEfforts(reasoning) {
+  if (reasoning === void 0 || !Array.isArray(reasoning.efforts)) return [];
+  const efforts = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const effort of reasoning.efforts) {
+    if (typeof effort.id !== "string" || effort.id.trim() === "" || seen.has(effort.id)) continue;
+    seen.add(effort.id);
+    efforts.push({ id: effort.id, name: typeof effort.name === "string" && effort.name.trim() !== "" ? effort.name : effort.id });
+  }
+  return efforts;
 }
 async function runSynthesisModel(llm, request) {
   const options = {
@@ -635,7 +670,8 @@ async function runSynthesisModel(llm, request) {
     messages: [{ role: "user", content: [{ type: "text", text: request.prompt }] }],
     maxTokens: SYNTHESIS_MAX_TOKENS,
     sessionId: request.sessionId,
-    signal: request.signal
+    signal: request.signal,
+    ...request.reasoningEffort === void 0 || request.reasoningEffort === null || request.reasoningEffort === "" ? {} : { reasoningEffort: request.reasoningEffort }
   };
   let streamed = "";
   let finished;
@@ -913,6 +949,7 @@ function createWikiArchiver(options = {}) {
     const output = await models.complete({
       provider: selected.provider,
       model: selected.model,
+      reasoningEffort: selected.reasoningEffort ?? null,
       system: prepared.prompt.system,
       prompt: prepared.prompt.user,
       sessionId: session,
@@ -1139,13 +1176,13 @@ data: ${JSON.stringify(feed)}
       if (pref === null) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
       const selection = selectionOf(pref);
       if (selection !== null) {
-        let known = false;
+        let verdict = "UNKNOWN_MODEL";
         try {
-          known = await store.validate(selection);
+          verdict = await store.validate(selection);
         } catch {
-          known = false;
+          verdict = "UNKNOWN_MODEL";
         }
-        if (!known) return jsonResponse(400, { ok: false, error: "UNKNOWN_MODEL" });
+        if (verdict !== "ok") return jsonResponse(400, { ok: false, error: verdict });
       }
       try {
         await store.write(pref);
@@ -1208,15 +1245,17 @@ function readStoredPref(store, warn) {
     return parseSynthesisPref(store.read());
   } catch (error) {
     warn(`dsh-session-board: synthesis preference read failed: ${describeError2(error)}`);
-    return { model: null, provider: null };
+    return { model: null, provider: null, reasoningEffort: null };
   }
 }
 function readSynthesisPrefBody(body) {
   const model = body.model;
   const provider = body.provider;
-  if (model === null && provider === null) return { model: null, provider: null };
+  if (model === null && provider === null) return { model: null, provider: null, reasoningEffort: null };
   if (typeof model !== "string" || typeof provider !== "string") return null;
-  const pref = parseSynthesisPref({ model, provider });
+  const effort = body.reasoningEffort;
+  if (effort !== void 0 && effort !== null && typeof effort !== "string") return null;
+  const pref = parseSynthesisPref({ model, provider, reasoningEffort: effort ?? null });
   return pref.model === null || pref.provider === null ? null : pref;
 }
 function jsonResponse(status, payload) {
@@ -1272,7 +1311,7 @@ function apply(ctx) {
   const llm = llmOf(ctx);
   let ledger = null;
   let prefs = null;
-  const readSynthesisPref = () => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null };
+  const readSynthesisPref = () => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null, reasoningEffort: null };
   const wikiArchive = createWikiArchiver({
     models: {
       read: () => selectionOf(readSynthesisPref()),

@@ -23,6 +23,7 @@ import {
   type SynthesisModelCatalogGroup,
   type SynthesisModelPref,
   type SynthesisModelSelection,
+  type SynthesisModelVerdict,
 } from '../shared/synthesis.ts'
 import { WikiArchiveError, validateWikiIds, type WikiArchiver } from './wiki-archive.ts'
 
@@ -83,7 +84,7 @@ export interface BoardTrustRequest {
 export interface SynthesisModelStore {
   read(): SynthesisModelPref
   write(pref: SynthesisModelPref): Promise<void>
-  validate(selection: SynthesisModelSelection): Promise<boolean>
+  validate(selection: SynthesisModelSelection): Promise<SynthesisModelVerdict>
   /**
    * The host's currently advertised provider/model groups. The page reads the
    * catalog from this route instead of another plugin's browser-side remote
@@ -277,13 +278,13 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       if (pref === null) return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
       const selection = selectionOf(pref)
       if (selection !== null) {
-        let known = false
+        let verdict: SynthesisModelVerdict = 'UNKNOWN_MODEL'
         try {
-          known = await store.validate(selection)
+          verdict = await store.validate(selection)
         } catch {
-          known = false
+          verdict = 'UNKNOWN_MODEL'
         }
-        if (!known) return jsonResponse(400, { ok: false, error: 'UNKNOWN_MODEL' })
+        if (verdict !== 'ok') return jsonResponse(400, { ok: false, error: verdict })
       }
       try {
         await store.write(pref)
@@ -359,7 +360,7 @@ function readStoredPref(store: SynthesisModelStore, warn: (message: string) => v
     return parseSynthesisPref(store.read())
   } catch (error) {
     warn(`dsh-session-board: synthesis preference read failed: ${describeError(error)}`)
-    return { model: null, provider: null }
+    return { model: null, provider: null, reasoningEffort: null }
   }
 }
 
@@ -373,9 +374,11 @@ function readStoredPref(store: SynthesisModelStore, warn: (message: string) => v
 function readSynthesisPrefBody(body: Record<string, unknown>): SynthesisModelPref | null {
   const model = body.model
   const provider = body.provider
-  if (model === null && provider === null) return { model: null, provider: null }
+  if (model === null && provider === null) return { model: null, provider: null, reasoningEffort: null }
   if (typeof model !== 'string' || typeof provider !== 'string') return null
-  const pref = parseSynthesisPref({ model, provider })
+  const effort = body.reasoningEffort
+  if (effort !== undefined && effort !== null && typeof effort !== 'string') return null
+  const pref = parseSynthesisPref({ model, provider, reasoningEffort: effort ?? null })
   return pref.model === null || pref.provider === null ? null : pref
 }
 

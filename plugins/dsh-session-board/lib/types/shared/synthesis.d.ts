@@ -10,10 +10,24 @@
  * preference out of an HTTP response and out of the served model catalog, so
  * both are normalized here instead of at the call site.
  */
+/**
+ * The verdict of checking one saved selection against the live registry.
+ *
+ * `UNKNOWN_EFFORT` is distinct from `UNKNOWN_MODEL` so the page can say that
+ * the model still exists but no longer offers the saved reasoning level.
+ */
+export type SynthesisModelVerdict = 'ok' | 'UNKNOWN_MODEL' | 'UNKNOWN_EFFORT';
+/** One adapter-owned reasoning effort of an exact model route. */
+export interface SynthesisModelReasoningEffort {
+    id: string;
+    name: string;
+}
 /** One exact provider/model route selected for knowledge synthesis. */
 export interface SynthesisModelSelection {
     provider: string;
     model: string;
+    /** Adapter-owned effort id; null or absent lets the model apply its own default. */
+    reasoningEffort?: string | null;
 }
 /**
  * The stored preference value.
@@ -24,6 +38,8 @@ export interface SynthesisModelSelection {
 export interface SynthesisModelPref {
     model: string | null;
     provider: string | null;
+    /** Selected reasoning effort of the route; null keeps the model's default. */
+    reasoningEffort: string | null;
 }
 /** Storage table key of the one preference record in the `prefs` domain. */
 export declare const SYNTHESIS_PREFS_KEY = "synthesis";
@@ -36,14 +52,21 @@ export declare const SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model"
  *
  * 2 adds the host-served model catalog (`action: 'catalog'`): the picker no
  * longer depends on another plugin's browser-side remote namespace.
+ * 3 adds per-model reasoning efforts: the catalog discloses them and the write
+ * route accepts `reasoningEffort`.
  */
-export declare const SYNTHESIS_MODEL_CAPABILITY = 2;
-/** One provider/model row as the client catalog advertises it. */
+export declare const SYNTHESIS_MODEL_CAPABILITY = 3;
+/** One provider/model row as the host catalog advertises it. */
 export interface SynthesisModelCatalogModel {
     id: string;
     name: string;
     /** Combined request and response context, when the serving catalog discloses it. */
     contextWindow?: number;
+    /** Adapter-owned selectable reasoning efforts, when the route exposes them. */
+    reasoning?: {
+        efforts: readonly SynthesisModelReasoningEffort[];
+        defaultEffort?: string;
+    };
 }
 /** One provider group as the client catalog advertises it. */
 export interface SynthesisModelCatalogGroup {
@@ -61,6 +84,10 @@ export interface SynthesisModelOption {
     modelName: string;
     /** Context capacity when the serving catalog discloses it. */
     contextWindow: number | null;
+    /** Selectable reasoning efforts of this exact route, in catalog order. */
+    reasoningEfforts: readonly SynthesisModelReasoningEffort[];
+    /** Adapter-configured default effort, when disclosed. */
+    defaultEffort: string | null;
 }
 /**
  * Normalize one stored preference value.
@@ -114,6 +141,13 @@ export declare function synthesisModelOptions(groups: readonly SynthesisModelCat
  * @returns the opaque row value used by the picker.
  */
 export declare function selectionOptionValue(selection: SynthesisModelSelection): string;
+/**
+ * Find the picker row of one encoded route value.
+ * @param options - rows from {@link synthesisModelOptions}.
+ * @param value - row value (`provider\0model`) or '' for the fallback.
+ * @returns the matching row, or null.
+ */
+export declare function optionByValue(options: readonly SynthesisModelOption[], value: string): SynthesisModelOption | null;
 /**
  * Find the picker value of one saved route.
  * @param options - rows from {@link synthesisModelOptions}.

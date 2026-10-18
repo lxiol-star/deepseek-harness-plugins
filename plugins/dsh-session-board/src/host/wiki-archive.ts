@@ -33,6 +33,8 @@ export interface SynthesisModelBinding {
   complete(request: {
     provider: string
     model: string
+    /** Saved reasoning effort, or null to keep the model's own default. */
+    reasoningEffort: string | null
     system: string
     prompt: string
     sessionId: string
@@ -257,6 +259,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
     const output = await models.complete({
       provider: selected.provider,
       model: selected.model,
+      reasoningEffort: selected.reasoningEffort ?? null,
       system: prepared.prompt.system,
       prompt: prepared.prompt.user,
       sessionId: session,

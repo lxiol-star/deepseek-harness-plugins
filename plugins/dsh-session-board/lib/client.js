@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.2",
+      "data-session-board-version": "0.3.3",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.2",
+      "data-session-board-version": "0.3.3",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.2",
+        "data-session-board-version": "0.3.3",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2479,6 +2479,10 @@ var NS = "session-board", en = {
   "settings.synthesisGroup": "Archive synthesis",
   "settings.synthesisHint": "Model used to synthesize archived sessions into Wiki knowledge pages. The list comes from the models this client can currently use.",
   "settings.synthesisModel": "Synthesis model",
+  "settings.synthesisEffort": "Reasoning effort",
+  "settings.synthesisEffortDefault": "Model default",
+  "settings.synthesisEffortDefaultNamed": "Model default ({value})",
+  "settings.synthesisEffortHint": "Applies to the synthesis call for archive extraction only. Chat keeps its own effort.",
   "settings.synthesisFallback": "Not specified (use the Wiki provider)",
   "settings.synthesisFallbackHint": "When no model is chosen, synthesis keeps using wiki-synthesize.py with the provider configured for the local Wiki.",
   "settings.synthesisSaved": "Saved",
@@ -2489,6 +2493,7 @@ var NS = "session-board", en = {
   "settings.contextWindow": "context {value}",
   "settings.retry": "Retry",
   "settings.errorUnknownModel": "That model route is no longer available. Pick another model.",
+  "settings.errorUnknownEffort": "That model no longer offers the saved reasoning effort. Pick another one.",
   "settings.errorHostOutdated": "The running Harness host is older than this plugin. Quit and reopen Harness, then try again.",
   "settings.errorStoreUnavailable": "The preference could not be stored. Check the host logs and try again.",
   "settings.errorInvalidSelection": "That selection is invalid. Pick a model from the list.",
@@ -2627,6 +2632,10 @@ var NS = "session-board", en = {
   "settings.synthesisGroup": "\u5F52\u6863\u63D0\u70BC",
   "settings.synthesisHint": "\u628A\u5F52\u6863\u4F1A\u8BDD\u63D0\u70BC\u6210 Wiki \u77E5\u8BC6\u9875\u65F6\u4F7F\u7528\u7684\u6A21\u578B\u3002\u5217\u8868\u6765\u81EA\u5F53\u524D\u5BA2\u6237\u7AEF\u53EF\u7528\u7684\u6A21\u578B\u3002",
   "settings.synthesisModel": "\u63D0\u70BC\u6A21\u578B",
+  "settings.synthesisEffort": "\u601D\u8003\u7B49\u7EA7",
+  "settings.synthesisEffortDefault": "\u9ED8\u8BA4\uFF08\u6A21\u578B\u81EA\u9009\uFF09",
+  "settings.synthesisEffortDefaultNamed": "\u9ED8\u8BA4\uFF08{value}\uFF09",
+  "settings.synthesisEffortHint": "\u4EC5\u4F5C\u7528\u4E8E\u5F52\u6863\u63D0\u70BC\u7684\u6A21\u578B\u8C03\u7528\uFF0C\u804A\u5929\u4E0D\u53D7\u5F71\u54CD\u3002",
   "settings.synthesisFallback": "\u4E0D\u6307\u5B9A\uFF08\u6CBF\u7528 Wiki provider\uFF09",
   "settings.synthesisFallbackHint": "\u672A\u9009\u62E9\u6A21\u578B\u65F6\uFF0C\u4ECD\u7531 wiki-synthesize.py \u4F7F\u7528\u672C\u5730 Wiki \u914D\u7F6E\u7684 provider \u5B8C\u6210\u63D0\u70BC\u3002",
   "settings.synthesisSaved": "\u5DF2\u4FDD\u5B58",
@@ -2637,6 +2646,7 @@ var NS = "session-board", en = {
   "settings.contextWindow": "\u4E0A\u4E0B\u6587 {value}",
   "settings.retry": "\u91CD\u8BD5",
   "settings.errorUnknownModel": "\u8BE5\u6A21\u578B\u8DEF\u7531\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u53E6\u9009\u4E00\u4E2A\u6A21\u578B\u3002",
+  "settings.errorUnknownEffort": "\u8BE5\u6A21\u578B\u5DF2\u4E0D\u652F\u6301\u4E4B\u524D\u4FDD\u5B58\u7684\u601D\u8003\u7B49\u7EA7\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002",
   "settings.errorHostOutdated": "\u6B63\u5728\u8FD0\u884C\u7684 Harness \u5BBF\u4E3B\u6BD4\u63D2\u4EF6\u65E7\u3002\u8BF7\u5B8C\u5168\u9000\u51FA\u5E76\u91CD\u65B0\u6253\u5F00 Harness \u540E\u518D\u8BD5\u3002",
   "settings.errorStoreUnavailable": "\u504F\u597D\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u67E5\u770B\u5BBF\u4E3B\u65E5\u5FD7\u540E\u91CD\u8BD5\u3002",
   "settings.errorInvalidSelection": "\u9009\u62E9\u65E0\u6548\uFF0C\u8BF7\u4ECE\u5217\u8868\u4E2D\u9009\u62E9\u6A21\u578B\u3002",
@@ -3295,21 +3305,39 @@ function routePart(value) {
   return trimmed === "" || trimmed.length > 200 || /[\u0000-\u001f\u007f]/u.test(trimmed) ? null : trimmed;
 }
 function parseSynthesisPref(raw) {
-  let record2 = asRecord2(raw), model = routePart(record2?.model), provider = routePart(record2?.provider);
-  return model === null || provider === null ? { model: null, provider: null } : { model, provider };
+  let record2 = asRecord2(raw), model = routePart(record2?.model), provider = routePart(record2?.provider), reasoningEffort = routePart(record2?.reasoningEffort);
+  return model === null || provider === null ? { model: null, provider: null, reasoningEffort: null } : { model, provider, reasoningEffort };
 }
 function selectionOf(pref) {
-  return pref.model === null || pref.provider === null ? null : { provider: pref.provider, model: pref.model };
+  return pref.model === null || pref.provider === null ? null : { provider: pref.provider, model: pref.model, reasoningEffort: pref.reasoningEffort };
 }
 function parseSynthesisModelResponse(raw) {
   let record2 = asRecord2(raw);
   return record2?.ok !== !0 || !("selection" in record2) ? null : parseSynthesisPref(record2.selection);
 }
+function parseReasoningEfforts(raw) {
+  let record2 = asRecord2(raw);
+  if (!Array.isArray(record2?.efforts)) return [];
+  let efforts = [], seen = /* @__PURE__ */ new Set();
+  for (let entry of record2.efforts) {
+    let effort = asRecord2(entry), id = routePart(effort?.id);
+    if (id === null || seen.has(id)) continue;
+    seen.add(id);
+    let name2 = typeof effort?.name == "string" && effort.name.trim() !== "" ? effort.name : id;
+    efforts.push({ id, name: name2 });
+  }
+  return efforts;
+}
 function parseCatalogModel(raw) {
   let record2 = asRecord2(raw), id = routePart(record2?.id), name2 = typeof record2?.name == "string" && record2.name.trim() !== "" ? record2.name : id;
   if (id === null || name2 === null) return null;
-  let direct = record2?.contextWindow, nested = asRecord2(record2?.context)?.contextWindow, contextWindow = typeof direct == "number" && Number.isSafeInteger(direct) && direct > 0 ? direct : typeof nested == "number" && Number.isSafeInteger(nested) && nested > 0 ? nested : void 0;
-  return { id, name: name2, ...contextWindow === void 0 ? {} : { contextWindow } };
+  let direct = record2?.contextWindow, nested = asRecord2(record2?.context)?.contextWindow, contextWindow = typeof direct == "number" && Number.isSafeInteger(direct) && direct > 0 ? direct : typeof nested == "number" && Number.isSafeInteger(nested) && nested > 0 ? nested : void 0, efforts = parseReasoningEfforts(record2?.reasoning), declaredDefault = routePart(asRecord2(record2?.reasoning)?.defaultEffort), defaultEffort = declaredDefault !== null && efforts.some((effort) => effort.id === declaredDefault) ? declaredDefault : void 0, reasoning = efforts.length === 0 ? void 0 : { efforts, ...defaultEffort === void 0 ? {} : { defaultEffort } };
+  return {
+    id,
+    name: name2,
+    ...contextWindow === void 0 ? {} : { contextWindow },
+    ...reasoning === void 0 ? {} : { reasoning }
+  };
 }
 function parseCatalogGroups(raw) {
   if (!Array.isArray(raw)) return [];
@@ -3336,13 +3364,18 @@ function synthesisModelOptions(groups) {
         providerName: group.name,
         model: model.id,
         modelName: model.name,
-        contextWindow: model.contextWindow ?? null
+        contextWindow: model.contextWindow ?? null,
+        reasoningEfforts: model.reasoning?.efforts ?? [],
+        defaultEffort: model.reasoning?.defaultEffort ?? null
       }));
     }
   return options.sort((left, right) => compareText(left.providerName, right.providerName) || compareText(left.modelName, right.modelName) || compareText(left.provider, right.provider) || compareText(left.model, right.model)), options;
 }
 function selectionOptionValue(selection) {
   return `${selection.provider}\0${selection.model}`;
+}
+function optionByValue(options, value) {
+  return options.find((option) => option.value === value) ?? null;
 }
 function optionValueOf(options, selection) {
   if (selection === null) return null;
@@ -3362,10 +3395,10 @@ function selectionFromOptionValue(value) {
 }
 
 // src/client/synthesis-settings.ts
-function writeBody(value) {
-  if (value === "") return { action: "write", model: null, provider: null };
+function writeBody(value, reasoningEffort) {
+  if (value === "") return { action: "write", model: null, provider: null, reasoningEffort: null };
   let selection = selectionFromOptionValue(value);
-  return selection === null ? null : { action: "write", model: selection.model, provider: selection.provider };
+  return selection === null ? null : { action: "write", model: selection.model, provider: selection.provider, reasoningEffort: reasoningEffort === "" ? null : reasoningEffort };
 }
 async function postSynthesisModel(body) {
   let response;
@@ -3440,9 +3473,9 @@ function createSynthesisSettings(options = {}) {
         await loadCatalog();
       })());
     },
-    async save(value) {
+    async save(value, reasoningEffort = "") {
       if (disposed) return;
-      let body = writeBody(value);
+      let body = writeBody(value, reasoningEffort);
       if (body === null) {
         publish({ saving: !1, saved: !1, error: "INVALID_SELECTION" });
         return;
@@ -3473,6 +3506,8 @@ function errorText(t, error) {
   switch (error) {
     case "UNKNOWN_MODEL":
       return t("settings.errorUnknownModel");
+    case "UNKNOWN_EFFORT":
+      return t("settings.errorUnknownEffort");
     case "HOST_OUTDATED":
       return t("settings.errorHostOutdated");
     case "STORE_UNAVAILABLE":
@@ -3487,12 +3522,16 @@ function optionLabel(option, t) {
   let base = `${option.providerName} \xB7 ${option.modelName}`;
   return option.contextWindow === null ? base : `${base} (${t("settings.contextWindow", { value: formatContextWindow(option.contextWindow) })})`;
 }
+function defaultEffortLabel(option, t) {
+  let known = option === null || option.defaultEffort === null ? null : option.reasoningEfforts.find((effort) => effort.id === option.defaultEffort);
+  return known == null ? t("settings.synthesisEffortDefault") : t("settings.synthesisEffortDefaultNamed", { value: known.name });
+}
 function SessionBoardSettingsPage({ t, settings }) {
   let state = useSnapshot(settings.store, (value) => value);
   (0, import_react8.useEffect)(() => {
     settings.start();
   }, [settings]);
-  let selectedValue = state.selection, knownValue = selectedValue === null ? FALLBACK_OPTION_VALUE : optionValueOf(state.options, selectedValue), currentValue = knownValue ?? (selectedValue === null ? FALLBACK_OPTION_VALUE : selectionOptionValue(selectedValue)), disabled = state.saving || state.status === "loading", catalogNote = state.catalogStatus === "loading" ? t("settings.synthesisLoading") : state.catalogStatus === "unavailable" ? t("settings.synthesisCatalogUnavailable") : null;
+  let selectedValue = state.selection, knownValue = selectedValue === null ? FALLBACK_OPTION_VALUE : optionValueOf(state.options, selectedValue), currentValue = knownValue ?? (selectedValue === null ? FALLBACK_OPTION_VALUE : selectionOptionValue(selectedValue)), disabled = state.saving || state.status === "loading", currentOption = currentValue === FALLBACK_OPTION_VALUE ? null : optionByValue(state.options, currentValue), savedEffort = selectedValue?.reasoningEffort ?? null, efforts = currentOption?.reasoningEfforts ?? [], effortKnown = savedEffort !== null && efforts.some((effort) => effort.id === savedEffort), showEffort = knownValue !== null && (efforts.length > 0 || savedEffort !== null), catalogNote = state.catalogStatus === "loading" ? t("settings.synthesisLoading") : state.catalogStatus === "unavailable" ? t("settings.synthesisCatalogUnavailable") : null;
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "sb-settings", "aria-label": t("settings.nav"), children: [
     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { className: "sb-settings-title", children: t("settings.synthesisGroup") }),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisHint") }),
@@ -3516,6 +3555,27 @@ function SessionBoardSettingsPage({ t, settings }) {
         }
       )
     ] }),
+    showEffort ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-effort", children: t("settings.synthesisEffort") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "select",
+        {
+          id: "sb-settings-synthesis-effort",
+          className: "sb-settings-select",
+          value: savedEffort ?? "",
+          disabled,
+          onChange: (event) => {
+            settings.save(currentValue, event.target.value);
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: defaultEffortLabel(currentOption, t) }),
+            efforts.map((effort) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: effort.id, children: effort.name }, effort.id)),
+            savedEffort !== null && !effortKnown ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: savedEffort, children: `${savedEffort} (${t("settings.synthesisUnavailable")})` }) : null
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisEffortHint") })
+    ] }) : null,
     catalogNote !== null && state.options.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", children: [
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: catalogNote }),
       state.catalogStatus === "unavailable" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-retry", onClick: () => {

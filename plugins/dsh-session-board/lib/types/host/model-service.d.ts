@@ -11,7 +11,7 @@
  * and `stream(GenerateOptions)`, whose ordinary text output arrives as
  * `text-delta` chunks and ends with a `finish` chunk.
  */
-import type { SynthesisModelCatalogGroup, SynthesisModelSelection } from '../shared/synthesis.ts';
+import type { SynthesisModelCatalogGroup, SynthesisModelSelection, SynthesisModelVerdict } from '../shared/synthesis.ts';
 /** One registered provider route (`LlmProviderInfo`). */
 export interface HostModelProvider {
     readonly id: string;
@@ -22,6 +22,20 @@ export interface HostModelInfo {
     readonly provider: string;
     readonly id: string;
     readonly name: string;
+}
+/** One adapter-owned reasoning effort (`LlmReasoningEffortInfo`). */
+export interface HostReasoningEffortInfo {
+    readonly id: string;
+    readonly name: string;
+}
+/** Selectable reasoning efforts of one route (`LlmModelReasoningInfo`). */
+export interface HostModelReasoningInfo {
+    readonly efforts: readonly HostReasoningEffortInfo[];
+    readonly defaultEffort?: string;
+}
+/** Exact-route metadata resolved by its adapter (`LlmResolvedModelInfo`). */
+export interface HostResolvedModelInfo {
+    readonly reasoning?: HostModelReasoningInfo;
 }
 /** One text block of a hand-built request. */
 export interface HostTextBlock {
@@ -58,6 +72,8 @@ export interface HostStreamChunk {
 export interface HostGenerateOptions {
     readonly provider: string;
     readonly model: string;
+    /** Adapter-owned reasoning effort selected for this exact model. */
+    readonly reasoningEffort?: string;
     readonly system?: string;
     readonly messages: readonly HostRequestMessage[];
     readonly maxTokens?: number;
@@ -72,12 +88,15 @@ export interface HostGenerateOptions {
 export interface HostLlmService {
     listProviders(): readonly HostModelProvider[];
     listModels(provider: string): Promise<readonly HostModelInfo[]>;
+    resolveModelInfo(provider: string, model: string): Promise<HostResolvedModelInfo>;
     stream(options: HostGenerateOptions): AsyncIterable<HostStreamChunk>;
 }
 /** One one-shot synthesis call requested by the archiver. */
 export interface SynthesisModelRequest {
     readonly provider: string;
     readonly model: string;
+    /** Reasoning effort of the saved route; null/absent keeps the model default. */
+    readonly reasoningEffort?: string | null;
     readonly system: string;
     readonly prompt: string;
     /**
@@ -105,7 +124,7 @@ export declare const SYNTHESIS_MAX_TOKENS = 8192;
  * @param selection - provider/model route to verify.
  * @returns whether both the provider route and the exact model are advertised.
  */
-export declare function isKnownSynthesisModel(llm: HostLlmService, selection: SynthesisModelSelection): Promise<boolean>;
+export declare function isKnownSynthesisModel(llm: HostLlmService, selection: SynthesisModelSelection): Promise<SynthesisModelVerdict>;
 /**
  * List the host's currently advertised routes as picker groups.
  *
@@ -118,6 +137,8 @@ export declare function isKnownSynthesisModel(llm: HostLlmService, selection: Sy
  * @returns one group per provider, in provider order.
  */
 export declare function listSynthesisCatalog(llm: HostLlmService): Promise<SynthesisModelCatalogGroup[]>;
+/** Re-export for the host half's own imports. */
+export type { SynthesisModelVerdict };
 /**
  * Run one one-shot completion and return its visible text.
  *

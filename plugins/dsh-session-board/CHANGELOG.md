@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 — 2026-10-19
+
+- 设置页「归档提炼」新增「思考等级」选择器：模型目录带出每个模型支持的推理档位（`resolveModelInfo().reasoning.efforts`），可单独保存；保存的档位随提炼请求以 `GenerateOptions.reasoningEffort` 传给模型，未选则用模型自身默认。
+- 新存储值为 `{ model, provider, reasoningEffort }`，旧记录自动解析为 `reasoningEffort: null`，无需迁移。
+- 写入校验区分 `UNKNOWN_MODEL` 与 `UNKNOWN_EFFORT`：模型还在但不再支持已保存档位时，设置页提示重新选择。
+- 宿主能力 `synthesisModel` 升到 3。
+
 ## 0.3.2 — 2026-10-19
 
 - 设置页模型列表改由插件宿主侧提供：新增 `action: 'catalog'`，宿主用 `llm.listProviders()` / `llm.listModels()` 列出当前路由，浏览器不再依赖其他插件的 `remote.session` 服务（该服务在部分宿主构建中无法从本插件上下文解析，导致 0.3.1 仍提示无法读取模型列表）。

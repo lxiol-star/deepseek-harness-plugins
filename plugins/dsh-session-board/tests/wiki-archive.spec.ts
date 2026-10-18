@@ -177,7 +177,7 @@ describe('authenticated connection route handler', () => {
 
 describe('plugin-selected synthesis model', () => {
   const page = 'raw/sessions/host/dsh/id.md'
-  const selection = { provider: 'alpha', model: 'pro' }
+  const selection: { provider: string; model: string; reasoningEffort?: string | null } = { provider: 'alpha', model: 'pro' }
 
   /** A commit fixture whose archive rows are real `--full` results for one id. */
   const fixture = (options: {
@@ -195,11 +195,14 @@ describe('plugin-selected synthesis model', () => {
       if (operation === 'synthesize') return { status: 'synthesized', pages: ['experience/example.md'] }
       return { status: 'updated' }
     })
-    const complete = vi.fn(options.complete ?? (async () => 'PAGE BODY'))
+    const complete = vi.fn(async (request?: unknown) => {
+      void request
+      return options.complete === undefined ? 'PAGE BODY' : await options.complete()
+    })
     const chosen = options.selection === undefined ? selection : options.selection
     const models = {
       read: () => chosen,
-      complete: () => complete(),
+      complete: (request: unknown) => complete(request),
     }
     const execute = async (args: readonly string[]) => ({ stdout: output([args[args.indexOf('--exact-session') + 1]!], args.includes('--dry-run')) })
     const service = createWikiArchiver({ home: '/test', dshHome: '/test/dev', workflow: run, execute, models })
@@ -218,6 +221,21 @@ describe('plugin-selected synthesis model', () => {
     expect(promptCall?.[1]).toBe(page)
     const writeCall = f.run.mock.calls.find(([operation]) => operation === 'write')
     expect(JSON.parse(writeCall?.[1] as string)).toEqual({ page, output: 'PAGE BODY' })
+  })
+
+  it('passes the saved reasoning effort to the model call', async () => {
+    const f = fixture({ selection: { provider: 'alpha', model: 'pro', reasoningEffort: 'high' } })
+    await f.service.commit((await f.service.preview(['id'])).token)
+    expect(f.complete).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'alpha',
+      model: 'pro',
+      reasoningEffort: 'high',
+      sessionId: 'id',
+    }))
+
+    const plain = fixture()
+    await plain.service.commit((await plain.service.preview(['id'])).token)
+    expect(plain.complete).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: null }))
   })
 
   it('keeps the Wiki-provider path when no model is selected', async () => {
