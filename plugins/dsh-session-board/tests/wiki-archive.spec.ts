@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createWikiArchiver, validateWikiIds } from '../src/host/wiki-archive.ts'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { createWikiArchiver, validateWikiIds, resolveDshHome } from '../src/host/wiki-archive.ts'
 import { createBoardRoutes, BOARD_WIKI_ARCHIVE_PATH } from '../src/host/routes.ts'
 import { EMPTY_FEED } from '../src/shared/types.ts'
 import type { WikiArchiver } from '../src/host/wiki-archive.ts'
@@ -11,12 +13,34 @@ function output(ids: string[], dry_run: boolean, source = 'source') {
     results: ids.map(id => ({ session: id, source: `${source}/${id}`, action: dry_run ? 'would-archive' : 'archived', ...(dry_run ? {} : { page: `raw/sessions/host/dsh/${id}.md` }) })) })
 }
 
+describe('Wiki home resolution', () => {
+  it('follows DSH: explicit value, then DSH_HOME, then ~/.dsh — a GUI launch has no env', () => {
+    expect(resolveDshHome('/custom/home', '/env/home')).toBe('/custom/home')
+    expect(resolveDshHome(undefined, '/env/home')).toBe('/env/home')
+    expect(resolveDshHome(undefined, '')).toBe(join(homedir(), '.dsh'))
+    expect(resolveDshHome(undefined, undefined)).toBe(join(homedir(), '.dsh'))
+  })
+})
+
 describe('Wiki archival safety', () => {
   it('accepts real non-UUID identifiers but not selector delimiters or traversal', () => {
     expect(validateWikiIds(['session-feishu-watch-lead-0930', 'session-feishu-watch-lead-0930'])).toEqual(['session-feishu-watch-lead-0930'])
     for (const id of ['a,b', 'a b', '../x', '-x', '', '.','..']) expect(() => validateWikiIds([id])).toThrow('INVALID_SELECTION')
     expect(() => validateWikiIds([])).toThrow()
     expect(() => validateWikiIds(Array(51).fill('id'))).toThrow()
+  })
+  it('archives against ~/.dsh when a GUI launch carries no DSH_HOME', async () => {
+    const saved = process.env.DSH_HOME
+    delete process.env.DSH_HOME
+    try {
+      const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(['id'], args.includes('--dry-run')) }))
+      const service = createWikiArchiver({ workflow, home: '/test', execute })
+      await service.preview(['id'])
+      const args = execute.mock.calls[0]?.[0] ?? []
+      expect(args[args.indexOf('--dsh-home') + 1]).toBe(join(homedir(), '.dsh'))
+    } finally {
+      if (saved !== undefined) process.env.DSH_HOME = saved
+    }
   })
   it('does not write until explicit single-use token commit', async () => {
     const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(['id'], args.includes('--dry-run')) }))

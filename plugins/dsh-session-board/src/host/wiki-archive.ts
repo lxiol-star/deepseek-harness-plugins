@@ -25,6 +25,23 @@ export interface WikiArchiverOptions {
   execute?: (args: readonly string[], signal: AbortSignal) => Promise<{ stdout: string }>
 }
 
+/**
+ * Resolve the harness home the way DSH itself does: an explicit value (config or
+ * `$DSH_HOME`) wins, otherwise `~/.dsh`. Returns null only for an unusable value.
+ * @param configured - home passed by the host, if any.
+ * @param fromEnv - `DSH_HOME` of the running process, if any.
+ * @returns the absolute home, or null when the configured value is unusable.
+ */
+export function resolveDshHome(configured: string | undefined, fromEnv: string | undefined): string | null {
+  const chosen = configured ?? (fromEnv === undefined || fromEnv.trim() === '' ? undefined : fromEnv) ?? join(homedir(), '.dsh')
+  if (chosen.trim() === '') return null
+  try {
+    return resolve(chosen)
+  } catch {
+    return null
+  }
+}
+
 /** Explicit IDs only; never a selector fragment or a shell command. */
 export function validateWikiIds(raw: unknown): string[] {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ARCHIVE_SELECTION || raw.some(id => typeof id !== 'string' || !SAFE_ID.test(id) || id === '.' || id === '..')) {
@@ -55,9 +72,11 @@ function validateResult(raw: string, ids: readonly string[], dryRun: boolean): A
 /** Preview is read-only. A short-lived, single-use token authorizes a fixed set. */
 export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchiver {
   const home = resolve(options.home ?? homedir())
-  // Only this running host's transcripts; never enumerate production by default.
-  const explicitHome = options.dshHome ?? process.env.DSH_HOME
-  const dshHome = explicitHome === undefined ? null : resolve(explicitHome)
+  // The running host's own transcripts. A GUI launch carries no DSH_HOME, so the
+  // documented default (~/.dsh) is the only correct answer there; an explicit
+  // DSH_HOME always wins, which keeps a Dev app pointed at its own home.
+  const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME)
+  const unavailableHome = dshHome === null
   const now = options.now ?? Date.now
   const script = join(home, 'wiki', 'scripts', 'wiki-archive.py')
   const execute = options.execute ?? (async (args, signal) => {
@@ -72,7 +91,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
     }
   })
   const workflow = options.workflow ?? (async (operation, value, signal) => {
-    if (dshHome === null) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
+    if (unavailableHome) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
     try {
       const result = await exec('/usr/bin/python3', [fileURLToPath(new URL('./wiki-workflow.py', import.meta.url)), operation,
         '--wiki-root', join(home, 'wiki'), '--dsh-home', dshHome, '--value', value],
@@ -90,7 +109,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   let busy = false
   let closed = false
   const perform = async (ids: readonly string[], dryRun: boolean): Promise<ArchiveSummary> => {
-    if (dshHome === null) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
+    if (unavailableHome) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
     const args = ['--wiki-root', join(home, 'wiki'), '--tool', 'dsh', '--dsh-home', dshHome, '--json',
       ...ids.flatMap(id => ['--exact-session', id]), ...(dryRun ? ['--dry-run'] : ['--full'])]
     return validateResult((await execute(args, controller.signal)).stdout, ids, dryRun)

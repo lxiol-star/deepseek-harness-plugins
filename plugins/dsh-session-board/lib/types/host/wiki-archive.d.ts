@@ -17,6 +17,14 @@ export interface WikiArchiverOptions {
         stdout: string;
     }>;
 }
+/**
+ * Resolve the harness home the way DSH itself does: an explicit value (config or
+ * `$DSH_HOME`) wins, otherwise `~/.dsh`. Returns null only for an unusable value.
+ * @param configured - home passed by the host, if any.
+ * @param fromEnv - `DSH_HOME` of the running process, if any.
+ * @returns the absolute home, or null when the configured value is unusable.
+ */
+export declare function resolveDshHome(configured: string | undefined, fromEnv: string | undefined): string | null;
 /** Explicit IDs only; never a selector fragment or a shell command. */
 export declare function validateWikiIds(raw: unknown): string[];
 /** Preview is read-only. A short-lived, single-use token authorizes a fixed set. */

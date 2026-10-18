@@ -635,6 +635,15 @@ var WikiArchiveError = class extends Error {
   }
   code;
 };
+function resolveDshHome(configured, fromEnv) {
+  const chosen = configured ?? (fromEnv === void 0 || fromEnv.trim() === "" ? void 0 : fromEnv) ?? join(homedir(), ".dsh");
+  if (chosen.trim() === "") return null;
+  try {
+    return resolve(chosen);
+  } catch {
+    return null;
+  }
+}
 function validateWikiIds(raw) {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ARCHIVE_SELECTION || raw.some((id) => typeof id !== "string" || !SAFE_ID.test(id) || id === "." || id === "..")) {
     throw new WikiArchiveError("INVALID_SELECTION");
@@ -670,8 +679,8 @@ function validateResult(raw, ids, dryRun) {
 }
 function createWikiArchiver(options = {}) {
   const home = resolve(options.home ?? homedir());
-  const explicitHome = options.dshHome ?? process.env.DSH_HOME;
-  const dshHome = explicitHome === void 0 ? null : resolve(explicitHome);
+  const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME);
+  const unavailableHome = dshHome === null;
   const now = options.now ?? Date.now;
   const script = join(home, "wiki", "scripts", "wiki-archive.py");
   const execute = options.execute ?? (async (args, signal) => {
@@ -684,7 +693,7 @@ function createWikiArchiver(options = {}) {
     }
   });
   const workflow = options.workflow ?? (async (operation, value, signal) => {
-    if (dshHome === null) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
+    if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
     try {
       const result = await exec(
         "/usr/bin/python3",
@@ -713,7 +722,7 @@ function createWikiArchiver(options = {}) {
   let busy = false;
   let closed = false;
   const perform = async (ids, dryRun) => {
-    if (dshHome === null) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
+    if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
     const args = [
       "--wiki-root",
       join(home, "wiki"),
