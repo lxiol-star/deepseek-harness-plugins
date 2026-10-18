@@ -141,6 +141,7 @@ function SessionCardBody({
     )
   }
 
+  const hasBody = preview.instruction !== '' || preview.activity !== '' || (preview.jobs?.length ?? 0) > 0 || entry.errorNote !== null
   const acknowledge = entry.group === 'attention' && entry.attentionKind !== 'blocked'
 
   return (
@@ -197,7 +198,9 @@ function SessionCardBody({
             <span className="sb-line-label">{t('card.instruction')}</span>{preview.instruction}
           </div>
         ) : null}
-        {entry.errorNote !== null ? (
+        {!hasBody ? (
+          <div className="sb-line sb-line--empty" style={BODY_STYLE}>{t('card.emptySession')}</div>
+        ) : entry.errorNote !== null ? (
           <div className="sb-line sb-line--error" style={BODY_STYLE}>
             <span className="sb-line-label">{t('note.error')}</span>{entry.errorNote}
           </div>
@@ -216,10 +219,12 @@ function SessionCardBody({
               <div className="sb-progress-fill" style={{ width: `${Math.round(progress.ratio * 100)}%` }} />
             </div>
           ) : null}
-          <button type="button" className="sb-card-details sb-btn" aria-expanded={expanded} disabled={interactionDisabled}
-            onClick={event => { event.stopPropagation(); setExpanded(value => !value) }}>
-            {t(expanded ? 'card.hideDetails' : 'card.showDetails')}
-          </button>
+          {hasBody ? (
+            <button type="button" className="sb-card-details sb-btn" aria-expanded={expanded} disabled={interactionDisabled}
+              onClick={event => { event.stopPropagation(); setExpanded(value => !value) }}>
+              {t(expanded ? 'card.hideDetails' : 'card.showDetails')}
+            </button>
+          ) : null}
           {acknowledge ? (
             <button
               className="sb-ack"

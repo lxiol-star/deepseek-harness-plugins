@@ -399,7 +399,7 @@ function SessionCardBody({
       input: formatCount(metrics.inputTokens ?? 0)
     }) }, "tokens")
   );
-  let acknowledge = entry.group === "attention" && entry.attentionKind !== "blocked";
+  let hasBody = preview.instruction !== "" || preview.activity !== "" || (preview.jobs?.length ?? 0) > 0 || entry.errorNote !== null, acknowledge = entry.group === "attention" && entry.attentionKind !== "blocked";
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
     "div",
     {
@@ -466,18 +466,18 @@ function SessionCardBody({
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-line-label", children: t("card.instruction") }),
             preview.instruction
           ] }) : null,
-          entry.errorNote !== null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-line sb-line--error", style: BODY_STYLE, children: [
+          hasBody ? entry.errorNote !== null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-line sb-line--error", style: BODY_STYLE, children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-line-label", children: t("note.error") }),
             entry.errorNote
           ] }) : preview.activity !== "" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-line", style: BODY_STYLE, children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-line-label", children: t("card.activity") }),
             preview.activity
-          ] }) : !expanded || preview.instruction === "" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-line", style: BODY_STYLE, children: preview.instruction || t("card.noPreview") }) : null
+          ] }) : !expanded || preview.instruction === "" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-line", style: BODY_STYLE, children: preview.instruction || t("card.noPreview") }) : null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-line sb-line--empty", style: BODY_STYLE, children: t("card.emptySession") })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-card-footer", style: FOOTER_STYLE, children: [
           figures.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-metrics", children: figures }) : null,
           expanded && progress.ratio !== null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-progress", title: t("card.progressEstimate"), role: "progressbar", "aria-label": t("card.progressEstimate"), "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress.ratio * 100), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-progress-fill", style: { width: `${Math.round(progress.ratio * 100)}%` } }) }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          hasBody ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "button",
             {
               type: "button",
@@ -489,7 +489,7 @@ function SessionCardBody({
               },
               children: t(expanded ? "card.hideDetails" : "card.showDetails")
             }
-          ),
+          ) : null,
           acknowledge ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "button",
             {
@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.2",
+      "data-session-board-version": "0.2.3",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.2",
+      "data-session-board-version": "0.2.3",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.2.2",
+        "data-session-board-version": "0.2.3",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1930,6 +1930,20 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-workspace-body > .sb-group { margin-top: 4px; }
 .sb-workspace-node > .sb-group-head { width: 100%; }
 .sb-pill--archived { color: var(--dsw-alias-state-success-primary); }
+/* A session with no turns at all: placeholder, never summary typography. */
+.sb-line--empty {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-style: italic;
+  opacity: .72;
+  padding: 2px 0;
+}
+.sb-line--empty::before {
+  content: "";
+  width: 6px; height: 6px; flex: none;
+  border-radius: 50%;
+  border: 1px dashed var(--dsw-alias-label-secondary);
+}
 ${ACCENTS}
 
 @media (prefers-reduced-motion: reduce) {
@@ -2349,6 +2363,7 @@ var NS = "session-board", en = {
   "card.instruction": "Asked",
   "card.activity": "Produced",
   "card.noPreview": "No summary available yet",
+  "card.emptySession": "This session has no content yet",
   "card.turn": "Turn {n}",
   "card.step": "Step {m}",
   "card.turnStep": "Turn {n} \xB7 {m} total steps",
@@ -2474,6 +2489,7 @@ var NS = "session-board", en = {
   "card.instruction": "\u6307\u4EE4",
   "card.activity": "\u4EA7\u51FA",
   "card.noPreview": "\u6682\u65E0\u6458\u8981",
+  "card.emptySession": "\u6B64\u4F1A\u8BDD\u8FD8\u6CA1\u6709\u4EFB\u4F55\u5185\u5BB9",
   "card.turn": "\u7B2C {n} \u8F6E",
   "card.step": "\u7B2C {m} \u6B65",
   "card.turnStep": "\u7B2C {n} \u8F6E \xB7 \u7D2F\u8BA1 {m} \u6B65",

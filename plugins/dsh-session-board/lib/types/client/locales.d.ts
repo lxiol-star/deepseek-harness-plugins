@@ -70,6 +70,7 @@ export declare const en: {
     readonly 'card.instruction': "Asked";
     readonly 'card.activity': "Produced";
     readonly 'card.noPreview': "No summary available yet";
+    readonly 'card.emptySession': "This session has no content yet";
     readonly 'card.turn': "Turn {n}";
     readonly 'card.step': "Step {m}";
     readonly 'card.turnStep': "Turn {n} · {m} total steps";

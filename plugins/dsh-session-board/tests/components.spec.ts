@@ -88,6 +88,19 @@ describe('actual React components', () => {
     expect(view.container.querySelector('.sb-card-footer .sb-metrics')).not.toBeNull()
     expect(view.container.querySelector('.sb-card-footer .sb-ack')).not.toBeNull()
   })
+  it('gives a session with no content its own empty style and hides details', async () => {
+    const empty = { ...entry, preview: { instruction: '', activity: '' }, errorNote: null }
+    const props = { entry: empty, t: components.t, onOpen: vi.fn(), onAck: vi.fn() }
+    const view = mount(components.SessionCard, props); await view.render(props)
+    const line = view.container.querySelector('.sb-line--empty')
+    expect(line?.textContent).toBe('This session has no content yet')
+    expect(view.container.querySelector('.sb-card-details')).toBeNull()
+    // A session that has content but no preview keeps the ordinary placeholder and its details toggle.
+    const busy = { ...entry, preview: { instruction: '', activity: '' }, metrics: { ...entry.metrics } }
+    await view.render({ ...props, entry: { ...busy, preview: { instruction: 'Do work', activity: '' } } })
+    expect(view.container.querySelector('.sb-line--empty')).toBeNull()
+    expect(view.container.querySelector('.sb-card-details')).not.toBeNull()
+  })
   it('unmounts collapsed cards and restores them when expanded', async () => {
     const props = { groups: [{ id: 'attention', entries: [entry] }], t: components.t, onOpen: vi.fn(), onAck: vi.fn(), emptyKey: 'empty.noSessions', collapsed: { attention: true } }
     const view = mount(components.BoardList, props); await view.render(props)

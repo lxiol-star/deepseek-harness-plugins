@@ -698,6 +698,20 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-workspace-body > .sb-group { margin-top: 4px; }
 .sb-workspace-node > .sb-group-head { width: 100%; }
 .sb-pill--archived { color: var(--dsw-alias-state-success-primary); }
+/* A session with no turns at all: placeholder, never summary typography. */
+.sb-line--empty {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-style: italic;
+  opacity: .72;
+  padding: 2px 0;
+}
+.sb-line--empty::before {
+  content: "";
+  width: 6px; height: 6px; flex: none;
+  border-radius: 50%;
+  border: 1px dashed var(--dsw-alias-label-secondary);
+}
 ${ACCENTS}
 
 @media (prefers-reduced-motion: reduce) {
