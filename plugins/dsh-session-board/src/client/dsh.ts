@@ -90,16 +90,27 @@ export interface WorkspacesService {
   list: Source<WorkspaceSnapshot>
 }
 
+/** One durable subagent address, the only target that can reveal a child Session. */
+export interface SubagentAddress {
+  parentSessionId: string
+  childSessionId: string
+  mode?: string
+}
+
 /** The sessions service face (only the members used here). */
 export interface SessionsService {
   list: Source<SessionListState>
   refreshProjections(sessionId: string): Promise<void>
+  /** The durable address of a subagent Session, when the client knows one. */
+  subagentAddress?(sessionId: string): SubagentAddress | undefined
 }
 
 /** The navigation service that actually switches the displayed session. */
 export interface UiWorkspaceService {
-  openSession(target: string): void
+  /** Show a main Session id, or a child Session through its durable address. */
+  openSession(target: string | SubagentAddress): void
   archiveSession?: (id: string) => Promise<void>
+  unarchiveSession?: (id: string) => Promise<void>
 }
 
 /** The uiSession service face (only the members used here). */

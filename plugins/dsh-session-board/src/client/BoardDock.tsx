@@ -142,7 +142,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.3.4"
+        data-session-board-version="0.3.5"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -173,7 +173,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.3.4"
+        data-session-board-version="0.3.5"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}

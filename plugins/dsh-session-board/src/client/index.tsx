@@ -44,6 +44,7 @@ import type {
   JobsService,
   SessionListState,
   SessionStatusSnapshot,
+  SubagentAddress,
   UiWorkspaceService,
   WorkspacesService,
 } from './dsh.ts'
@@ -52,14 +53,21 @@ import type {
 export const name = 'dsh-session-board'
 
 /**
- * Services required before the browser half runs at all. The rest are read
- * optionally through `ctx.get`, so a profile without, say, the jobs service
- * still gets a working panel instead of an inactive one.
+ * Services required before the browser half runs at all. The nested
+ * {@link CORE_SERVICES} injection below adds the session, navigation and job
+ * services the panel reads before it registers anything.
  */
 export const inject = ['slots', 'locale']
 
-/** Services the panel is useless without; activation waits for these. */
-const CORE_SERVICES = ['sessions', 'uiSession']
+/**
+ * Services the panel is useless without; activation waits for these.
+ *
+ * They are injected rather than read through `ctx.get` because a `get` made
+ * while the client is still composing captures `undefined` forever: navigation
+ * (`uiWorkspace`) is what opens a card's session, and `workspaces` is what
+ * tells the board which sessions the DSH client itself archived.
+ */
+const CORE_SERVICES = ['sessions', 'uiSession', 'uiWorkspace', 'jobs', 'workspaces']
 
 /** Default dock width, in pixels, before the user drags it. */
 const DOCK_DEFAULT_WIDTH = 340
@@ -124,7 +132,10 @@ export interface BoardFace {
   view: Store<ViewState>
   t: Translate
   locale: LocaleService
-  sessions: { list: ReadonlyStore<SessionListState> } | null
+  sessions: {
+    list: ReadonlyStore<SessionListState>
+    subagentAddress?: (sessionId: string) => SubagentAddress | undefined
+  } | null
   uiSession: { sessionStatus: ReadonlyStore<SessionStatusSnapshot> } | null
   jobs: JobsService | null
   workspaces: WorkspacesService | null
@@ -408,6 +419,15 @@ export function apply(ctx: Context): void {
     const workspaces = (scoped.get('workspaces') ?? null) as WorkspacesService | null
     const scopedSlots = scoped.get('slots') as SlotRegistry | undefined
     const navigation = scoped.get('uiWorkspace') as UiWorkspaceService | undefined
+    /**
+     * The navigation service, resolved again after this plugin settles.
+     *
+     * The injection above already waits for it, but resolving lazily keeps a
+     * click working if the service instance is replaced (or was not visible
+     * yet when this closure was built).
+     */
+    const navigationOf = (): UiWorkspaceService | undefined =>
+      navigation ?? (scoped.get('uiWorkspace') as UiWorkspaceService | undefined)
     if (scopedSlots === undefined) return
 
     const cleanup = new CleanupStack()
@@ -485,14 +505,50 @@ export function apply(ctx: Context): void {
       jobs,
       workspaces,
       openSession: (id) => {
-        if (navigation === undefined || typeof navigation.openSession !== 'function') {
+        const nav = navigationOf()
+        if (nav === undefined || typeof nav.openSession !== 'function') {
           warn('navigation-unavailable')
           return
         }
+        /** Open a child Session through the address the client records for it. */
+        const openSubagent = (): boolean => {
+          let address: SubagentAddress | undefined
+          try {
+            address = sessions?.subagentAddress?.(id)
+          } catch {
+            address = undefined
+          }
+          if (address === undefined || address === null) return false
+          try {
+            nav.openSession(address)
+            return true
+          } catch (error: unknown) {
+            warn(`open-session-failed: ${String(error)}`)
+            return true
+          }
+        }
         try {
-          navigation.openSession(id)
+          nav.openSession(id)
         } catch (error: unknown) {
-          warn(`open-session-failed: ${String(error)}`)
+          if (openSubagent()) return
+          // A Session archived in the client — often by this board's own batch
+          // archive — stays addressable but cannot be revealed; restore it and
+          // open it again instead of leaving the click without any effect.
+          const archived = workspaces?.list.getSnapshot().archivedSessionIds ?? []
+          if (!archived.includes(id) || typeof nav.unarchiveSession !== 'function') {
+            warn(`open-session-failed: ${String(error)}`)
+            return
+          }
+          void nav.unarchiveSession(id).then(
+            () => {
+              try {
+                nav.openSession(id)
+              } catch (retryError: unknown) {
+                warn(`open-session-failed: ${String(retryError)}`)
+              }
+            },
+            (unarchiveError: unknown) => { warn(`open-session-failed: ${String(unarchiveError)}`) },
+          )
         }
       },
       ack: (id) => { void feed.ack(id) },
