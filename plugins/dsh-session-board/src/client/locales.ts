@@ -12,6 +12,11 @@ export const NS = 'session-board'
 
 /** English copy. */
 export const en = {
+  'batch.error.SCOPE_FAILED': 'Could not resolve the selected sessions and their children. Check the local Wiki scripts.',
+  'batch.error.SYNTHESIS_FAILED': 'Synthesis step failed. Raw archives are kept.',
+  'batch.error.INDEX_FAILED': 'Knowledge pages were written but the index update failed.',
+  'batch.error.SCHEMA_UNAVAILABLE': 'Local Wiki SCHEMA.md is missing or empty.',
+
   'batch.nativeTitle': 'DSH archive results',
   'batch.native.archived': 'Archived in DSH',
   'batch.native.already-archived': 'Already archived in DSH',
@@ -120,7 +125,7 @@ export const en = {
   'batch.preview': 'Preview archive and synthesis',
   'batch.working': 'Working…',
   'batch.confirmTitle': 'Confirm archive and synthesis',
-  'batch.destination': 'Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.',
+  'batch.destination': 'Archive to ~/wiki/raw/sessions/, then synthesize each session with the model chosen in Session board settings (the Wiki provider when none is chosen), and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.',
   'batch.planCounts': '{count} to copy · {skipped} unchanged',
   'batch.confirm': 'Confirm archive and synthesis',
   'batch.cancel': 'Cancel',
@@ -151,10 +156,34 @@ export const en = {
   'a11y.list': 'Session list',
   'a11y.card': 'Open session {title}',
   'a11y.groupCount': '{group}, {count} sessions',
+
+  'settings.nav': 'Session board',
+  'settings.synthesisGroup': 'Archive synthesis',
+  'settings.synthesisHint': 'Model used to synthesize archived sessions into Wiki knowledge pages. The list comes from the models this client can currently use.',
+  'settings.synthesisModel': 'Synthesis model',
+  'settings.synthesisFallback': 'Not specified (use the Wiki provider)',
+  'settings.synthesisFallbackHint': 'When no model is chosen, synthesis keeps using wiki-synthesize.py with the provider configured for the local Wiki.',
+  'settings.synthesisSaved': 'Saved',
+  'settings.synthesisSaving': 'Saving…',
+  'settings.synthesisLoading': 'Loading models…',
+  'settings.synthesisCatalogUnavailable': 'The client model list is unavailable right now. You can still keep the Wiki provider.',
+  'settings.synthesisUnavailable': 'not currently available',
+  'settings.contextWindow': 'context {value}',
+  'settings.retry': 'Retry',
+  'settings.errorUnknownModel': 'That model route is no longer available. Pick another model.',
+  'settings.errorHostOutdated': 'The running Harness host is older than this plugin. Quit and reopen Harness, then try again.',
+  'settings.errorStoreUnavailable': 'The preference could not be stored. Check the host logs and try again.',
+  'settings.errorInvalidSelection': 'That selection is invalid. Pick a model from the list.',
+  'settings.errorRequestFailed': 'Could not reach the Harness host.',
 } as const
 
 /** Chinese copy. */
 export const zh: Record<keyof typeof en, string> = {
+  'batch.error.SCOPE_FAILED': '无法核对所选会话及其子会话，请检查本地 Wiki 脚本。',
+  'batch.error.SYNTHESIS_FAILED': '提炼步骤失败，原文归档已保留。',
+  'batch.error.INDEX_FAILED': '知识页已写入，但索引更新失败。',
+  'batch.error.SCHEMA_UNAVAILABLE': '本地 Wiki 的 SCHEMA.md 缺失或为空。',
+
   'batch.nativeTitle': 'DSH 客户端归档结果',
   'batch.native.archived': '已归档到 DSH',
   'batch.native.already-archived': 'DSH 中已归档',
@@ -263,7 +292,7 @@ export const zh: Record<keyof typeof en, string> = {
   'batch.preview': '预览归档与提炼',
   'batch.working': '处理中…',
   'batch.confirmTitle': '确认归档并提炼',
-  'batch.destination': '原文归档到 ~/wiki/raw/sessions/，脱敏复核后通过 stepx-terra 逐会话提炼，最后更新索引。成功后将空闲会话归档到 DSH（不删除）；空会话跳过提炼后直接归档。运行中或有新内容的会话保留。提炼会向已配置的模型服务发送归档文本。',
+  'batch.destination': '原文归档到 ~/wiki/raw/sessions/，脱敏复核后用会话看板设置里选择的模型逐会话提炼（未选择时沿用 Wiki provider），最后更新索引。成功后将空闲会话归档到 DSH（不删除）；空会话跳过提炼后直接归档。运行中或有新内容的会话保留。提炼会向已配置的模型服务发送归档文本。',
   'batch.planCounts': '将复制 {count} 个 · 未变化 {skipped} 个',
   'batch.confirm': '确认归档并提炼',
   'batch.cancel': '取消',
@@ -294,6 +323,25 @@ export const zh: Record<keyof typeof en, string> = {
   'a11y.list': '会话列表',
   'a11y.card': '打开会话 {title}',
   'a11y.groupCount': '{group}，{count} 个会话',
+
+  'settings.nav': '会话看板',
+  'settings.synthesisGroup': '归档提炼',
+  'settings.synthesisHint': '把归档会话提炼成 Wiki 知识页时使用的模型。列表来自当前客户端可用的模型。',
+  'settings.synthesisModel': '提炼模型',
+  'settings.synthesisFallback': '不指定（沿用 Wiki provider）',
+  'settings.synthesisFallbackHint': '未选择模型时，仍由 wiki-synthesize.py 使用本地 Wiki 配置的 provider 完成提炼。',
+  'settings.synthesisSaved': '已保存',
+  'settings.synthesisSaving': '正在保存…',
+  'settings.synthesisLoading': '正在加载模型…',
+  'settings.synthesisCatalogUnavailable': '当前无法读取客户端的模型列表。仍可保持使用 Wiki provider。',
+  'settings.synthesisUnavailable': '当前不可用',
+  'settings.contextWindow': '上下文 {value}',
+  'settings.retry': '重试',
+  'settings.errorUnknownModel': '该模型路由已不可用，请另选一个模型。',
+  'settings.errorHostOutdated': '正在运行的 Harness 宿主比插件旧。请完全退出并重新打开 Harness 后再试。',
+  'settings.errorStoreUnavailable': '偏好设置保存失败，请查看宿主日志后重试。',
+  'settings.errorInvalidSelection': '选择无效，请从列表中选择模型。',
+  'settings.errorRequestFailed': '无法连接 Harness 宿主。',
 }
 
 /** Every dictionary key. */

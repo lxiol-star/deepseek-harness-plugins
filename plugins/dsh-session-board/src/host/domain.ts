@@ -93,10 +93,14 @@ function defineDomain<S extends DomainSpec>(spec: S): S {
 export const ACK_DOMAIN_NAME = 'dsh_session_board'
 /** Domain holding per-session busy accounting. */
 export const TURN_DOMAIN_NAME = 'dsh_session_board_turns'
+/** Domain holding board-wide preferences (independent from the session fact stores). */
+export const PREFS_DOMAIN_NAME = 'dsh_session_board_prefs'
 /** Table of {@link ACK_DOMAIN_NAME}: session id → turn-end facts + ack cursor. */
 export const ACK_TABLE_NAME = 'acks'
 /** Table of {@link TURN_DOMAIN_NAME}: session id → busy accounting. */
 export const TURN_TABLE_NAME = 'turn_stats'
+/** Table of {@link PREFS_DOMAIN_NAME}: preference key → stored value. */
+export const PREFS_TABLE_NAME = 'prefs'
 
 /**
  * Truncation budget for a stored error note, counted in Unicode code points.
@@ -199,6 +203,19 @@ export interface StoredTurnRecord {
   lastEventAt: number | null
 }
 
+/**
+ * Stored synthesis preference.
+ *
+ * Both fields are either a route part or null together; a half-filled or
+ * malformed record normalizes to the null/null fallback instead of failing the
+ * domain open. This is a preference, not a durable fact: losing it costs one
+ * re-selection, never a card.
+ */
+export interface StoredSynthesisPrefRecord {
+  model: string | null
+  provider: string | null
+}
+
 /** Ack record validator; see {@link RecordSchema} for the normalize-not-throw policy. */
 const ackRecordSchema: RecordSchema<StoredAckRecord> = {
   parse(raw: unknown): StoredAckRecord {
@@ -224,6 +241,19 @@ const turnRecordSchema: RecordSchema<StoredTurnRecord> = {
       openWaitKeys: stringArrayOrNull(fieldOf(raw, 'openWaitKeys')),
       lastEventAt: numberOrNull(fieldOf(raw, 'lastEventAt')),
     }
+  },
+}
+
+/**
+ * Preference validator; see {@link RecordSchema}. A value that is not exactly
+ * two non-empty strings is stored as the null/null fallback.
+ */
+const prefsRecordSchema: RecordSchema<StoredSynthesisPrefRecord> = {
+  parse(raw: unknown): StoredSynthesisPrefRecord {
+    const model = stringOrNull(fieldOf(raw, 'model'))
+    const provider = stringOrNull(fieldOf(raw, 'provider'))
+    if (model === null || provider === null) return { model: null, provider: null }
+    return { model, provider }
   },
 }
 
@@ -256,6 +286,19 @@ export const turnDomainSpec = defineDomain({
   },
 })
 
+/**
+ * Preferences live in their own domain so a future preference shape (or a
+ * write-heavy table) never touches the authoritative session fact stores.
+ */
+export const prefsDomainSpec = defineDomain({
+  name: PREFS_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: 'backup-and-skip',
+  tables: {
+    [PREFS_TABLE_NAME]: domainTable(prefsRecordSchema),
+  },
+})
+
 /** One table handle as the storage layer exposes it (only the members used here). */
 export interface KvTableLike<V> {
   get(key: string): V | undefined
@@ -268,3 +311,5 @@ export interface KvTableLike<V> {
 export type BoardAckTable = KvTableLike<StoredAckRecord>
 /** Handle on the `turn_stats` table; keys are session ids. */
 export type BoardTurnTable = KvTableLike<StoredTurnRecord>
+/** Handle on the `prefs` table; keys are preference names. */
+export type BoardPrefsTable = KvTableLike<StoredSynthesisPrefRecord>

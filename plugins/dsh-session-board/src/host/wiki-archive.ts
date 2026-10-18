@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
+import type { SynthesisModelSelection } from '../shared/synthesis.ts'
 
 const exec = promisify(execFile)
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -18,12 +19,38 @@ export interface WikiArchiver {
   commit(token: string): Promise<ArchiveSummary>
   close(): void
 }
+/**
+ * The plugin-side synthesis path, used when the user picked a model route in
+ * the settings page.
+ *
+ * `read` returns the stored route (null keeps the Wiki-provider path), and
+ * `complete` runs exactly one model call for one raw page. The bridge's
+ * `prompt`/`write` operations keep parsing, page validation, state recording,
+ * SKIP handling and slug uniqueness inside `wiki-synthesize.py`'s own logic.
+ */
+export interface SynthesisModelBinding {
+  read(): SynthesisModelSelection | null
+  complete(request: {
+    provider: string
+    model: string
+    system: string
+    prompt: string
+    sessionId: string
+    signal: AbortSignal
+  }): Promise<string>
+}
+
+/** Workflow operations the bridge must implement for the plugin-side call. */
+type WorkflowOperation = 'scope' | 'synthesize' | 'prompt' | 'write' | 'index'
+
 export interface WikiArchiverOptions {
   home?: string
   dshHome?: string
   now?: () => number
-  workflow?: (operation: 'scope' | 'synthesize' | 'index', value: string, signal: AbortSignal) => Promise<unknown>
+  workflow?: (operation: WorkflowOperation, value: string, signal: AbortSignal) => Promise<unknown>
   execute?: (args: readonly string[], signal: AbortSignal) => Promise<{ stdout: string }>
+  /** Plugin-side model call; absent keeps every synthesis on the Wiki provider. */
+  models?: SynthesisModelBinding
 }
 
 /**
@@ -93,6 +120,50 @@ function validateResult(raw: string, ids: readonly string[], dryRun: boolean): A
   return summary
 }
 
+/**
+ * Read one prepared prompt response from the bridge.
+ *
+ * The response is either a `{ prompt: { system, user } }` request to send to
+ * the selected model, or a terminal synthesis row (`sensitive` when the raw
+ * page carries recognizable credentials, `skipped` when the page's content has
+ * not changed since a final conclusion).
+ * @param raw - parsed JSON returned by the bridge.
+ * @param session - session id owning the page, for the terminal row.
+ * @param page - raw page path the row refers to.
+ * @returns the prompt to send, or a validated terminal synthesis row.
+ */
+function parsePreparedPrompt(
+  raw: unknown,
+  session: string,
+  page: string,
+): { prompt: { system: string; user: string } } | { terminal: SynthesisResult } {
+  const value = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+  const status = value.status
+  if (status === 'sensitive' || status === 'skipped') {
+    const parsed = parseWikiWorkflow({
+      synthesis: [{ status, pages: Array.isArray(value.pages) ? value.pages : [], ...(status === 'sensitive' ? { error: 'SENSITIVE_CONTENT' } : {}), session, page }],
+      index: 'not-needed',
+    })
+    return { terminal: parsed.synthesis[0] as SynthesisResult }
+  }
+  const prompt = typeof value.prompt === 'object' && value.prompt !== null ? value.prompt as Record<string, unknown> : null
+  if (prompt === null || typeof prompt.system !== 'string' || typeof prompt.user !== 'string') throw new WikiArchiveError('INVALID_RESULT')
+  return { prompt: { system: prompt.system, user: prompt.user } }
+}
+
+/**
+ * Read one `write` response as a synthesis row.
+ * @param raw - parsed JSON returned by the bridge.
+ * @param session - session id owning the page.
+ * @param page - raw page path the row refers to.
+ * @returns the validated synthesis row.
+ */
+function parseWrittenRow(raw: unknown, session: string, page: string): SynthesisResult {
+  const value = typeof raw === 'object' && raw !== null ? { ...(raw as Record<string, unknown>) } : {}
+  const parsed = parseWikiWorkflow({ synthesis: [{ ...value, session, page }], index: 'not-needed' })
+  return parsed.synthesis[0] as SynthesisResult
+}
+
 /** Preview is read-only. A short-lived, single-use token authorizes a fixed set. */
 export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchiver {
   const home = resolve(options.home ?? homedir())
@@ -127,9 +198,22 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       return parsed
     } catch (error) {
       if (error instanceof WikiArchiveError) throw error
-      throw new WikiArchiveError(signal.aborted ? 'CANCELLED' : 'WORKFLOW_UNAVAILABLE')
+      if (signal.aborted) throw new WikiArchiveError('CANCELLED')
+      // The bridge prints a structured error even when it exits non-zero; the
+      // generic exec failure must not hide that reason from the panel.
+      const stdout = (error as { stdout?: unknown }).stdout
+      if (typeof stdout === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(stdout)
+          if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && typeof parsed.error === 'string') throw new WikiArchiveError(parsed.error)
+        } catch (inner) {
+          if (inner instanceof WikiArchiveError) throw inner
+        }
+      }
+      throw new WikiArchiveError(operation === 'scope' ? 'SCOPE_FAILED' : operation === 'index' ? 'INDEX_FAILED' : 'SYNTHESIS_FAILED')
     }
   })
+  const models = options.models
   const previews = new Map<string, { ids: readonly string[]; expiresAt: number; sources: readonly string[]; scope: ArchiveScope }>()
   const controller = new AbortController()
   let busy = false
@@ -146,6 +230,41 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
     busy = true
     try { return await work() } finally { busy = false }
   }
+  /**
+   * Synthesize one raw page through the selected route.
+   *
+   * With no saved route this keeps the historical `synthesize` operation
+   * (the Wiki provider path). With a route, the bridge prepares the prompt
+   * (`prompt`), the plugin calls the DSH model, and the bridge validates and
+   * writes the output (`write`) — raw archives are never touched by either.
+   */
+  const synthesizeOne = async (session: string, page: string): Promise<SynthesisResult> => {
+    let selected: SynthesisModelSelection | null = null
+    if (models !== undefined) {
+      try {
+        selected = models.read()
+      } catch {
+        selected = null
+      }
+    }
+    if (selected === null || models === undefined) {
+      const response = await workflow('synthesize', page, controller.signal)
+      const parsed = parseWikiWorkflow({ synthesis: [{ ...(typeof response === 'object' && response !== null ? response : {}), session, page }], index: 'not-needed' })
+      return parsed.synthesis[0] as SynthesisResult
+    }
+    const prepared = parsePreparedPrompt(await workflow('prompt', page, controller.signal), session, page)
+    if ('terminal' in prepared) return prepared.terminal
+    const output = await models.complete({
+      provider: selected.provider,
+      model: selected.model,
+      system: prepared.prompt.system,
+      prompt: prepared.prompt.user,
+      sessionId: session,
+      signal: controller.signal,
+    })
+    return parseWrittenRow(await workflow('write', JSON.stringify({ page, output }), controller.signal), session, page)
+  }
+
   return {
     preview: async (raw) => exclusive(async () => {
       const requested = validateWikiIds(raw)
@@ -192,9 +311,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       for (const row of summary.results) {
         if (!row.page || !['archived', 'skipped'].includes(row.action)) continue
         try {
-          const response = await workflow('synthesize', row.page, controller.signal)
-          const parsed = parseWikiWorkflow({ synthesis: [{ ...(typeof response === 'object' && response !== null ? response : {}), session: row.session, page: row.page }], index: 'not-needed' })
-          synthesis.push(...parsed.synthesis)
+          synthesis.push(await synthesizeOne(row.session, row.page))
         } catch {
           if (closed) throw new WikiArchiveError('CANCELLED')
           synthesis.push({ session: row.session, page: row.page, status: 'failed', pages: [], error: 'SYNTHESIS_FAILED' })

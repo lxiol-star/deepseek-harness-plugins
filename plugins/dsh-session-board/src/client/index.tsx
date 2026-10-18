@@ -38,6 +38,8 @@ import { CleanupStack } from './lifecycle.ts'
 import { createStore, type ReadonlyStore, type Store } from './store.ts'
 import { en, NS, zh } from './locales.ts'
 import { useSnapshot, type Translate } from './hooks.ts'
+import { createSynthesisSettings, type SynthesisSettingsFace } from './synthesis-settings.ts'
+import { SessionBoardSettingsPage } from './SettingsPage.tsx'
 import type {
   JobsService,
   SessionListState,
@@ -77,9 +79,18 @@ interface SlotRegistry {
     id?: string
     key?: string
     order?: number
+    /** Registrant-localized nav label; `settings.section` reads it. */
+    label?: () => string
     locale?: string
     inject?: () => Record<string, unknown>
   }, component: unknown): () => void
+}
+
+/** The client remote gateway slice used to read the model catalog. */
+interface RemoteService {
+  session?: {
+    modelCatalog(): Promise<{ ok: boolean; value?: { groups?: unknown } }>
+  }
 }
 
 /** The locale service slice this plugin uses. */
@@ -375,6 +386,31 @@ export function apply(ctx: Context): void {
   if (doc === undefined || doc === null) return
 
   const t = locale.bind(NS)
+
+  // Settings page: one group over the client's own model catalog. Registered
+  // outside the core-service injection so the page still appears in a
+  // composition without the session services.
+  const synthesis = createSynthesisSettings({
+    catalog: async () => {
+      // Read the service per call: the remote gateway may activate after this
+      // plugin, and the catalog is only needed when the page opens.
+      const gateway = (ctx.get('remote') as RemoteService | undefined)?.session
+      if (gateway === undefined) throw new Error('CATALOG_UNAVAILABLE')
+      const response = await gateway.modelCatalog()
+      if (response?.ok !== true) throw new Error('CATALOG_UNAVAILABLE')
+      return response.value?.groups
+    },
+  })
+  ctx.effect(() => () => synthesis.dispose(), 'dsh-session-board: settings controller')
+  ctx.effect(() => slots.inject('settings.section', () => slots.register({
+    name: 'settings.section',
+    id: 'session-board',
+    order: 60,
+    label: () => t('settings.nav'),
+    locale: NS,
+    inject: (): { settings: SynthesisSettingsFace } => ({ settings: synthesis }),
+  }, SessionBoardSettingsPage)), 'dsh-session-board: settings page')
+
   const warned = new Set<string>()
   const warn = (reason: string): void => {
     if (warned.has(reason)) return

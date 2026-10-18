@@ -719,4 +719,48 @@ ${ACCENTS}
   .sb-progress-fill { transition: none; }
   .sb-scroll { scroll-behavior: auto; }
 }
+
+/* ------------------------------------------------------------ settings --- */
+
+/* The settings page renders in the shell's own settings content column; it
+   borrows the panel's typography and theme tokens, and never paints a surface
+   of its own. */
+.sb-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 8px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sb-settings-title { margin: 0; font-size: 13px; font-weight: 600; }
+.sb-settings-hint { margin: 0; color: var(--dsw-alias-label-secondary); }
+.sb-settings-row { display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
+.sb-settings-label { font-weight: 500; }
+.sb-settings-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: inherit;
+  font: inherit;
+}
+.sb-settings-select:disabled { opacity: .6; }
+.sb-settings-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-settings-meta { display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.sb-settings-saved { color: var(--dsw-alias-state-success-primary); }
+.sb-settings-error { color: var(--dsw-alias-state-error-primary); }
+.sb-settings-note { color: var(--dsw-alias-label-secondary); }
+.sb-settings-retry {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-settings-retry:hover { background: var(--dsw-alias-bg-layer-2, transparent); }
 `

@@ -27,7 +27,7 @@ __export(index_exports, {
   name: () => name
 });
 module.exports = __toCommonJS(index_exports);
-var import_react8 = require("react"), import_client = require("react-dom/client");
+var import_react9 = require("react"), import_client = require("react-dom/client");
 
 // src/client/archive-marks.ts
 function isArchivedInClient(entry) {
@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.6",
+      "data-session-board-version": "0.3.0",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.6",
+      "data-session-board-version": "0.3.0",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.2.6",
+        "data-session-board-version": "0.3.0",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1951,6 +1951,50 @@ ${ACCENTS}
   .sb-progress-fill { transition: none; }
   .sb-scroll { scroll-behavior: auto; }
 }
+
+/* ------------------------------------------------------------ settings --- */
+
+/* The settings page renders in the shell's own settings content column; it
+   borrows the panel's typography and theme tokens, and never paints a surface
+   of its own. */
+.sb-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 8px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sb-settings-title { margin: 0; font-size: 13px; font-weight: 600; }
+.sb-settings-hint { margin: 0; color: var(--dsw-alias-label-secondary); }
+.sb-settings-row { display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
+.sb-settings-label { font-weight: 500; }
+.sb-settings-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: inherit;
+  font: inherit;
+}
+.sb-settings-select:disabled { opacity: .6; }
+.sb-settings-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-settings-meta { display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.sb-settings-saved { color: var(--dsw-alias-state-success-primary); }
+.sb-settings-error { color: var(--dsw-alias-state-error-primary); }
+.sb-settings-note { color: var(--dsw-alias-label-secondary); }
+.sb-settings-retry {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-settings-retry:hover { background: var(--dsw-alias-bg-layer-2, transparent); }
 `;
 
 // src/shared/types.ts
@@ -2302,6 +2346,10 @@ var import_react7 = require("react");
 
 // src/client/locales.ts
 var NS = "session-board", en = {
+  "batch.error.SCOPE_FAILED": "Could not resolve the selected sessions and their children. Check the local Wiki scripts.",
+  "batch.error.SYNTHESIS_FAILED": "Synthesis step failed. Raw archives are kept.",
+  "batch.error.INDEX_FAILED": "Knowledge pages were written but the index update failed.",
+  "batch.error.SCHEMA_UNAVAILABLE": "Local Wiki SCHEMA.md is missing or empty.",
   "batch.nativeTitle": "DSH archive results",
   "batch.native.archived": "Archived in DSH",
   "batch.native.already-archived": "Already archived in DSH",
@@ -2399,7 +2447,7 @@ var NS = "session-board", en = {
   "batch.preview": "Preview archive and synthesis",
   "batch.working": "Working\u2026",
   "batch.confirmTitle": "Confirm archive and synthesis",
-  "batch.destination": "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.",
+  "batch.destination": "Archive to ~/wiki/raw/sessions/, then synthesize each session with the model chosen in Session board settings (the Wiki provider when none is chosen), and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.",
   "batch.planCounts": "{count} to copy \xB7 {skipped} unchanged",
   "batch.confirm": "Confirm archive and synthesis",
   "batch.cancel": "Cancel",
@@ -2426,8 +2474,30 @@ var NS = "session-board", en = {
   "a11y.dock": "Session panel",
   "a11y.list": "Session list",
   "a11y.card": "Open session {title}",
-  "a11y.groupCount": "{group}, {count} sessions"
+  "a11y.groupCount": "{group}, {count} sessions",
+  "settings.nav": "Session board",
+  "settings.synthesisGroup": "Archive synthesis",
+  "settings.synthesisHint": "Model used to synthesize archived sessions into Wiki knowledge pages. The list comes from the models this client can currently use.",
+  "settings.synthesisModel": "Synthesis model",
+  "settings.synthesisFallback": "Not specified (use the Wiki provider)",
+  "settings.synthesisFallbackHint": "When no model is chosen, synthesis keeps using wiki-synthesize.py with the provider configured for the local Wiki.",
+  "settings.synthesisSaved": "Saved",
+  "settings.synthesisSaving": "Saving\u2026",
+  "settings.synthesisLoading": "Loading models\u2026",
+  "settings.synthesisCatalogUnavailable": "The client model list is unavailable right now. You can still keep the Wiki provider.",
+  "settings.synthesisUnavailable": "not currently available",
+  "settings.contextWindow": "context {value}",
+  "settings.retry": "Retry",
+  "settings.errorUnknownModel": "That model route is no longer available. Pick another model.",
+  "settings.errorHostOutdated": "The running Harness host is older than this plugin. Quit and reopen Harness, then try again.",
+  "settings.errorStoreUnavailable": "The preference could not be stored. Check the host logs and try again.",
+  "settings.errorInvalidSelection": "That selection is invalid. Pick a model from the list.",
+  "settings.errorRequestFailed": "Could not reach the Harness host."
 }, zh = {
+  "batch.error.SCOPE_FAILED": "\u65E0\u6CD5\u6838\u5BF9\u6240\u9009\u4F1A\u8BDD\u53CA\u5176\u5B50\u4F1A\u8BDD\uFF0C\u8BF7\u68C0\u67E5\u672C\u5730 Wiki \u811A\u672C\u3002",
+  "batch.error.SYNTHESIS_FAILED": "\u63D0\u70BC\u6B65\u9AA4\u5931\u8D25\uFF0C\u539F\u6587\u5F52\u6863\u5DF2\u4FDD\u7559\u3002",
+  "batch.error.INDEX_FAILED": "\u77E5\u8BC6\u9875\u5DF2\u5199\u5165\uFF0C\u4F46\u7D22\u5F15\u66F4\u65B0\u5931\u8D25\u3002",
+  "batch.error.SCHEMA_UNAVAILABLE": "\u672C\u5730 Wiki \u7684 SCHEMA.md \u7F3A\u5931\u6216\u4E3A\u7A7A\u3002",
   "batch.nativeTitle": "DSH \u5BA2\u6237\u7AEF\u5F52\u6863\u7ED3\u679C",
   "batch.native.archived": "\u5DF2\u5F52\u6863\u5230 DSH",
   "batch.native.already-archived": "DSH \u4E2D\u5DF2\u5F52\u6863",
@@ -2525,7 +2595,7 @@ var NS = "session-board", en = {
   "batch.preview": "\u9884\u89C8\u5F52\u6863\u4E0E\u63D0\u70BC",
   "batch.working": "\u5904\u7406\u4E2D\u2026",
   "batch.confirmTitle": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
-  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230 ~/wiki/raw/sessions/\uFF0C\u8131\u654F\u590D\u6838\u540E\u901A\u8FC7 stepx-terra \u9010\u4F1A\u8BDD\u63D0\u70BC\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u6210\u529F\u540E\u5C06\u7A7A\u95F2\u4F1A\u8BDD\u5F52\u6863\u5230 DSH\uFF08\u4E0D\u5220\u9664\uFF09\uFF1B\u7A7A\u4F1A\u8BDD\u8DF3\u8FC7\u63D0\u70BC\u540E\u76F4\u63A5\u5F52\u6863\u3002\u8FD0\u884C\u4E2D\u6216\u6709\u65B0\u5185\u5BB9\u7684\u4F1A\u8BDD\u4FDD\u7559\u3002\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
+  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230 ~/wiki/raw/sessions/\uFF0C\u8131\u654F\u590D\u6838\u540E\u7528\u4F1A\u8BDD\u770B\u677F\u8BBE\u7F6E\u91CC\u9009\u62E9\u7684\u6A21\u578B\u9010\u4F1A\u8BDD\u63D0\u70BC\uFF08\u672A\u9009\u62E9\u65F6\u6CBF\u7528 Wiki provider\uFF09\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u6210\u529F\u540E\u5C06\u7A7A\u95F2\u4F1A\u8BDD\u5F52\u6863\u5230 DSH\uFF08\u4E0D\u5220\u9664\uFF09\uFF1B\u7A7A\u4F1A\u8BDD\u8DF3\u8FC7\u63D0\u70BC\u540E\u76F4\u63A5\u5F52\u6863\u3002\u8FD0\u884C\u4E2D\u6216\u6709\u65B0\u5185\u5BB9\u7684\u4F1A\u8BDD\u4FDD\u7559\u3002\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
   "batch.planCounts": "\u5C06\u590D\u5236 {count} \u4E2A \xB7 \u672A\u53D8\u5316 {skipped} \u4E2A",
   "batch.confirm": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
   "batch.cancel": "\u53D6\u6D88",
@@ -2552,7 +2622,25 @@ var NS = "session-board", en = {
   "a11y.dock": "\u4F1A\u8BDD\u9762\u677F",
   "a11y.list": "\u4F1A\u8BDD\u5217\u8868",
   "a11y.card": "\u6253\u5F00\u4F1A\u8BDD {title}",
-  "a11y.groupCount": "{group}\uFF0C{count} \u4E2A\u4F1A\u8BDD"
+  "a11y.groupCount": "{group}\uFF0C{count} \u4E2A\u4F1A\u8BDD",
+  "settings.nav": "\u4F1A\u8BDD\u770B\u677F",
+  "settings.synthesisGroup": "\u5F52\u6863\u63D0\u70BC",
+  "settings.synthesisHint": "\u628A\u5F52\u6863\u4F1A\u8BDD\u63D0\u70BC\u6210 Wiki \u77E5\u8BC6\u9875\u65F6\u4F7F\u7528\u7684\u6A21\u578B\u3002\u5217\u8868\u6765\u81EA\u5F53\u524D\u5BA2\u6237\u7AEF\u53EF\u7528\u7684\u6A21\u578B\u3002",
+  "settings.synthesisModel": "\u63D0\u70BC\u6A21\u578B",
+  "settings.synthesisFallback": "\u4E0D\u6307\u5B9A\uFF08\u6CBF\u7528 Wiki provider\uFF09",
+  "settings.synthesisFallbackHint": "\u672A\u9009\u62E9\u6A21\u578B\u65F6\uFF0C\u4ECD\u7531 wiki-synthesize.py \u4F7F\u7528\u672C\u5730 Wiki \u914D\u7F6E\u7684 provider \u5B8C\u6210\u63D0\u70BC\u3002",
+  "settings.synthesisSaved": "\u5DF2\u4FDD\u5B58",
+  "settings.synthesisSaving": "\u6B63\u5728\u4FDD\u5B58\u2026",
+  "settings.synthesisLoading": "\u6B63\u5728\u52A0\u8F7D\u6A21\u578B\u2026",
+  "settings.synthesisCatalogUnavailable": "\u5F53\u524D\u65E0\u6CD5\u8BFB\u53D6\u5BA2\u6237\u7AEF\u7684\u6A21\u578B\u5217\u8868\u3002\u4ECD\u53EF\u4FDD\u6301\u4F7F\u7528 Wiki provider\u3002",
+  "settings.synthesisUnavailable": "\u5F53\u524D\u4E0D\u53EF\u7528",
+  "settings.contextWindow": "\u4E0A\u4E0B\u6587 {value}",
+  "settings.retry": "\u91CD\u8BD5",
+  "settings.errorUnknownModel": "\u8BE5\u6A21\u578B\u8DEF\u7531\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u53E6\u9009\u4E00\u4E2A\u6A21\u578B\u3002",
+  "settings.errorHostOutdated": "\u6B63\u5728\u8FD0\u884C\u7684 Harness \u5BBF\u4E3B\u6BD4\u63D2\u4EF6\u65E7\u3002\u8BF7\u5B8C\u5168\u9000\u51FA\u5E76\u91CD\u65B0\u6253\u5F00 Harness \u540E\u518D\u8BD5\u3002",
+  "settings.errorStoreUnavailable": "\u504F\u597D\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u67E5\u770B\u5BBF\u4E3B\u65E5\u5FD7\u540E\u91CD\u8BD5\u3002",
+  "settings.errorInvalidSelection": "\u9009\u62E9\u65E0\u6548\uFF0C\u8BF7\u4ECE\u5217\u8868\u4E2D\u9009\u62E9\u6A21\u578B\u3002",
+  "settings.errorRequestFailed": "\u65E0\u6CD5\u8FDE\u63A5 Harness \u5BBF\u4E3B\u3002"
 };
 
 // src/client/BatchToolbar.tsx
@@ -3196,8 +3284,251 @@ var CleanupStack = class {
   }
 };
 
+// src/shared/synthesis.ts
+var SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
+function asRecord2(value) {
+  return typeof value == "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function routePart(value) {
+  if (typeof value != "string") return null;
+  let trimmed = value.trim();
+  return trimmed === "" || trimmed.length > 200 || /[\u0000-\u001f\u007f]/u.test(trimmed) ? null : trimmed;
+}
+function parseSynthesisPref(raw) {
+  let record2 = asRecord2(raw), model = routePart(record2?.model), provider = routePart(record2?.provider);
+  return model === null || provider === null ? { model: null, provider: null } : { model, provider };
+}
+function selectionOf(pref) {
+  return pref.model === null || pref.provider === null ? null : { provider: pref.provider, model: pref.model };
+}
+function parseSynthesisModelResponse(raw) {
+  let record2 = asRecord2(raw);
+  return record2?.ok !== !0 || !("selection" in record2) ? null : parseSynthesisPref(record2.selection);
+}
+function parseCatalogModel(raw) {
+  let record2 = asRecord2(raw), id = routePart(record2?.id), name2 = typeof record2?.name == "string" && record2.name.trim() !== "" ? record2.name : id;
+  if (id === null || name2 === null) return null;
+  let direct = record2?.contextWindow, nested = asRecord2(record2?.context)?.contextWindow, contextWindow = typeof direct == "number" && Number.isSafeInteger(direct) && direct > 0 ? direct : typeof nested == "number" && Number.isSafeInteger(nested) && nested > 0 ? nested : void 0;
+  return { id, name: name2, ...contextWindow === void 0 ? {} : { contextWindow } };
+}
+function parseCatalogGroups(raw) {
+  if (!Array.isArray(raw)) return [];
+  let groups = [];
+  for (let entry of raw) {
+    let record2 = asRecord2(entry), id = routePart(record2?.id);
+    if (id === null) continue;
+    let name2 = typeof record2?.name == "string" && record2.name.trim() !== "" ? record2.name : id, models = Array.isArray(record2?.models) ? record2.models.map(parseCatalogModel).filter((model) => model !== null) : [];
+    groups.push({ id, name: name2, models });
+  }
+  return groups;
+}
+function compareText(left, right) {
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+function synthesisModelOptions(groups) {
+  let seen = /* @__PURE__ */ new Set(), options = [];
+  for (let group of groups)
+    for (let model of group.models) {
+      let value = `${group.id}\0${model.id}`;
+      seen.has(value) || (seen.add(value), options.push({
+        value,
+        provider: group.id,
+        providerName: group.name,
+        model: model.id,
+        modelName: model.name,
+        contextWindow: model.contextWindow ?? null
+      }));
+    }
+  return options.sort((left, right) => compareText(left.providerName, right.providerName) || compareText(left.modelName, right.modelName) || compareText(left.provider, right.provider) || compareText(left.model, right.model)), options;
+}
+function selectionOptionValue(selection) {
+  return `${selection.provider}\0${selection.model}`;
+}
+function optionValueOf(options, selection) {
+  if (selection === null) return null;
+  let value = selectionOptionValue(selection);
+  return options.some((option) => option.value === value) ? value : null;
+}
+function formatContextWindow(tokens) {
+  if (tokens >= 1048576) {
+    let millions = tokens / 1048576;
+    return `${Number.isInteger(millions) ? String(millions) : millions.toFixed(1)}M`;
+  }
+  return tokens >= 1024 ? `${Math.round(tokens / 1024)}K` : String(tokens);
+}
+function selectionFromOptionValue(value) {
+  let separator = value.indexOf("\0");
+  return separator <= 0 || separator === value.length - 1 ? null : { provider: value.slice(0, separator), model: value.slice(separator + 1) };
+}
+
+// src/client/synthesis-settings.ts
+function writeBody(value) {
+  if (value === "") return { action: "write", model: null, provider: null };
+  let selection = selectionFromOptionValue(value);
+  return selection === null ? null : { action: "write", model: selection.model, provider: selection.provider };
+}
+async function postSynthesisModel(body) {
+  let response;
+  try {
+    response = await globalThis.fetch(SYNTHESIS_MODEL_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error("REQUEST_FAILED");
+  }
+  let payload = await response.json().catch(() => null);
+  if (response.status === 404) throw new Error("HOST_OUTDATED");
+  if (!response.ok) {
+    let code = typeof payload == "object" && payload !== null && typeof payload.error == "string" ? payload.error : "REQUEST_FAILED";
+    throw new Error(code);
+  }
+  return payload;
+}
+function createSynthesisSettings(options = {}) {
+  let state = {
+    status: "loading",
+    selection: null,
+    options: [],
+    catalogStatus: options.catalog === void 0 ? "unavailable" : "idle",
+    saving: !1,
+    saved: !1,
+    error: null
+  }, listeners = /* @__PURE__ */ new Set(), started = !1, disposed = !1, publish = (next) => {
+    if (!disposed) {
+      state = { ...state, ...next };
+      for (let listener of [...listeners]) listener();
+    }
+  }, loadCatalog = async () => {
+    if (options.catalog === void 0) {
+      publish({ catalogStatus: "unavailable" });
+      return;
+    }
+    publish({ catalogStatus: "loading" });
+    try {
+      let groups = parseCatalogGroups(await options.catalog());
+      if (disposed) return;
+      publish({ options: synthesisModelOptions(groups), catalogStatus: "ready" });
+    } catch {
+      if (disposed) return;
+      publish({ options: [], catalogStatus: "unavailable" });
+    }
+  };
+  return {
+    store: {
+      getSnapshot: () => state,
+      subscribe(listener) {
+        return listeners.add(listener), () => {
+          listeners.delete(listener);
+        };
+      }
+    },
+    start() {
+      started || disposed || (started = !0, (async () => {
+        try {
+          let payload = await postSynthesisModel({ action: "read" }), pref = parseSynthesisModelResponse(payload);
+          if (pref === null) throw new Error("REQUEST_FAILED");
+          publish({ status: "ready", selection: selectionOf(pref) });
+        } catch (error) {
+          publish({ status: "error", error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+        }
+        await loadCatalog();
+      })());
+    },
+    async save(value) {
+      if (disposed) return;
+      let body = writeBody(value);
+      if (body === null) {
+        publish({ saving: !1, saved: !1, error: "INVALID_SELECTION" });
+        return;
+      }
+      publish({ saving: !0, saved: !1, error: null });
+      try {
+        let payload = await postSynthesisModel(body), pref = parseSynthesisModelResponse(payload);
+        if (pref === null) throw new Error("REQUEST_FAILED");
+        publish({ saving: !1, saved: !0, selection: selectionOf(pref), status: "ready" });
+      } catch (error) {
+        publish({ saving: !1, error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+      }
+    },
+    async reloadCatalog() {
+      disposed || await loadCatalog();
+    },
+    dispose() {
+      disposed = !0, listeners.clear();
+    }
+  };
+}
+var FALLBACK_OPTION_VALUE = "";
+
+// src/client/SettingsPage.tsx
+var import_react8 = require("react");
+var import_jsx_runtime7 = require("react/jsx-runtime");
+function errorText(t, error) {
+  switch (error) {
+    case "UNKNOWN_MODEL":
+      return t("settings.errorUnknownModel");
+    case "HOST_OUTDATED":
+      return t("settings.errorHostOutdated");
+    case "STORE_UNAVAILABLE":
+      return t("settings.errorStoreUnavailable");
+    case "INVALID_SELECTION":
+      return t("settings.errorInvalidSelection");
+    default:
+      return t("settings.errorRequestFailed");
+  }
+}
+function optionLabel(option, t) {
+  let base = `${option.providerName} \xB7 ${option.modelName}`;
+  return option.contextWindow === null ? base : `${base} (${t("settings.contextWindow", { value: formatContextWindow(option.contextWindow) })})`;
+}
+function SessionBoardSettingsPage({ t, settings }) {
+  let state = useSnapshot(settings.store, (value) => value);
+  (0, import_react8.useEffect)(() => {
+    settings.start();
+  }, [settings]);
+  let selectedValue = state.selection, knownValue = selectedValue === null ? FALLBACK_OPTION_VALUE : optionValueOf(state.options, selectedValue), currentValue = knownValue ?? (selectedValue === null ? FALLBACK_OPTION_VALUE : selectionOptionValue(selectedValue)), disabled = state.saving || state.status === "loading", catalogNote = state.catalogStatus === "loading" ? t("settings.synthesisLoading") : state.catalogStatus === "unavailable" ? t("settings.synthesisCatalogUnavailable") : null;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "sb-settings", "aria-label": t("settings.nav"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { className: "sb-settings-title", children: t("settings.synthesisGroup") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-model", children: t("settings.synthesisModel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "select",
+        {
+          id: "sb-settings-synthesis-model",
+          className: "sb-settings-select",
+          value: currentValue,
+          disabled,
+          onChange: (event) => {
+            settings.save(event.target.value);
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: FALLBACK_OPTION_VALUE, children: t("settings.synthesisFallback") }),
+            state.options.map((option) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: option.value, children: optionLabel(option, t) }, option.value)),
+            knownValue === null && selectedValue !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: selectionOptionValue(selectedValue), children: `${selectedValue.provider} \xB7 ${selectedValue.model} (${t("settings.synthesisUnavailable")})` }) : null
+          ]
+        }
+      )
+    ] }),
+    catalogNote !== null && state.options.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: catalogNote }),
+      state.catalogStatus === "unavailable" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-retry", onClick: () => {
+        settings.reloadCatalog();
+      }, children: t("settings.retry") }) : null
+    ] }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", role: "status", "aria-live": "polite", children: [
+      state.saved && state.error === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-saved", children: t("settings.synthesisSaved") }) : null,
+      state.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-error", children: errorText(t, state.error) }) : null,
+      state.saving ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: t("settings.synthesisSaving") }) : null
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisFallbackHint") })
+  ] });
+}
+
 // src/client/index.tsx
-var import_jsx_runtime7 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession"], DOCK_DEFAULT_WIDTH = 340;
+var import_jsx_runtime8 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession"], DOCK_DEFAULT_WIDTH = 340;
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -3215,15 +3546,15 @@ function emptyStore(value) {
 }
 var EMPTY_LIST = { ids: [], byId: {} }, EMPTY_STATUS = /* @__PURE__ */ new Map(), EMPTY_LIST_SOURCE = emptyStore(EMPTY_LIST), EMPTY_STATUS_SOURCE = emptyStore(EMPTY_STATUS);
 function useViewActions(face) {
-  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react8.useCallback)(() => {
+  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react9.useCallback)(() => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, collapsed: !current.dock.collapsed } }));
-  }, [face]), setWidth = (0, import_react8.useCallback)((width) => {
+  }, [face]), setWidth = (0, import_react9.useCallback)((width) => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, width: clampDockWidth(width) } }));
-  }, [face]), toggleDensity = (0, import_react8.useCallback)(() => {
+  }, [face]), toggleDensity = (0, import_react9.useCallback)(() => {
     face.view.set((current) => ({ ...current, density: current.density === "compact" ? "full" : "compact" }));
-  }, [face]), setBoardOpen = (0, import_react8.useCallback)((open) => {
+  }, [face]), setBoardOpen = (0, import_react9.useCallback)((open) => {
     face.view.set((current) => ({ ...current, board: { open } }));
-  }, [face]), toggleGroup = (0, import_react8.useCallback)((group) => {
+  }, [face]), toggleGroup = (0, import_react9.useCallback)((group) => {
     face.view.set((current) => ({
       ...current,
       collapsedGroups: { ...current.collapsedGroups, [group]: current.collapsedGroups[group] !== !0 }
@@ -3233,21 +3564,21 @@ function useViewActions(face) {
 }
 function useTranslation(face) {
   let revision = useSnapshot(face.locale, (value) => value.revision);
-  return (0, import_react8.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
+  return (0, import_react9.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
 }
 function useSelection(face) {
   let state = useSnapshot(face.batch, (value) => value);
-  return { selected: (0, import_react8.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
+  return { selected: (0, import_react9.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
 }
 function useFilters(face, groups) {
-  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react8.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react8.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react8.useCallback)((next) => {
+  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react9.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react9.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react9.useCallback)((next) => {
     face.view.set((current) => ({ ...current, filters: next }));
   }, [face]);
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     BoardDock,
     {
       grouping: view.grouping,
@@ -3267,9 +3598,9 @@ function DockRoot({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       interactionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -3277,10 +3608,10 @@ function DockRoot({ face }) {
   );
 }
 function OpenOverlayContent({ face }) {
-  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react8.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react8.useCallback)((id) => {
+  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react9.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react9.useCallback)((id) => {
     face.openSession(id), setBoardOpen(!1);
   }, [face, setBoardOpen]);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     BoardOverlay,
     {
       open: !0,
@@ -3297,9 +3628,9 @@ function OpenOverlayContent({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       interactionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -3308,11 +3639,11 @@ function OpenOverlayContent({ face }) {
 }
 function BoardOverlaySlot({ face }) {
   let { view } = useViewActions(face);
-  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(OpenOverlayContent, { face }) : null;
+  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(OpenOverlayContent, { face }) : null;
 }
 function HeaderToggle({ face }) {
   let { view, setBoardOpen } = useViewActions(face), label = view.board.open ? face.t("action.closeBoard") : face.t("action.openBoard");
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     "button",
     {
       type: "button",
@@ -3322,7 +3653,7 @@ function HeaderToggle({ face }) {
       "aria-pressed": view.board.open,
       "data-session-board-toggle": "",
       onClick: () => setBoardOpen(!view.board.open),
-      children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
+      children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
     }
   );
 }
@@ -3366,7 +3697,24 @@ function apply(ctx) {
   ctx.effect(() => locale.register(NS, { zh, en }), "dsh-session-board: dictionaries"), ctx.effect(() => installStylesheet(globalThis.document), "dsh-session-board: stylesheet");
   let doc = globalThis.document;
   if (doc == null) return;
-  let t = locale.bind(NS), warned = /* @__PURE__ */ new Set(), warn = (reason) => {
+  let t = locale.bind(NS), synthesis = createSynthesisSettings({
+    catalog: async () => {
+      let gateway = ctx.get("remote")?.session;
+      if (gateway === void 0) throw new Error("CATALOG_UNAVAILABLE");
+      let response = await gateway.modelCatalog();
+      if (response?.ok !== !0) throw new Error("CATALOG_UNAVAILABLE");
+      return response.value?.groups;
+    }
+  });
+  ctx.effect(() => () => synthesis.dispose(), "dsh-session-board: settings controller"), ctx.effect(() => slots.inject("settings.section", () => slots.register({
+    name: "settings.section",
+    id: "session-board",
+    order: 60,
+    label: () => t("settings.nav"),
+    locale: NS,
+    inject: () => ({ settings: synthesis })
+  }, SessionBoardSettingsPage)), "dsh-session-board: settings page");
+  let warned = /* @__PURE__ */ new Set(), warn = (reason) => {
     warned.has(reason) || (warned.add(reason), ctx.logger?.warn?.(`dsh-session-board: ${reason}`));
   };
   ctx.inject(CORE_SERVICES, (scoped) => {
@@ -3485,7 +3833,7 @@ function apply(ctx) {
       host.setAttribute("data-dsh-session-board-host", "");
       let disposeDock = mountDock(host, (element) => {
         let root = (0, import_client.createRoot)(element);
-        return root.render(/* @__PURE__ */ (0, import_jsx_runtime7.jsx)(DockRoot, { face })), () => {
+        return root.render(/* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DockRoot, { face })), () => {
           root.unmount();
         };
       }, warn);

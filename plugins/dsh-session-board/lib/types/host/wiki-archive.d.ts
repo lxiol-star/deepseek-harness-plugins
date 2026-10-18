@@ -1,4 +1,5 @@
 import { type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
+import type { SynthesisModelSelection } from '../shared/synthesis.ts';
 export declare class WikiArchiveError extends Error {
     readonly code: string;
     constructor(code: string);
@@ -8,14 +9,38 @@ export interface WikiArchiver {
     commit(token: string): Promise<ArchiveSummary>;
     close(): void;
 }
+/**
+ * The plugin-side synthesis path, used when the user picked a model route in
+ * the settings page.
+ *
+ * `read` returns the stored route (null keeps the Wiki-provider path), and
+ * `complete` runs exactly one model call for one raw page. The bridge's
+ * `prompt`/`write` operations keep parsing, page validation, state recording,
+ * SKIP handling and slug uniqueness inside `wiki-synthesize.py`'s own logic.
+ */
+export interface SynthesisModelBinding {
+    read(): SynthesisModelSelection | null;
+    complete(request: {
+        provider: string;
+        model: string;
+        system: string;
+        prompt: string;
+        sessionId: string;
+        signal: AbortSignal;
+    }): Promise<string>;
+}
+/** Workflow operations the bridge must implement for the plugin-side call. */
+type WorkflowOperation = 'scope' | 'synthesize' | 'prompt' | 'write' | 'index';
 export interface WikiArchiverOptions {
     home?: string;
     dshHome?: string;
     now?: () => number;
-    workflow?: (operation: 'scope' | 'synthesize' | 'index', value: string, signal: AbortSignal) => Promise<unknown>;
+    workflow?: (operation: WorkflowOperation, value: string, signal: AbortSignal) => Promise<unknown>;
     execute?: (args: readonly string[], signal: AbortSignal) => Promise<{
         stdout: string;
     }>;
+    /** Plugin-side model call; absent keeps every synthesis on the Wiki provider. */
+    models?: SynthesisModelBinding;
 }
 /**
  * Resolve the harness home the way DSH itself does: an explicit value (config or
@@ -39,3 +64,4 @@ export declare function resolveDshHome(configured: string | undefined, fromEnv: 
 export declare function validateWikiIds(raw: unknown): string[];
 /** Preview is read-only. A short-lived, single-use token authorizes a fixed set. */
 export declare function createWikiArchiver(options?: WikiArchiverOptions): WikiArchiver;
+export {};

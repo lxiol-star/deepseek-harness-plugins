@@ -18,9 +18,11 @@ import type { Context } from '@deepseek-ai/cordis'
 // `session/event` declaration. Erased at build time.
 import type {} from '@deepseek-ai/dsh-session'
 import { EMPTY_FEED } from '../shared/types.ts'
-import { ACK_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, turnDomainSpec } from './domain.ts'
-import type { DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
+import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelSelection } from '../shared/synthesis.ts'
+import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec } from './domain.ts'
+import type { BoardPrefsTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
 import { BoardLedger, describeError, subscribeBoardLedger } from './ledger.ts'
+import { isKnownSynthesisModel, runSynthesisModel, type HostLlmService } from './model-service.ts'
 import { createWikiArchiver } from './wiki-archive.ts'
 import { createBoardRoutes } from './routes.ts'
 import type { BoardFetchRoute, BoardTrustRequest, BoardWebRoute } from './routes.ts'
@@ -34,7 +36,7 @@ export const name = 'dsh-session-board'
  * needs. Cordis runs `apply` only once all three are present, and unloads this
  * plugin if one disappears.
  */
-export const inject = ['storageDomain', 'connection', 'webServer']
+export const inject = ['storageDomain', 'connection', 'webServer', 'llm']
 
 /**
  * Structural views of the three host services consumed here.
@@ -87,6 +89,11 @@ function storageDomainOf(ctx: Context): HostStorageDomainService {
   return Reflect.get(ctx, 'storageDomain') as HostStorageDomainService
 }
 
+/** The composition's `llm` service (see {@link HostLlmService}). */
+function llmOf(ctx: Context): HostLlmService {
+  return Reflect.get(ctx, 'llm') as HostLlmService
+}
+
 /**
  * Wire the ledger, the JSON routes, and the SSE stream.
  * @param ctx - Host plugin context; already carries the injected services.
@@ -102,6 +109,7 @@ export function apply(ctx: Context): () => void {
   const storageDomain = storageDomainOf(ctx)
   const connection = connectionOf(ctx)
   const webServer = webServerOf(ctx)
+  const llm = llmOf(ctx)
 
   /**
    * The ledger exists only once both domains are open, but the routes register
@@ -110,8 +118,17 @@ export function apply(ctx: Context): () => void {
    * the ack route awaits the promise, which always settles.
    */
   let ledger: BoardLedger | null = null
+  /** Open only once the preference domain is available; null keeps the fallback. */
+  let prefs: BoardPrefsTable | null = null
 
-  const wikiArchive = createWikiArchiver()
+  const readSynthesisPref = (): { model: string | null; provider: string | null } => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null }
+
+  const wikiArchive = createWikiArchiver({
+    models: {
+      read: (): SynthesisModelSelection | null => selectionOf(readSynthesisPref()),
+      complete: request => runSynthesisModel(llm, request),
+    },
+  })
   const routes = createBoardRoutes({
     snapshot: () => ledger?.snapshot() ?? EMPTY_FEED,
     ack: async (sessionId) => {
@@ -120,6 +137,15 @@ export function apply(ctx: Context): () => void {
     },
     requestRejection: (request) => connection.requestRejection(request),
     wikiArchive,
+    synthesisModel: {
+      read: readSynthesisPref,
+      write: async (pref) => {
+        const table = prefs
+        if (table === null) throw new Error('STORE_UNAVAILABLE')
+        await table.put(SYNTHESIS_PREFS_KEY, pref)
+      },
+      validate: selection => isKnownSynthesisModel(llm, selection),
+    },
     warn,
   })
 
@@ -155,6 +181,21 @@ export function apply(ctx: Context): () => void {
         + describeError(error),
       )
       return null
+    }
+  })()
+
+  /**
+   * The preference domain opens independently: a broken preference store must
+   * not disable the durable acknowledgement and turn facts, and vice versa.
+   * Failure leaves `prefs` null, which means "no saved route" (Wiki fallback).
+   */
+  void (async (): Promise<void> => {
+    try {
+      const domain = await storageDomain.open(prefsDomainSpec)
+      ctx.effect(() => () => domain.close(), 'dsh-session-board: prefs domain')
+      prefs = domain.table(PREFS_TABLE_NAME)
+    } catch (error) {
+      warn(`dsh-session-board: synthesis preference store unavailable, using the Wiki provider: ${describeError(error)}`)
     }
   })()
 

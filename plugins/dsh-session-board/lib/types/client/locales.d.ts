@@ -9,6 +9,10 @@
 export declare const NS = "session-board";
 /** English copy. */
 export declare const en: {
+    readonly 'batch.error.SCOPE_FAILED': "Could not resolve the selected sessions and their children. Check the local Wiki scripts.";
+    readonly 'batch.error.SYNTHESIS_FAILED': "Synthesis step failed. Raw archives are kept.";
+    readonly 'batch.error.INDEX_FAILED': "Knowledge pages were written but the index update failed.";
+    readonly 'batch.error.SCHEMA_UNAVAILABLE': "Local Wiki SCHEMA.md is missing or empty.";
     readonly 'batch.nativeTitle': "DSH archive results";
     readonly 'batch.native.archived': "Archived in DSH";
     readonly 'batch.native.already-archived': "Already archived in DSH";
@@ -106,7 +110,7 @@ export declare const en: {
     readonly 'batch.preview': "Preview archive and synthesis";
     readonly 'batch.working': "Working…";
     readonly 'batch.confirmTitle': "Confirm archive and synthesis";
-    readonly 'batch.destination': "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.";
+    readonly 'batch.destination': "Archive to ~/wiki/raw/sessions/, then synthesize each session with the model chosen in Session board settings (the Wiki provider when none is chosen), and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.";
     readonly 'batch.planCounts': "{count} to copy · {skipped} unchanged";
     readonly 'batch.confirm': "Confirm archive and synthesis";
     readonly 'batch.cancel': "Cancel";
@@ -134,6 +138,24 @@ export declare const en: {
     readonly 'a11y.list': "Session list";
     readonly 'a11y.card': "Open session {title}";
     readonly 'a11y.groupCount': "{group}, {count} sessions";
+    readonly 'settings.nav': "Session board";
+    readonly 'settings.synthesisGroup': "Archive synthesis";
+    readonly 'settings.synthesisHint': "Model used to synthesize archived sessions into Wiki knowledge pages. The list comes from the models this client can currently use.";
+    readonly 'settings.synthesisModel': "Synthesis model";
+    readonly 'settings.synthesisFallback': "Not specified (use the Wiki provider)";
+    readonly 'settings.synthesisFallbackHint': "When no model is chosen, synthesis keeps using wiki-synthesize.py with the provider configured for the local Wiki.";
+    readonly 'settings.synthesisSaved': "Saved";
+    readonly 'settings.synthesisSaving': "Saving…";
+    readonly 'settings.synthesisLoading': "Loading models…";
+    readonly 'settings.synthesisCatalogUnavailable': "The client model list is unavailable right now. You can still keep the Wiki provider.";
+    readonly 'settings.synthesisUnavailable': "not currently available";
+    readonly 'settings.contextWindow': "context {value}";
+    readonly 'settings.retry': "Retry";
+    readonly 'settings.errorUnknownModel': "That model route is no longer available. Pick another model.";
+    readonly 'settings.errorHostOutdated': "The running Harness host is older than this plugin. Quit and reopen Harness, then try again.";
+    readonly 'settings.errorStoreUnavailable': "The preference could not be stored. Check the host logs and try again.";
+    readonly 'settings.errorInvalidSelection': "That selection is invalid. Pick a model from the list.";
+    readonly 'settings.errorRequestFailed': "Could not reach the Harness host.";
 };
 /** Chinese copy. */
 export declare const zh: Record<keyof typeof en, string>;

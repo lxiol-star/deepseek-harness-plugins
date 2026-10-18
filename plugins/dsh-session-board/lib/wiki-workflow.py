@@ -1,6 +1,9 @@
 """Scoped bridge for the session-board Wiki workflow. Never runs a full archive."""
 import argparse
+import contextlib
+import fcntl
 import importlib.util
+import io
 import json
 import os
 import signal
@@ -14,6 +17,103 @@ def load_script(path, name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextlib.contextmanager
+def quiet():
+    """Swallow helper logging so stdout stays one JSON document.
+
+    `wiki-synthesize.py`'s helpers log through `print` (state corruption
+    warnings, rejected pages, slug rewrites). The provider path captures those
+    in a child process, but the plugin path calls the helpers in-process, so
+    their text must not reach the JSON the host parses.
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
+
+
+def synthesize_module(root):
+    return load_script(root / 'scripts' / 'wiki-synthesize.py', 'board_synth')
+
+
+def state_path(root):
+    return root / 'scripts' / '.synthesize-state.json'
+
+
+def validate_raw_page(root, page):
+    target = (root / page).resolve()
+    if not page.startswith('raw/sessions/') or not page.endswith('.md') or not target.is_relative_to(root / 'raw' / 'sessions'):
+        raise ValueError('INVALID_RESULT')
+    if not target.is_file():
+        raise ValueError('INVALID_RESULT')
+    return target
+
+
+def require_schema(root):
+    schema = root / 'SCHEMA.md'
+    if not schema.is_file() or not schema.read_text(encoding='utf-8').strip():
+        raise ValueError('SCHEMA_UNAVAILABLE')
+
+
+def require_exact_page(root, synth, page):
+    matches = [item for item in synth.collect_sessions(str(root)) if page in item]
+    if matches != [page]:
+        raise ValueError('SELECTION_MISMATCH')
+
+
+def relevant_pages(root, page):
+    """Knowledge pages whose frontmatter block mentions this raw page."""
+    pages = []
+    for directory in ('projects', 'concepts', 'experience', 'patterns', 'issues', 'tools', 'entities', 'digests', 'comparisons', 'decisions'):
+        for file in (root / directory).glob('*.md'):
+            content = file.read_text(encoding='utf-8')
+            if page in content.split('\n---', 1)[0]:
+                pages.append(str(file.relative_to(root)))
+    return sorted(pages)
+
+
+def build_prompt(synth, page, text, candidates):
+    """Build the same user prompt `wiki-synthesize.py`'s call_chat sends."""
+    whitelist = ''
+    if candidates:
+        whitelist = (
+            '可链接页面白名单（库中真实存在的 slug，wikilink 只能从这里选，'
+            '或链接你本轮同时新建的页面）：\n'
+            + '、'.join(candidates) + '\n\n'
+        )
+    return (
+        f'会话相对路径：{page}\n\n'
+        f'{whitelist}'
+        f'以下是会话归档原文全文：\n\n{text}\n\n'
+        f'——会话归档原文到此结束——\n'
+        f'现在严格按 system 指令作答：无沉淀价值则只输出一行 SKIP；'
+        f'否则输出 1-3 个知识页（每页以 --- frontmatter 开头）。'
+        f'禁止续写、复述或摘录上面的会话原文。'
+    )
+
+
+def acquire_write_lock(synth):
+    """Take `wiki-synthesize.py`'s own single-instance lock without exiting.
+
+    The provider path exits 3 when the lock is held; the plugin path returns a
+    per-session failure instead so the raw archive is kept and the batch
+    continues.
+    """
+    path = getattr(synth, 'LOCK_PATH', os.path.join(os.path.expanduser('~'), '.wiki-synthesize.lock'))
+    handle = open(path, 'w')
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def release_write_lock(handle):
+    try:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        handle.close()
 
 
 def header(path, archive):
@@ -110,14 +210,6 @@ def synthesize(args, archive):
     if archive.redact_credentials(text) != text:
         return {'status': 'sensitive', 'pages': [], 'error': 'SENSITIVE_CONTENT'}
     output = ''
-    def relevant_pages():
-        pages = []
-        for directory in ('projects', 'concepts', 'experience', 'patterns', 'issues', 'tools', 'entities', 'digests', 'comparisons', 'decisions'):
-            for file in (root / directory).glob('*.md'):
-                content = file.read_text(encoding='utf-8')
-                if page in content.split('\n---', 1)[0]:
-                    pages.append(str(file.relative_to(root)))
-        return sorted(pages)
     for attempt in range(2):
         try:
             run = run_child(['/usr/bin/python3', str(root / 'scripts' / 'wiki-synthesize.py'),
@@ -135,10 +227,116 @@ def synthesize(args, archive):
         valid = state.get('sha256') == hashlib.sha256(text.encode('utf-8')).hexdigest()
         reason = state.get('reason', '')
         if run.returncode == 0 and valid and reason not in ('api-error', 'parse-error'):
-            return {'status': 'synthesized' if state.get('status') == 'synthesized' else 'skipped', 'pages': sorted(set(pages + relevant_pages()))}
+            return {'status': 'synthesized' if state.get('status') == 'synthesized' else 'skipped', 'pages': sorted(set(pages + relevant_pages(root, page)))}
         if reason not in ('api-error', 'parse-error') or attempt == 1:
             return {'status': 'failed', 'pages': pages, 'error': reason if reason in ('api-error', 'parse-error') else 'SYNTHESIS_FAILED'}
     raise RuntimeError('SYNTHESIS_FAILED')
+
+
+def prepare(args, archive):
+    """Return the prompt for the plugin-selected model, or a terminal result.
+
+    Validation mirrors the provider path before any text leaves the machine:
+    exact page match, readable SCHEMA, and the same credential scan the
+    provider path performs (`sensitive`). A page whose content already has a
+    final conclusion is reported as `skipped` so no model call happens.
+    """
+    root = Path(args.wiki_root).resolve()
+    page = args.value
+    target = validate_raw_page(root, page)
+    require_schema(root)
+    synth = synthesize_module(root)
+    require_exact_page(root, synth, page)
+    text = target.read_text(encoding='utf-8')
+    if archive.redact_credentials(text) != text:
+        return {'status': 'sensitive', 'pages': [], 'error': 'SENSITIVE_CONTENT'}
+    with quiet():
+        state = synth.load_state(str(state_path(root)))
+        candidates = synth.suggest_link_candidates(text, synth.collect_existing_slugs(str(root)))
+    entry = state.get(page)
+    if isinstance(entry, dict) and entry.get('sha256') == synth.sha256_text(text) and synth.is_final(entry):
+        return {'status': 'skipped', 'pages': relevant_pages(root, page)}
+    # Bound the prompt the same way the provider path does when a session is
+    # longer than its configured context; the DSH route carries no
+    # longContextModel, so the safe truncation applies.
+    if len(text) > synth.LONG_CONTEXT_THRESHOLD:
+        text = synth.truncate_session_text(text)
+    return {'page': page, 'prompt': {'system': synth.SYSTEM_PROMPT, 'user': build_prompt(synth, page, text, candidates)}}
+
+
+def write(args, archive):
+    """Validate model output and write its pages through `wiki-synthesize.py`.
+
+    The output is parsed by the script's own `parse_pages`, every page goes
+    through its `process_page` (SKIP, slug uniqueness, frontmatter validation,
+    wikilink sanitizing, sources), and the script's state file records the
+    conclusion exactly as a provider run would.
+    """
+    root = Path(args.wiki_root).resolve()
+    try:
+        payload = json.loads(args.value)
+    except ValueError:
+        raise ValueError('INVALID_RESULT')
+    if not isinstance(payload, dict):
+        raise ValueError('INVALID_RESULT')
+    page = payload.get('page')
+    output = payload.get('output')
+    if not isinstance(page, str) or not isinstance(output, str) or not output.strip() or len(output) > 1_000_000:
+        raise ValueError('INVALID_RESULT')
+    target = validate_raw_page(root, page)
+    require_schema(root)
+    synth = synthesize_module(root)
+    require_exact_page(root, synth, page)
+    text = target.read_text(encoding='utf-8')
+    sha = synth.sha256_text(text)
+    lock = acquire_write_lock(synth)
+    if lock is None:
+        return {'status': 'failed', 'pages': [], 'error': 'STATE_UNAVAILABLE'}
+    try:
+        with quiet():
+            state = synth.load_state(str(state_path(root)))
+            entry = state.get(page)
+            if isinstance(entry, dict) and entry.get('sha256') == sha and synth.is_final(entry):
+                return {'status': 'skipped', 'pages': relevant_pages(root, page)}
+            parsed = synth.parse_pages(output)
+            if parsed == 'SKIP':
+                state[page] = {'sha256': sha, 'status': 'skipped', 'reason': 'ai-no-value', 'date': synth.today_str()}
+                synth.save_state(str(state_path(root)), state)
+                return {'status': 'skipped', 'pages': []}
+            if not parsed:
+                state[page] = {'sha256': sha, 'status': 'skipped', 'reason': 'parse-error', 'date': synth.today_str()}
+                synth.save_state(str(state_path(root)), state)
+                return {'status': 'failed', 'pages': [], 'error': 'PARSE_ERROR'}
+            # Pages created in this batch may link to each other, so the
+            # whitelist is collected before any page is written.
+            batch_slugs = set()
+            for fm, _body in parsed:
+                checked = synth.validate_file_field((fm or {}).get('file'))
+                if checked:
+                    batch_slugs.add(synth.norm_slug(checked[1]))
+            valid_slugs = synth.collect_existing_slugs(str(root)) | batch_slugs
+            written_count = 0
+            written_pages = []
+            rejected_count = 0
+            for fm, body in parsed:
+                ok, message = synth.process_page(str(root), fm, body, page, False, valid_slugs=valid_slugs)
+                if ok:
+                    written_count += 1
+                    written_pages.extend(re.findall(r'已写入 ([a-z0-9/-]+\.md)', message))
+                else:
+                    rejected_count += 1
+            if written_count == 0:
+                state[page] = {'sha256': sha, 'status': 'skipped', 'reason': 'parse-error', 'date': synth.today_str()}
+                synth.save_state(str(state_path(root)), state)
+                return {'status': 'failed', 'pages': [], 'error': 'PARSE_ERROR'}
+            reason = f'建页 {written_count} 个' + (f'，拒绝 {rejected_count} 个' if rejected_count else '')
+            state[page] = {'sha256': sha, 'status': 'synthesized', 'reason': reason, 'date': synth.today_str()}
+            synth.save_state(str(state_path(root)), state)
+            return {'status': 'synthesized', 'pages': sorted(set(written_pages + relevant_pages(root, page)))}
+    except ValueError:
+        raise
+    finally:
+        release_write_lock(lock)
 
 
 def run_child(command, **kwargs):
@@ -165,7 +363,7 @@ def run_child(command, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['scope', 'synthesize', 'index'])
+    parser.add_argument('operation', choices=['scope', 'synthesize', 'prompt', 'write', 'index'])
     parser.add_argument('--wiki-root', required=True)
     parser.add_argument('--dsh-home', required=True)
     parser.add_argument('--value', default='')
@@ -179,6 +377,10 @@ def main():
         result = scope(args, archive)
     elif args.operation == 'synthesize':
         result = synthesize(args, archive)
+    elif args.operation == 'prompt':
+        result = prepare(args, archive)
+    elif args.operation == 'write':
+        result = write(args, archive)
     else:
         run = run_child(['/usr/bin/python3', str(root / 'scripts' / 'wiki-index.py'), '--wiki-root', str(root)], capture_output=True, timeout=120)
         result = {'status': 'updated' if run.returncode == 0 else 'failed'}

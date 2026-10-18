@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
-import { homedir } from 'node:os'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWikiArchiver, validateWikiIds, resolveDshHome, resolveSynthesisProvider } from '../src/host/wiki-archive.ts'
 import { createBoardRoutes, BOARD_WIKI_ARCHIVE_PATH } from '../src/host/routes.ts'
 import { EMPTY_FEED } from '../src/shared/types.ts'
 import type { WikiArchiver } from '../src/host/wiki-archive.ts'
+import { pythonAvailable } from './wiki-test-environment.ts'
 
 const workflow = async (operation: string, value: string) => operation === 'scope' ? { entries: JSON.parse(value).map((session: string) => ({ session, source: `source/${session}`, parent: null, role: 'main', evidence: 'header', snapshot: false })), missing: [] } : operation === 'synthesize' ? { status: 'skipped', pages: [] } : { status: 'updated' }
 
@@ -170,5 +172,112 @@ describe('authenticated connection route handler', () => {
     const response = await route.fetch(request({ action: 'commit', token: 'token' }))
     expect(response.status).toBe(200)
     expect((await response.json()).result.archived).toBe(1)
+  })
+})
+
+describe('plugin-selected synthesis model', () => {
+  const page = 'raw/sessions/host/dsh/id.md'
+  const selection = { provider: 'alpha', model: 'pro' }
+
+  /** A commit fixture whose archive rows are real `--full` results for one id. */
+  const fixture = (options: {
+    selection?: typeof selection | null
+    run?: (operation: string, value: string) => Promise<unknown>
+    complete?: () => Promise<string>
+  } = {}) => {
+    const calls: string[] = []
+    const run = vi.fn(async (operation: string, value: string) => {
+      calls.push(`${operation}:${value}`)
+      if (operation === 'scope') return workflow('scope', value)
+      if (options.run !== undefined) return await options.run(operation, value)
+      if (operation === 'prompt') return { page, prompt: { system: 'SYSTEM PROMPT', user: 'USER PROMPT' } }
+      if (operation === 'write') return { status: 'synthesized', pages: ['experience/example.md'] }
+      if (operation === 'synthesize') return { status: 'synthesized', pages: ['experience/example.md'] }
+      return { status: 'updated' }
+    })
+    const complete = vi.fn(options.complete ?? (async () => 'PAGE BODY'))
+    const chosen = options.selection === undefined ? selection : options.selection
+    const models = {
+      read: () => chosen,
+      complete: () => complete(),
+    }
+    const execute = async (args: readonly string[]) => ({ stdout: output([args[args.indexOf('--exact-session') + 1]!], args.includes('--dry-run')) })
+    const service = createWikiArchiver({ home: '/test', dshHome: '/test/dev', workflow: run, execute, models })
+    return { service, run, complete, calls }
+  }
+
+  it('calls the selected model through the plugin and writes through the bridge', async () => {
+    const f = fixture()
+    const plan = await f.service.preview(['id'])
+    const result = await f.service.commit(plan.token)
+    expect(result.workflow?.synthesis).toEqual([{ session: 'id', page, status: 'synthesized', pages: ['experience/example.md'] }])
+    expect(f.calls.some(call => call.startsWith('synthesize:'))).toBe(false)
+    expect(f.calls.filter(call => call.startsWith('prompt:'))).toEqual([`prompt:${page}`])
+    expect(f.complete).toHaveBeenCalledTimes(1)
+    const promptCall = f.run.mock.calls.find(([operation]) => operation === 'prompt')
+    expect(promptCall?.[1]).toBe(page)
+    const writeCall = f.run.mock.calls.find(([operation]) => operation === 'write')
+    expect(JSON.parse(writeCall?.[1] as string)).toEqual({ page, output: 'PAGE BODY' })
+  })
+
+  it('keeps the Wiki-provider path when no model is selected', async () => {
+    const f = fixture({ selection: null })
+    const plan = await f.service.preview(['id'])
+    const result = await f.service.commit(plan.token)
+    expect(f.calls.some(call => call.startsWith('synthesize:'))).toBe(true)
+    expect(f.calls.some(call => call.startsWith('prompt:'))).toBe(false)
+    expect(f.complete).not.toHaveBeenCalled()
+    expect(result.workflow?.synthesis[0]?.status).toBe('synthesized')
+  })
+
+  it('reports a model failure per session, keeps the raw archive, and continues', async () => {
+    const f = fixture({ complete: async () => { throw new Error('provider exploded') } })
+    const plan = await f.service.preview(['id'])
+    const result = await f.service.commit(plan.token)
+    expect(result.archived).toBe(1)
+    expect(result.workflow?.synthesis[0]).toMatchObject({ session: 'id', page, status: 'failed', error: 'SYNTHESIS_FAILED' })
+    expect(result.workflow?.index).toBe('not-needed')
+    expect(f.calls.some(call => call.startsWith('write:'))).toBe(false)
+  })
+
+  it('never calls the model for a sensitive page or an unchanged conclusion', async () => {
+    const sensitive = fixture({ run: async (operation) => operation === 'prompt' ? { status: 'sensitive', pages: [], error: 'SENSITIVE_CONTENT' } : {} })
+    const sensitiveResult = await sensitive.service.commit((await sensitive.service.preview(['id'])).token)
+    expect(sensitiveResult.workflow?.synthesis[0]).toMatchObject({ status: 'sensitive', error: 'SENSITIVE_CONTENT' })
+    expect(sensitive.complete).not.toHaveBeenCalled()
+
+    const skipped = fixture({ run: async (operation) => operation === 'prompt' ? { status: 'skipped', pages: [] } : {} })
+    const skippedResult = await skipped.service.commit((await skipped.service.preview(['id'])).token)
+    expect(skippedResult.workflow?.synthesis[0]).toMatchObject({ status: 'skipped', pages: [] })
+    expect(skipped.complete).not.toHaveBeenCalled()
+  })
+
+  it('reports a rejected write as failed without claiming pages', async () => {
+    const f = fixture({ run: async (operation) => operation === 'prompt'
+      ? { page, prompt: { system: 'SYS', user: 'USER' } }
+      : operation === 'write' ? { status: 'failed', pages: [], error: 'PARSE_ERROR' } : {} })
+    const result = await f.service.commit((await f.service.preview(['id'])).token)
+    expect(result.archived).toBe(1)
+    expect(result.workflow?.synthesis[0]).toMatchObject({ status: 'failed', error: 'PARSE_ERROR' })
+  })
+})
+
+describe.skipIf(!pythonAvailable)('workflow failure classification', () => {
+  /** One synthetic wiki root with an optional archive stub. */
+  function fixture(schema: string, archive?: string) {
+    const home = mkdtempSync(join(tmpdir(), 'board-workflow-failure-'))
+    const wiki = join(home, 'wiki'), scripts = join(wiki, 'scripts')
+    mkdirSync(scripts, { recursive: true })
+    writeFileSync(join(wiki, 'SCHEMA.md'), schema)
+    if (archive !== undefined) writeFileSync(join(scripts, 'wiki-archive.py'), archive)
+    return createWikiArchiver({ home, dshHome: join(home, 'dev') })
+  }
+
+  it('passes the bridge structured error through instead of a generic code', async () => {
+    await expect(fixture('').preview(['id'])).rejects.toThrow('SCHEMA_UNAVAILABLE')
+  })
+
+  it('names the failed step when the bridge dies without a structured error', async () => {
+    await expect(fixture('# schema', 'raise SystemExit(2)\n').preview(['id'])).rejects.toThrow('SCOPE_FAILED')
   })
 })

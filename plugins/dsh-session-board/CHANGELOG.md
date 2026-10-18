@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-10-19
+
+- 新增「会话看板」设置页（设置 → 会话看板）的「归档提炼」分组：可选择归档提炼使用的供应商/模型，也可选“不指定（沿用 Wiki provider）”。
+- 模型选项来自当前 DSH 客户端的模型列表（客户端 `ctx.remote.session.modelCatalog()`），不写死列表、不读 Wiki 配置；显示供应商 / 模型 / 上下文窗口（目录提供时）。
+- 选择即时保存到宿主独立存储域 `dsh_session_board_prefs`（version 1，`prefs` 表，key `synthesis`），经已认证路由 `POST /api/session-board/synthesis-model` 读写；保存前校验该路由仍是宿主已知的模型，未知值拒绝。
+- 已选择模型时由插件宿主经 DSH `llm` 服务发起调用，模型输出交给 `wiki-synthesize.py` 的 `parse_pages` / `process_page` / 状态文件逻辑写入知识页；`wiki-workflow.py` 新增 `prompt` / `write` 操作，未选择时原 `--provider` 路径保持不变。
+- 模型报错、输出无法解析或写入被拒时保留原文归档，并在批次结果中标记失败；SKIP、slug 唯一、sources 与写入校验与脚本路径一致。
+- 工作流失败不再一律显示“Wiki 工作流不可用”：桥接脚本的结构化错误会透传到界面，并按步骤区分“核对会话失败 / 提炼失败 / 索引更新失败 / SCHEMA 缺失”，便于定位脚本、环境或 provider 的具体问题。
+
 ## 0.2.6 — 2026-10-19
 
 - 提炼 provider 可由用户文件 `~/.dsh-session-board.json` 的 `synthesisProvider` 指定，发布包不含任何账号相关的默认值。

@@ -1,6 +1,32 @@
 // src/shared/types.ts
 var EMPTY_FEED = { acks: {}, turns: {} };
 
+// src/shared/synthesis.ts
+var SYNTHESIS_PREFS_KEY = "synthesis";
+var SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
+var SYNTHESIS_MODEL_CAPABILITY = 1;
+var ROUTE_PART_MAX = 200;
+function asRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function routePart(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed.length > ROUTE_PART_MAX) return null;
+  return /[\u0000-\u001f\u007f]/u.test(trimmed) ? null : trimmed;
+}
+function parseSynthesisPref(raw) {
+  const record2 = asRecord(raw);
+  const model = routePart(record2?.model);
+  const provider = routePart(record2?.provider);
+  if (model === null || provider === null) return { model: null, provider: null };
+  return { model, provider };
+}
+function selectionOf(pref) {
+  if (pref.model === null || pref.provider === null) return null;
+  return { provider: pref.provider, model: pref.model };
+}
+
 // src/host/domain.ts
 var UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/;
 function domainTable(schema) {
@@ -24,8 +50,10 @@ function defineDomain(spec) {
 }
 var ACK_DOMAIN_NAME = "dsh_session_board";
 var TURN_DOMAIN_NAME = "dsh_session_board_turns";
+var PREFS_DOMAIN_NAME = "dsh_session_board_prefs";
 var ACK_TABLE_NAME = "acks";
 var TURN_TABLE_NAME = "turn_stats";
+var PREFS_TABLE_NAME = "prefs";
 var ERROR_NOTE_MAX = 160;
 var ELLIPSIS = "\u2026";
 function truncateErrorNote(text, max = ERROR_NOTE_MAX) {
@@ -81,6 +109,14 @@ var turnRecordSchema = {
     };
   }
 };
+var prefsRecordSchema = {
+  parse(raw) {
+    const model = stringOrNull(fieldOf(raw, "model"));
+    const provider = stringOrNull(fieldOf(raw, "provider"));
+    if (model === null || provider === null) return { model: null, provider: null };
+    return { model, provider };
+  }
+};
 var ackDomainSpec = defineDomain({
   name: ACK_DOMAIN_NAME,
   version: 1,
@@ -95,6 +131,14 @@ var turnDomainSpec = defineDomain({
   invalidRecords: "backup-and-skip",
   tables: {
     [TURN_TABLE_NAME]: domainTable(turnRecordSchema)
+  }
+});
+var prefsDomainSpec = defineDomain({
+  name: PREFS_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: "backup-and-skip",
+  tables: {
+    [PREFS_TABLE_NAME]: domainTable(prefsRecordSchema)
   }
 });
 
@@ -468,14 +512,14 @@ var BoardLedger = class {
 };
 function subscribeBoardLedger(ctx, ledgerReady) {
   ctx.on("session/event", (session, event) => {
-    const envelope = asRecord(event);
+    const envelope = asRecord2(event);
     if (envelope === null) return;
     const type = envelope["type"];
     const sessionId = readSessionId(session);
     if (sessionId === null) return;
     const time = readEventTime(envelope["time"]);
     if (time === null) return;
-    const data = asRecord(envelope["data"]);
+    const data = asRecord2(envelope["data"]);
     if (type === "turn/start") {
       void ledgerReady.then((ledger) => {
         ledger?.recordTurnStart(sessionId, time);
@@ -501,16 +545,16 @@ function describeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 function readSessionId(session) {
-  const envelope = asRecord(session);
+  const envelope = asRecord2(session);
   return envelope === null ? null : readString(envelope["id"]);
 }
 function readEventTime(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 function readTurnEndFacts(time, reason) {
-  const envelope = asRecord(reason);
+  const envelope = asRecord2(reason);
   const kind = envelope === null ? null : readString(envelope["kind"]);
-  const error = envelope === null ? null : asRecord(envelope["error"]);
+  const error = envelope === null ? null : asRecord2(envelope["error"]);
   const message = error === null ? null : readString(error["message"]);
   return { time, kind, errorMessage: kind === "error" ? message : null };
 }
@@ -535,13 +579,13 @@ function readWaitEvent(type, time, data) {
 }
 function readQuestionResultId(data) {
   if (data === null) return null;
-  const message = asRecord(data["message"]);
+  const message = asRecord2(data["message"]);
   if (message === null) return null;
-  const source = asRecord(message["source"]);
+  const source = asRecord2(message["source"]);
   const fromSource = source === null ? null : readString(source["callId"]);
   return fromSource ?? readString(message["toolCallId"]);
 }
-function asRecord(value) {
+function asRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 }
 function readString(value) {
@@ -549,6 +593,49 @@ function readString(value) {
 }
 function emptySection() {
   return /* @__PURE__ */ Object.create(null);
+}
+
+// src/host/model-service.ts
+var SYNTHESIS_MAX_TOKENS = 8192;
+async function isKnownSynthesisModel(llm, selection) {
+  let providers;
+  try {
+    providers = llm.listProviders();
+  } catch {
+    return false;
+  }
+  if (!providers.some((provider) => provider.id === selection.provider)) return false;
+  try {
+    const models = await llm.listModels(selection.provider);
+    return models.some((model) => model.id === selection.model);
+  } catch {
+    return false;
+  }
+}
+async function runSynthesisModel(llm, request) {
+  const options = {
+    provider: request.provider,
+    model: request.model,
+    system: request.system,
+    messages: [{ role: "user", content: [{ type: "text", text: request.prompt }] }],
+    maxTokens: SYNTHESIS_MAX_TOKENS,
+    sessionId: request.sessionId,
+    signal: request.signal
+  };
+  let streamed = "";
+  let finished;
+  const blockText = [];
+  for await (const chunk of llm.stream(options)) {
+    if (chunk.type === "text-delta" && typeof chunk.text === "string") streamed += chunk.text;
+    else if (chunk.type === "block-end" && chunk.block?.type === "text" && typeof chunk.block.text === "string") blockText.push(chunk.block.text);
+    else if (chunk.type === "finish") finished = chunk.reason?.kind;
+  }
+  if (finished === "error" || finished === "aborted" || finished === "max-tokens" || finished === void 0) {
+    throw new Error("SYNTHESIS_MODEL_FAILED");
+  }
+  const output = streamed.trim() === "" ? blockText.join("") : streamed;
+  if (output.trim() === "") throw new Error("SYNTHESIS_MODEL_EMPTY");
+  return output;
 }
 
 // src/host/wiki-archive.ts
@@ -690,6 +777,25 @@ function validateResult(raw, ids, dryRun) {
   }
   return summary;
 }
+function parsePreparedPrompt(raw, session, page) {
+  const value = typeof raw === "object" && raw !== null ? raw : {};
+  const status = value.status;
+  if (status === "sensitive" || status === "skipped") {
+    const parsed = parseWikiWorkflow({
+      synthesis: [{ status, pages: Array.isArray(value.pages) ? value.pages : [], ...status === "sensitive" ? { error: "SENSITIVE_CONTENT" } : {}, session, page }],
+      index: "not-needed"
+    });
+    return { terminal: parsed.synthesis[0] };
+  }
+  const prompt = typeof value.prompt === "object" && value.prompt !== null ? value.prompt : null;
+  if (prompt === null || typeof prompt.system !== "string" || typeof prompt.user !== "string") throw new WikiArchiveError("INVALID_RESULT");
+  return { prompt: { system: prompt.system, user: prompt.user } };
+}
+function parseWrittenRow(raw, session, page) {
+  const value = typeof raw === "object" && raw !== null ? { ...raw } : {};
+  const parsed = parseWikiWorkflow({ synthesis: [{ ...value, session, page }], index: "not-needed" });
+  return parsed.synthesis[0];
+}
 function createWikiArchiver(options = {}) {
   const home = resolve(options.home ?? homedir());
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME);
@@ -730,9 +836,20 @@ function createWikiArchiver(options = {}) {
       return parsed;
     } catch (error) {
       if (error instanceof WikiArchiveError) throw error;
-      throw new WikiArchiveError(signal.aborted ? "CANCELLED" : "WORKFLOW_UNAVAILABLE");
+      if (signal.aborted) throw new WikiArchiveError("CANCELLED");
+      const stdout = error.stdout;
+      if (typeof stdout === "string") {
+        try {
+          const parsed = JSON.parse(stdout);
+          if (typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "string") throw new WikiArchiveError(parsed.error);
+        } catch (inner) {
+          if (inner instanceof WikiArchiveError) throw inner;
+        }
+      }
+      throw new WikiArchiveError(operation === "scope" ? "SCOPE_FAILED" : operation === "index" ? "INDEX_FAILED" : "SYNTHESIS_FAILED");
     }
   });
+  const models = options.models;
   const previews = /* @__PURE__ */ new Map();
   const controller = new AbortController();
   let busy = false;
@@ -761,6 +878,32 @@ function createWikiArchiver(options = {}) {
     } finally {
       busy = false;
     }
+  };
+  const synthesizeOne = async (session, page) => {
+    let selected = null;
+    if (models !== void 0) {
+      try {
+        selected = models.read();
+      } catch {
+        selected = null;
+      }
+    }
+    if (selected === null || models === void 0) {
+      const response = await workflow("synthesize", page, controller.signal);
+      const parsed = parseWikiWorkflow({ synthesis: [{ ...typeof response === "object" && response !== null ? response : {}, session, page }], index: "not-needed" });
+      return parsed.synthesis[0];
+    }
+    const prepared = parsePreparedPrompt(await workflow("prompt", page, controller.signal), session, page);
+    if ("terminal" in prepared) return prepared.terminal;
+    const output = await models.complete({
+      provider: selected.provider,
+      model: selected.model,
+      system: prepared.prompt.system,
+      prompt: prepared.prompt.user,
+      sessionId: session,
+      signal: controller.signal
+    });
+    return parseWrittenRow(await workflow("write", JSON.stringify({ page, output }), controller.signal), session, page);
   };
   return {
     preview: async (raw) => exclusive(async () => {
@@ -813,9 +956,7 @@ function createWikiArchiver(options = {}) {
       for (const row of summary.results) {
         if (!row.page || !["archived", "skipped"].includes(row.action)) continue;
         try {
-          const response = await workflow("synthesize", row.page, controller.signal);
-          const parsed = parseWikiWorkflow({ synthesis: [{ ...typeof response === "object" && response !== null ? response : {}, session: row.session, page: row.page }], index: "not-needed" });
-          synthesis.push(...parsed.synthesis);
+          synthesis.push(await synthesizeOne(row.session, row.page));
         } catch {
           if (closed) throw new WikiArchiveError("CANCELLED");
           synthesis.push({ session: row.session, page: row.page, status: "failed", pages: [], error: "SYNTHESIS_FAILED" });
@@ -846,6 +987,7 @@ var BOARD_API_PREFIX = "/api/session-board";
 var BOARD_SNAPSHOT_PATH = `${BOARD_API_PREFIX}/board`;
 var BOARD_ACK_PATH = `${BOARD_API_PREFIX}/ack`;
 var BOARD_WIKI_ARCHIVE_PATH = WIKI_ARCHIVE_PATH;
+var BOARD_SYNTHESIS_MODEL_PATH = SYNTHESIS_MODEL_PATH;
 var BOARD_STREAM_PREFIX = "/dsh-session-board";
 var BOARD_STREAM_PATH = `${BOARD_STREAM_PREFIX}/stream`;
 var SESSION_ID_MAX = 200;
@@ -916,7 +1058,7 @@ data: ${JSON.stringify(feed)}
       if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       try {
-        if (value.action === "capabilities") return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY } });
+        if (value.action === "capabilities") return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } });
         if (value.action === "preview") {
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds));
           return jsonResponse(200, { ok: true, preview });
@@ -954,6 +1096,41 @@ data: ${JSON.stringify(feed)}
       }
     }
   };
+  const synthesisModelRoute = {
+    path: BOARD_SYNTHESIS_MODEL_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      const store = options.synthesisModel;
+      if (store === void 0) return jsonResponse(503, { ok: false, error: "STORE_UNAVAILABLE" });
+      const body = await readJsonBody(request);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      const value = body;
+      if (value.action === "read") {
+        const pref2 = readStoredPref(store, options.warn);
+        return jsonResponse(200, { ok: true, selection: selectionOf(pref2) });
+      }
+      if (value.action !== "write") return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      const pref = readSynthesisPrefBody(value);
+      if (pref === null) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      const selection = selectionOf(pref);
+      if (selection !== null) {
+        let known = false;
+        try {
+          known = await store.validate(selection);
+        } catch {
+          known = false;
+        }
+        if (!known) return jsonResponse(400, { ok: false, error: "UNKNOWN_MODEL" });
+      }
+      try {
+        await store.write(pref);
+      } catch {
+        return jsonResponse(500, { ok: false, error: "STORE_UNAVAILABLE" });
+      }
+      return jsonResponse(200, { ok: true, selection });
+    }
+  };
   const streamRoute = {
     kind: "prefix",
     path: BOARD_STREAM_PREFIX,
@@ -988,7 +1165,7 @@ data: ${JSON.stringify(feed)}
     }
   };
   return {
-    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute],
+    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute],
     streamRoute,
     broadcast,
     close: () => {
@@ -1001,6 +1178,22 @@ data: ${JSON.stringify(feed)}
       held.clear();
     }
   };
+}
+function readStoredPref(store, warn) {
+  try {
+    return parseSynthesisPref(store.read());
+  } catch (error) {
+    warn(`dsh-session-board: synthesis preference read failed: ${describeError2(error)}`);
+    return { model: null, provider: null };
+  }
+}
+function readSynthesisPrefBody(body) {
+  const model = body.model;
+  const provider = body.provider;
+  if (model === null && provider === null) return { model: null, provider: null };
+  if (typeof model !== "string" || typeof provider !== "string") return null;
+  const pref = parseSynthesisPref({ model, provider });
+  return pref.model === null || pref.provider === null ? null : pref;
 }
 function jsonResponse(status, payload) {
   return new Response(JSON.stringify(payload), {
@@ -1032,7 +1225,7 @@ function describeError2(error) {
 
 // src/host/plugin.ts
 var name = "dsh-session-board";
-var inject = ["storageDomain", "connection", "webServer"];
+var inject = ["storageDomain", "connection", "webServer", "llm"];
 function connectionOf(ctx) {
   return Reflect.get(ctx, "connection");
 }
@@ -1042,6 +1235,9 @@ function webServerOf(ctx) {
 function storageDomainOf(ctx) {
   return Reflect.get(ctx, "storageDomain");
 }
+function llmOf(ctx) {
+  return Reflect.get(ctx, "llm");
+}
 function apply(ctx) {
   const warn = (message) => {
     ctx.logger?.warn?.(message);
@@ -1049,8 +1245,16 @@ function apply(ctx) {
   const storageDomain = storageDomainOf(ctx);
   const connection = connectionOf(ctx);
   const webServer = webServerOf(ctx);
+  const llm = llmOf(ctx);
   let ledger = null;
-  const wikiArchive = createWikiArchiver();
+  let prefs = null;
+  const readSynthesisPref = () => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null };
+  const wikiArchive = createWikiArchiver({
+    models: {
+      read: () => selectionOf(readSynthesisPref()),
+      complete: (request) => runSynthesisModel(llm, request)
+    }
+  });
   const routes = createBoardRoutes({
     snapshot: () => ledger?.snapshot() ?? EMPTY_FEED,
     ack: async (sessionId) => {
@@ -1059,6 +1263,15 @@ function apply(ctx) {
     },
     requestRejection: (request) => connection.requestRejection(request),
     wikiArchive,
+    synthesisModel: {
+      read: readSynthesisPref,
+      write: async (pref) => {
+        const table = prefs;
+        if (table === null) throw new Error("STORE_UNAVAILABLE");
+        await table.put(SYNTHESIS_PREFS_KEY, pref);
+      },
+      validate: (selection) => isKnownSynthesisModel(llm, selection)
+    },
     warn
   });
   const ledgerReady = (async () => {
@@ -1086,6 +1299,15 @@ function apply(ctx) {
         "dsh-session-board: durable store unavailable, acks and turn facts are disabled: " + describeError(error)
       );
       return null;
+    }
+  })();
+  void (async () => {
+    try {
+      const domain = await storageDomain.open(prefsDomainSpec);
+      ctx.effect(() => () => domain.close(), "dsh-session-board: prefs domain");
+      prefs = domain.table(PREFS_TABLE_NAME);
+    } catch (error) {
+      warn(`dsh-session-board: synthesis preference store unavailable, using the Wiki provider: ${describeError(error)}`);
     }
   })();
   for (const route of routes.fetchRoutes) {

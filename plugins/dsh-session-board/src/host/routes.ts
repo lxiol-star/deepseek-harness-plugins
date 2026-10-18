@@ -15,6 +15,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { BoardFeed } from '../shared/types.ts'
 import { EMPTY_FEED } from '../shared/types.ts'
 import { WIKI_ARCHIVE_PATH, WIKI_WORKFLOW_CAPABILITY } from '../shared/archive.ts'
+import {
+  SYNTHESIS_MODEL_CAPABILITY,
+  SYNTHESIS_MODEL_PATH,
+  parseSynthesisPref,
+  selectionOf,
+  type SynthesisModelPref,
+  type SynthesisModelSelection,
+} from '../shared/synthesis.ts'
 import { WikiArchiveError, validateWikiIds, type WikiArchiver } from './wiki-archive.ts'
 
 /**
@@ -29,6 +37,8 @@ export const BOARD_SNAPSHOT_PATH = `${BOARD_API_PREFIX}/board`
 export const BOARD_ACK_PATH = `${BOARD_API_PREFIX}/ack`
 /** POST { sessionIds } → archive selected sessions into the local Wiki raw layer. */
 export const BOARD_WIKI_ARCHIVE_PATH = WIKI_ARCHIVE_PATH
+/** POST { action } → read or write the saved synthesis-model preference. */
+export const BOARD_SYNTHESIS_MODEL_PATH = SYNTHESIS_MODEL_PATH
 /** Prefix owned by the raw SSE route. */
 export const BOARD_STREAM_PREFIX = '/dsh-session-board'
 /** `GET` → `text/event-stream`, one `state` frame per change. */
@@ -61,6 +71,20 @@ export interface BoardTrustRequest {
   readonly headers: IncomingMessage['headers']
 }
 
+/**
+ * The synthesis-model preference store and route validation.
+ *
+ * `read` is synchronous because the durable table is, and because the archiver
+ * reads the current route per session; `write` resolves only once the value is
+ * durable; `validate` answers whether one route is currently advertised, which
+ * is what makes an unknown value a 400 instead of a saved dead route.
+ */
+export interface SynthesisModelStore {
+  read(): SynthesisModelPref
+  write(pref: SynthesisModelPref): Promise<void>
+  validate(selection: SynthesisModelSelection): Promise<boolean>
+}
+
 /** Collaborators of {@link createBoardRoutes}. */
 export interface BoardRoutesOptions {
   /** Whole durable state. Must be synchronous and must not throw. */
@@ -69,6 +93,8 @@ export interface BoardRoutesOptions {
   readonly ack: (sessionId: string) => Promise<boolean>
   /** Archive exact selected DSH IDs into the local Wiki raw layer. */
   readonly wikiArchive: WikiArchiver
+  /** Synthesis-model preference; absent means the route answers 503. */
+  readonly synthesisModel?: SynthesisModelStore
   /** Connection's Host/Origin + browser-session fence. */
   readonly requestRejection: (request: BoardTrustRequest) => 401 | 403 | undefined
   /** Containment sink for request-time failures. */
@@ -180,7 +206,7 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       if (typeof body !== 'object' || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
       const value = body as Record<string, unknown>
       try {
-        if (value.action === 'capabilities') return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY } })
+        if (value.action === 'capabilities') return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } })
         if (value.action === 'preview') {
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds))
           return jsonResponse(200, { ok: true, preview })
@@ -213,6 +239,42 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
         const status = code === 'INVALID_SELECTION' ? 400 : code === 'BUSY' ? 429 : 409
         return jsonResponse(status, { ok: false, error: code })
       }
+    },
+  }
+
+  const synthesisModelRoute: BoardFetchRoute = {
+    path: BOARD_SYNTHESIS_MODEL_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      const store = options.synthesisModel
+      if (store === undefined) return jsonResponse(503, { ok: false, error: 'STORE_UNAVAILABLE' })
+      const body = await readJsonBody(request)
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
+      const value = body as Record<string, unknown>
+      if (value.action === 'read') {
+        const pref = readStoredPref(store, options.warn)
+        return jsonResponse(200, { ok: true, selection: selectionOf(pref) })
+      }
+      if (value.action !== 'write') return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
+      const pref = readSynthesisPrefBody(value)
+      if (pref === null) return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
+      const selection = selectionOf(pref)
+      if (selection !== null) {
+        let known = false
+        try {
+          known = await store.validate(selection)
+        } catch {
+          known = false
+        }
+        if (!known) return jsonResponse(400, { ok: false, error: 'UNKNOWN_MODEL' })
+      }
+      try {
+        await store.write(pref)
+      } catch {
+        return jsonResponse(500, { ok: false, error: 'STORE_UNAVAILABLE' })
+      }
+      return jsonResponse(200, { ok: true, selection })
     },
   }
 
@@ -256,7 +318,7 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
   }
 
   return {
-    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute],
+    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute],
     streamRoute,
     broadcast,
     close: () => {
@@ -270,6 +332,35 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       held.clear()
     },
   }
+}
+
+/**
+ * Read the stored preference, degrading to the Wiki fallback.
+ * A broken reader costs a picker selection, never the settings page.
+ */
+function readStoredPref(store: SynthesisModelStore, warn: (message: string) => void): SynthesisModelPref {
+  try {
+    return parseSynthesisPref(store.read())
+  } catch (error) {
+    warn(`dsh-session-board: synthesis preference read failed: ${describeError(error)}`)
+    return { model: null, provider: null }
+  }
+}
+
+/**
+ * Parse a write body: both fields null (the fallback row) or two usable route
+ * parts. A half-filled value is refused rather than normalized, because the
+ * caller intended a route and lost one half.
+ * @param body - decoded write request.
+ * @returns the preference to store, or null when the body is unusable.
+ */
+function readSynthesisPrefBody(body: Record<string, unknown>): SynthesisModelPref | null {
+  const model = body.model
+  const provider = body.provider
+  if (model === null && provider === null) return { model: null, provider: null }
+  if (typeof model !== 'string' || typeof provider !== 'string') return null
+  const pref = parseSynthesisPref({ model, provider })
+  return pref.model === null || pref.provider === null ? null : pref
 }
 
 /** JSON response for the API channel (no-store: both routes serve live state). */

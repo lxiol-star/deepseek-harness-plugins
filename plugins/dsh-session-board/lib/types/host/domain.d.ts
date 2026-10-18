@@ -57,10 +57,14 @@ export interface DomainSpec {
 export declare const ACK_DOMAIN_NAME = "dsh_session_board";
 /** Domain holding per-session busy accounting. */
 export declare const TURN_DOMAIN_NAME = "dsh_session_board_turns";
+/** Domain holding board-wide preferences (independent from the session fact stores). */
+export declare const PREFS_DOMAIN_NAME = "dsh_session_board_prefs";
 /** Table of {@link ACK_DOMAIN_NAME}: session id → turn-end facts + ack cursor. */
 export declare const ACK_TABLE_NAME = "acks";
 /** Table of {@link TURN_DOMAIN_NAME}: session id → busy accounting. */
 export declare const TURN_TABLE_NAME = "turn_stats";
+/** Table of {@link PREFS_DOMAIN_NAME}: preference key → stored value. */
+export declare const PREFS_TABLE_NAME = "prefs";
 /**
  * Truncation budget for a stored error note, counted in Unicode code points.
  * A provider error can be thousands of characters of stack-adjacent prose; the
@@ -111,6 +115,18 @@ export interface StoredTurnRecord {
     lastEventAt: number | null;
 }
 /**
+ * Stored synthesis preference.
+ *
+ * Both fields are either a route part or null together; a half-filled or
+ * malformed record normalizes to the null/null fallback instead of failing the
+ * domain open. This is a preference, not a durable fact: losing it costs one
+ * re-selection, never a card.
+ */
+export interface StoredSynthesisPrefRecord {
+    model: string | null;
+    provider: string | null;
+}
+/**
  * Authoritative facts: small, written on every turn boundary.
  *
  * `backup-and-skip` is the right policy for records whose loss costs one card's
@@ -137,6 +153,18 @@ export declare const turnDomainSpec: {
         turn_stats: DomainTableSpec<StoredTurnRecord>;
     };
 };
+/**
+ * Preferences live in their own domain so a future preference shape (or a
+ * write-heavy table) never touches the authoritative session fact stores.
+ */
+export declare const prefsDomainSpec: {
+    name: string;
+    version: number;
+    invalidRecords: "backup-and-skip";
+    tables: {
+        prefs: DomainTableSpec<StoredSynthesisPrefRecord>;
+    };
+};
 /** One table handle as the storage layer exposes it (only the members used here). */
 export interface KvTableLike<V> {
     get(key: string): V | undefined;
@@ -148,3 +176,5 @@ export interface KvTableLike<V> {
 export type BoardAckTable = KvTableLike<StoredAckRecord>;
 /** Handle on the `turn_stats` table; keys are session ids. */
 export type BoardTurnTable = KvTableLike<StoredTurnRecord>;
+/** Handle on the `prefs` table; keys are preference names. */
+export type BoardPrefsTable = KvTableLike<StoredSynthesisPrefRecord>;

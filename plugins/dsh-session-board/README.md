@@ -11,6 +11,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - 支持“隐藏已归档 / 查看已归档 / 全部会话”。Wiki 完成标记与 DSH 原生归档是两种不同来源，分别显示。
 - 归档成功的 Wiki 标记记录当时观察到的内容版本；会话重新运行或出现新内容后重新显示。
 - 中英双语、键盘操作、独立滚动、触控板滚动传递和减少动态效果支持。
+- 设置 → 会话看板 →「归档提炼」可选择归档提炼使用的模型（选项来自当前客户端的模型列表），选择保存到宿主并在提炼时生效；不选择时沿用 Wiki provider。
 
 ## 安装与兼容性
 
@@ -34,7 +35,8 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.2.2.tgz
 - `~/wiki/scripts/wiki-archive.py`
 - `~/wiki/scripts/wiki-synthesize.py`
 - `~/wiki/scripts/wiki-index.py`
-- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。
+- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。若在设置页选择了模型，则改用所选模型，不再使用该 provider 配置。
+- 运行中的 Harness 需提供 `llm` 模型服务与客户端模型目录（0.2.x 正式版均包含）；宿主版本旧于插件时设置页会提示重启，而不是静默保存。
 - `/usr/bin/python3`，以及 Python `zstandard` 或 `zstd` 可执行程序。
 
 这些脚本和配置属于外部集成，**没有包含在本仓库中**；插件不会下载它们或生成密钥。该工作流根据本地 `wiki-current-session` 技能约定实现，属于需要既有兼容 Wiki 环境的高级功能。
@@ -45,8 +47,8 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.2.2.tgz
 2. 预览核对精确会话 ID、源路径、明确的 `parentSession` 父子归属，以及缺失子会话和进行中快照。仅扫描当前实际 `DSH_HOME`，总范围最多 50 个。
 3. “确认归档并提炼”授权原文归档及向已配置的 `stepx-terra` 模型服务发送脱敏后的归档文本。取消不写原文、不调用模型。
 4. 每条会话单独执行 `wiki-archive.py --exact-session <完整ID> --full --json`，要求精确命中一个来源。
-5. 对成功归档的完整原文页路径逐条执行 `wiki-synthesize.py --provider stepx-terra --session <raw/.../完整页.md> --limit 1`。提炼前再次检查可识别凭证，API/解析错误重试一次，SKIP 视为正常结论。
-6. 批次结束统一更新索引，面板显示原文路径、知识页路径、SKIP、失败和索引状态。提炼失败保留原文，不伪报成功。
+5. 提炼使用「设置 → 会话看板 → 归档提炼」里选择的模型：由插件宿主通过 DSH 的 `llm` 服务调用模型，模型输出交给 `wiki-synthesize.py` 的 `parse_pages` / `process_page` / 状态文件逻辑落盘（SKIP、slug 唯一、sources 与写入校验与脚本一致）；未选择模型时逐条执行 `wiki-synthesize.py --provider stepx-terra --session <raw/.../完整页.md> --limit 1`，保持原有行为。提炼前再次检查可识别凭证；SKIP 视为正常结论。
+6. 批次结束统一更新索引，面板显示原文路径、知识页路径、SKIP、失败和索引状态。模型报错、输出无法解析或写入被拒时保留原文归档并标记失败，不伪报成功。
 
 脱敏采用启发式，无法保证识别任意秘密。归档会保留敏感的本地原文内容，不应直接公开。确认框会明确说明模型外发，不依赖模型自行隐去密钥。
 

@@ -13,6 +13,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { BoardFeed } from '../shared/types.ts';
+import { type SynthesisModelPref, type SynthesisModelSelection } from '../shared/synthesis.ts';
 import { type WikiArchiver } from './wiki-archive.ts';
 /**
  * Physical request paths. `ConnectionFetchRoute.path` is matched against the
@@ -26,6 +27,8 @@ export declare const BOARD_SNAPSHOT_PATH = "/api/session-board/board";
 export declare const BOARD_ACK_PATH = "/api/session-board/ack";
 /** POST { sessionIds } → archive selected sessions into the local Wiki raw layer. */
 export declare const BOARD_WIKI_ARCHIVE_PATH = "/api/session-board/wiki-archive";
+/** POST { action } → read or write the saved synthesis-model preference. */
+export declare const BOARD_SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
 /** Prefix owned by the raw SSE route. */
 export declare const BOARD_STREAM_PREFIX = "/dsh-session-board";
 /** `GET` → `text/event-stream`, one `state` frame per change. */
@@ -47,6 +50,19 @@ export interface BoardWebRoute {
 export interface BoardTrustRequest {
     readonly headers: IncomingMessage['headers'];
 }
+/**
+ * The synthesis-model preference store and route validation.
+ *
+ * `read` is synchronous because the durable table is, and because the archiver
+ * reads the current route per session; `write` resolves only once the value is
+ * durable; `validate` answers whether one route is currently advertised, which
+ * is what makes an unknown value a 400 instead of a saved dead route.
+ */
+export interface SynthesisModelStore {
+    read(): SynthesisModelPref;
+    write(pref: SynthesisModelPref): Promise<void>;
+    validate(selection: SynthesisModelSelection): Promise<boolean>;
+}
 /** Collaborators of {@link createBoardRoutes}. */
 export interface BoardRoutesOptions {
     /** Whole durable state. Must be synchronous and must not throw. */
@@ -55,6 +71,8 @@ export interface BoardRoutesOptions {
     readonly ack: (sessionId: string) => Promise<boolean>;
     /** Archive exact selected DSH IDs into the local Wiki raw layer. */
     readonly wikiArchive: WikiArchiver;
+    /** Synthesis-model preference; absent means the route answers 503. */
+    readonly synthesisModel?: SynthesisModelStore;
     /** Connection's Host/Origin + browser-session fence. */
     readonly requestRejection: (request: BoardTrustRequest) => 401 | 403 | undefined;
     /** Containment sink for request-time failures. */
