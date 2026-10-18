@@ -14,6 +14,7 @@ export declare const en: {
     readonly 'batch.error.INDEX_FAILED': "Knowledge pages were written but the index update failed.";
     readonly 'batch.error.SCHEMA_UNAVAILABLE': "Local Wiki SCHEMA.md is missing or empty.";
     readonly 'batch.nativeTitle': "DSH archive results";
+    readonly 'batch.dismissResult': "Close results";
     readonly 'batch.native.archived': "Archived in DSH";
     readonly 'batch.native.already-archived': "Already archived in DSH";
     readonly 'batch.native.empty-archived': "Empty session: synthesis skipped, archived in DSH";

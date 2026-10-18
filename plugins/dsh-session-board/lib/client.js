@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.3",
+      "data-session-board-version": "0.3.4",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.3",
+      "data-session-board-version": "0.3.4",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.3",
+        "data-session-board-version": "0.3.4",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1879,6 +1879,11 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-batch-preview p { margin: 6px 0; font-size: 11px; }
 .sb-batch-preview ul { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
 .sb-batch-status:not(:empty), .sb-batch-error { padding: 6px 10px; font-size: 11px; }
+.sb-batch-result { margin: 0 0 8px; }
+.sb-batch-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 0 10px; }
+.sb-batch-result-count { font-size: 11px; }
+.sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
+.sb-batch-dismiss:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
 .sb-batch button:disabled { opacity: .45; cursor: not-allowed; }
 .sb-overlay > .sb-batch .sb-batch-preview { max-width: 640px; }
@@ -2307,6 +2312,15 @@ var BatchController = class {
   cancel = () => {
     this.isBusy() || this.state.set({ ...this.getSnapshot(), phase: "idle", preview: null });
   };
+  /**
+   * Drop a finished batch result (counts, synthesis rows, native-archive rows)
+   * and any error, so the panel stops occupying space once it has been read.
+   */
+  dismissResult = () => {
+    if (this.isBusy()) return;
+    let s = this.getSnapshot();
+    s.result === null && s.error === null || this.state.set({ ...s, result: null, error: null });
+  };
   preview = async () => {
     let s = this.getSnapshot();
     if (!(this.disposed || this.isBusy() || s.selected.length === 0)) {
@@ -2351,6 +2365,7 @@ var NS = "session-board", en = {
   "batch.error.INDEX_FAILED": "Knowledge pages were written but the index update failed.",
   "batch.error.SCHEMA_UNAVAILABLE": "Local Wiki SCHEMA.md is missing or empty.",
   "batch.nativeTitle": "DSH archive results",
+  "batch.dismissResult": "Close results",
   "batch.native.archived": "Archived in DSH",
   "batch.native.already-archived": "Already archived in DSH",
   "batch.native.empty-archived": "Empty session: synthesis skipped, archived in DSH",
@@ -2504,6 +2519,7 @@ var NS = "session-board", en = {
   "batch.error.INDEX_FAILED": "\u77E5\u8BC6\u9875\u5DF2\u5199\u5165\uFF0C\u4F46\u7D22\u5F15\u66F4\u65B0\u5931\u8D25\u3002",
   "batch.error.SCHEMA_UNAVAILABLE": "\u672C\u5730 Wiki \u7684 SCHEMA.md \u7F3A\u5931\u6216\u4E3A\u7A7A\u3002",
   "batch.nativeTitle": "DSH \u5BA2\u6237\u7AEF\u5F52\u6863\u7ED3\u679C",
+  "batch.dismissResult": "\u5173\u95ED\u7ED3\u679C",
   "batch.native.archived": "\u5DF2\u5F52\u6863\u5230 DSH",
   "batch.native.already-archived": "DSH \u4E2D\u5DF2\u5F52\u6863",
   "batch.native.empty-archived": "\u7A7A\u4F1A\u8BDD\uFF1A\u8DF3\u8FC7\u63D0\u70BC\uFF0C\u5DF2\u5F52\u6863\u5230 DSH",
@@ -2687,28 +2703,41 @@ function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
       }, children: t("batch.confirm") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-btn", type: "button", onClick: controller.cancel, children: t("batch.cancel") })
     ] }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { role: "status", "aria-live": "polite", className: "sb-batch-status", children: [
-      busy ? t("batch.working") : null,
-      state.result ? t("batch.result", { archived: state.result.archived, skipped: state.result.skipped, empty: state.result.empty, failed: state.result.failed }) : null
-    ] }),
-    state.result?.workflow ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.result.workflow.synthesis.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
-        titles.get(row.session) ?? row.session,
-        ": ",
-        t(`batch.synthesis.${row.status}`),
-        row.error ? ` (${row.error})` : "",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: row.page }),
-        row.pages.map((page) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: page }, page))
-      ] }, row.session)) }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(`batch.index.${state.result.workflow.index}`) })
-    ] }) : null,
-    state.result?.nativeArchive ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", "aria-label": t("batch.nativeTitle"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("strong", { children: t("batch.nativeTitle") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.result.nativeArchive.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
-        titles.get(row.session) ?? row.session,
-        ": ",
-        t(`batch.native.${row.status}`)
-      ] }, row.session)) })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { role: "status", "aria-live": "polite", className: "sb-batch-status", children: busy ? t("batch.working") : null }),
+    state.result !== null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-result", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-result-head", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "sb-batch-result-count", children: t("batch.result", { archived: state.result.archived, skipped: state.result.skipped, empty: state.result.empty, failed: state.result.failed }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "sb-btn sb-batch-dismiss",
+            "aria-label": t("batch.dismissResult"),
+            title: t("batch.dismissResult"),
+            onClick: controller.dismissResult,
+            children: "\xD7"
+          }
+        )
+      ] }),
+      state.result.workflow ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.result.workflow.synthesis.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
+          titles.get(row.session) ?? row.session,
+          ": ",
+          t(`batch.synthesis.${row.status}`),
+          row.error ? ` (${row.error})` : "",
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: row.page }),
+          row.pages.map((page) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: page }, page))
+        ] }, row.session)) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(`batch.index.${state.result.workflow.index}`) })
+      ] }) : null,
+      state.result.nativeArchive ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", "aria-label": t("batch.nativeTitle"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("strong", { children: t("batch.nativeTitle") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.result.nativeArchive.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
+          titles.get(row.session) ?? row.session,
+          ": ",
+          t(`batch.native.${row.status}`)
+        ] }, row.session)) })
+      ] }) : null
     ] }) : null,
     state.error ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { role: "alert", className: "sb-batch-error", children: [
       t("batch.error"),

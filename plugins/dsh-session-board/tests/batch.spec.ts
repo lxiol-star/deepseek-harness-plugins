@@ -49,6 +49,34 @@ describe('batch archive state machine', () => {
     controller.selectAll(Array.from({ length: 100 }, (_, i) => String(i)))
     expect(controller.getSnapshot().selected).toHaveLength(50)
   })
+  it('dismisses a finished result and a request error', async () => {
+    const controller = new BatchController({
+      preview: async () => plan,
+      commit: async () => summary([{ session: 'a', source: 'a', action: 'archived' }]),
+    })
+    controller.toggle('a')
+    await controller.preview(); await controller.confirm()
+    expect(controller.getSnapshot().result).not.toBeNull()
+    controller.dismissResult()
+    expect(controller.getSnapshot()).toMatchObject({ result: null, error: null })
+
+    const failing = new BatchController({ preview: async () => { throw new Error('REQUEST_FAILED') }, commit: vi.fn() })
+    failing.toggle('a'); await failing.preview()
+    expect(failing.getSnapshot().error).toBe('REQUEST_FAILED')
+    failing.dismissResult()
+    expect(failing.getSnapshot().error).toBeNull()
+  })
+  it('does not dismiss while a batch is running', async () => {
+    let resolve!: (value: ArchiveSummary) => void
+    const controller = new BatchController({ preview: async () => plan, commit: () => new Promise(r => { resolve = r }) })
+    controller.toggle('a'); await controller.preview()
+    const pending = controller.confirm()
+    controller.dismissResult()
+    expect(controller.getSnapshot().phase).toBe('archiving')
+    resolve(summary([{ session: 'a', source: 'a', action: 'archived' }]))
+    await pending
+    expect(controller.getSnapshot().result).not.toBeNull()
+  })
   it('disposal ignores late network response', async () => {
     let resolve!: (value: ArchivePreview) => void
     const controller = new BatchController({ preview: () => new Promise(r => { resolve = r }), commit: vi.fn() })

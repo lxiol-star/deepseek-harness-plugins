@@ -34,16 +34,31 @@ export function BatchToolbar({ controller, groups, visibleGroups = groups, t }: 
       ) : null}
       <div role="status" aria-live="polite" className="sb-batch-status">
         {busy ? t('batch.working') : null}
-        {state.result ? t('batch.result', { archived: state.result.archived, skipped: state.result.skipped, empty: state.result.empty, failed: state.result.failed }) : null}
       </div>
-      {state.result?.workflow ? <div className="sb-batch-preview">
-        <ul>{state.result.workflow.synthesis.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.synthesis.${row.status}`)}{row.error ? ` (${row.error})` : ''}<small className="sb-batch-source">{row.page}</small>{row.pages.map(page => <small key={page} className="sb-batch-source">{page}</small>)}</li>)}</ul>
-        <p>{t(`batch.index.${state.result.workflow.index}`)}</p>
-      </div> : null}
-      {state.result?.nativeArchive ? <div className="sb-batch-preview" aria-label={t('batch.nativeTitle')}>
-        <strong>{t('batch.nativeTitle')}</strong>
-        <ul>{state.result.nativeArchive.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.native.${row.status}`)}</li>)}</ul>
-      </div> : null}
+      {state.result !== null ? (
+        <div className="sb-batch-result">
+          <div className="sb-batch-result-head">
+            <span className="sb-batch-result-count">
+              {t('batch.result', { archived: state.result.archived, skipped: state.result.skipped, empty: state.result.empty, failed: state.result.failed })}
+            </span>
+            <button
+              type="button"
+              className="sb-btn sb-batch-dismiss"
+              aria-label={t('batch.dismissResult')}
+              title={t('batch.dismissResult')}
+              onClick={controller.dismissResult}
+            >×</button>
+          </div>
+          {state.result.workflow ? <div className="sb-batch-preview">
+            <ul>{state.result.workflow.synthesis.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.synthesis.${row.status}`)}{row.error ? ` (${row.error})` : ''}<small className="sb-batch-source">{row.page}</small>{row.pages.map(page => <small key={page} className="sb-batch-source">{page}</small>)}</li>)}</ul>
+            <p>{t(`batch.index.${state.result.workflow.index}`)}</p>
+          </div> : null}
+          {state.result.nativeArchive ? <div className="sb-batch-preview" aria-label={t('batch.nativeTitle')}>
+            <strong>{t('batch.nativeTitle')}</strong>
+            <ul>{state.result.nativeArchive.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.native.${row.status}`)}</li>)}</ul>
+          </div> : null}
+        </div>
+      ) : null}
       {state.error ? <div role="alert" className="sb-batch-error">{t('batch.error')} <span>{t((`batch.error.${state.error}` in en) ? `batch.error.${state.error}` : 'batch.error.UNKNOWN')}</span></div> : null}
     </section>
   )

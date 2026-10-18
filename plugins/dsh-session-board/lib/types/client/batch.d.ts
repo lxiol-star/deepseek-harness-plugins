@@ -23,6 +23,11 @@ export declare class BatchController {
     readonly reconcile: (ids: readonly string[]) => void;
     readonly clear: () => void;
     readonly cancel: () => void;
+    /**
+     * Drop a finished batch result (counts, synthesis rows, native-archive rows)
+     * and any error, so the panel stops occupying space once it has been read.
+     */
+    readonly dismissResult: () => void;
     readonly preview: () => Promise<void>;
     readonly confirm: () => Promise<void>;
     isBusy(): boolean;

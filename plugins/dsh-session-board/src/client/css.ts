@@ -647,6 +647,11 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-batch-preview p { margin: 6px 0; font-size: 11px; }
 .sb-batch-preview ul { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
 .sb-batch-status:not(:empty), .sb-batch-error { padding: 6px 10px; font-size: 11px; }
+.sb-batch-result { margin: 0 0 8px; }
+.sb-batch-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 0 10px; }
+.sb-batch-result-count { font-size: 11px; }
+.sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
+.sb-batch-dismiss:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
 .sb-batch button:disabled { opacity: .45; cursor: not-allowed; }
 .sb-overlay > .sb-batch .sb-batch-preview { max-width: 640px; }

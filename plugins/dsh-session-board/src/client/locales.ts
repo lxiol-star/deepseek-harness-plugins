@@ -18,6 +18,7 @@ export const en = {
   'batch.error.SCHEMA_UNAVAILABLE': 'Local Wiki SCHEMA.md is missing or empty.',
 
   'batch.nativeTitle': 'DSH archive results',
+  'batch.dismissResult': 'Close results',
   'batch.native.archived': 'Archived in DSH',
   'batch.native.already-archived': 'Already archived in DSH',
   'batch.native.empty-archived': 'Empty session: synthesis skipped, archived in DSH',
@@ -190,6 +191,7 @@ export const zh: Record<keyof typeof en, string> = {
   'batch.error.SCHEMA_UNAVAILABLE': '本地 Wiki 的 SCHEMA.md 缺失或为空。',
 
   'batch.nativeTitle': 'DSH 客户端归档结果',
+  'batch.dismissResult': '关闭结果',
   'batch.native.archived': '已归档到 DSH',
   'batch.native.already-archived': 'DSH 中已归档',
   'batch.native.empty-archived': '空会话：跳过提炼，已归档到 DSH',

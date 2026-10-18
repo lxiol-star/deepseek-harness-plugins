@@ -42,6 +42,16 @@ export class BatchController {
   readonly cancel = (): void => {
     if (!this.isBusy()) this.state.set({ ...this.getSnapshot(), phase: 'idle', preview: null })
   }
+  /**
+   * Drop a finished batch result (counts, synthesis rows, native-archive rows)
+   * and any error, so the panel stops occupying space once it has been read.
+   */
+  readonly dismissResult = (): void => {
+    if (this.isBusy()) return
+    const s = this.getSnapshot()
+    if (s.result === null && s.error === null) return
+    this.state.set({ ...s, result: null, error: null })
+  }
   readonly preview = async (): Promise<void> => {
     const s = this.getSnapshot()
     if (this.disposed || this.isBusy() || s.selected.length === 0) return

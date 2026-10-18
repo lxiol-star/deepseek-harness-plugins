@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { ArchivePreview, ArchiveSummary } from '../src/shared/archive.ts'
 
 const require = createRequire(import.meta.url)
 const repo = process.env.DSH_REPO ?? resolve(process.cwd(), '../../../deepseek-harness')
@@ -27,7 +28,13 @@ const components = require(output) as {
   BoardOverlay: unknown
   BoardList: unknown
   BoardFilterBar: unknown
-  BatchController: new (transport: object) => { toggle(id: string): void; getSnapshot(): { selected: readonly string[] } }
+  BatchController: new (transport: object) => {
+    toggle(id: string): void
+    preview(): Promise<void>
+    confirm(): Promise<void>
+    dismissResult(): void
+    getSnapshot(): { selected: readonly string[]; result: unknown }
+  }
   BatchToolbar: unknown
   t: (key: string, args?: Record<string, string | number>) => string
 }
@@ -132,6 +139,30 @@ describe('actual React components', () => {
     const all = [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Select visible'))!
     await React.act(async () => { all.click() })
     expect(controller.getSnapshot().selected).toEqual(['other'])
+  })
+  it('closes a finished batch result from the toolbar', async () => {
+    const summary: ArchiveSummary = {
+      archived: 1, skipped: 0, empty: 0, failed: 0, selected: 1, dry_run: false,
+      results: [{ session: 'session-one', source: 'raw/sessions/one.md', action: 'archived' }],
+      nativeArchive: [{ session: 'session-one', status: 'archived' }],
+    }
+    const plan: ArchivePreview = {
+      token: 'token',
+      expiresAt: Date.now() + 30_000,
+      summary: { ...summary, dry_run: true, results: [{ session: 'session-one', source: 'raw/sessions/one.md', action: 'would-archive' }] },
+    }
+    const controller = new components.BatchController({ preview: async () => plan, commit: async () => summary })
+    controller.toggle('session-one')
+    await controller.preview(); await controller.confirm()
+    const props = { controller, groups: [{ id: 'attention', entries: [entry] }], t: components.t }
+    const view = mount(components.BatchToolbar, props); await view.render(props)
+    expect(view.container.textContent).toContain('Copied 1')
+    expect(view.container.querySelector('.sb-batch-result')).not.toBeNull()
+    const close = view.container.querySelector<HTMLButtonElement>('.sb-batch-dismiss')!
+    expect(close.getAttribute('aria-label')).toBe('Close results')
+    await React.act(async () => { close.click() })
+    expect(view.container.querySelector('.sb-batch-result')).toBeNull()
+    expect(view.container.textContent).not.toContain('Copied 1')
   })
   it('renders workspace groups with independent collapse and archived badges', async () => {
     const toggle = vi.fn()
