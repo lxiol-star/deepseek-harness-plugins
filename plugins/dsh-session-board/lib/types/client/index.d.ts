@@ -26,13 +26,13 @@ import { BatchController } from './batch.ts';
 import { BoardModel } from './model.ts';
 import { type ReadonlyStore, type Store } from './store.ts';
 import { type Translate } from './hooks.ts';
-import type { JobsService, SessionListState, SessionStatusSnapshot, WorkspacesService } from './dsh.ts';
+import type { JobsService, SessionListState, SessionStatusSnapshot, SubagentAddress, WorkspacesService } from './dsh.ts';
 /** Plugin name, shared by both halves. */
 export declare const name = "dsh-session-board";
 /**
- * Services required before the browser half runs at all. The rest are read
- * optionally through `ctx.get`, so a profile without, say, the jobs service
- * still gets a working panel instead of an inactive one.
+ * Services required before the browser half runs at all. The nested
+ * {@link CORE_SERVICES} injection below adds the session, navigation and job
+ * services the panel reads before it registers anything.
  */
 export declare const inject: string[];
 /** The locale service slice this plugin uses. */
@@ -68,6 +68,7 @@ export interface BoardFace {
     locale: LocaleService;
     sessions: {
         list: ReadonlyStore<SessionListState>;
+        subagentAddress?: (sessionId: string) => SubagentAddress | undefined;
     } | null;
     uiSession: {
         sessionStatus: ReadonlyStore<SessionStatusSnapshot>;

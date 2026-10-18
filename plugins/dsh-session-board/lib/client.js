@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.4",
+      "data-session-board-version": "0.3.5",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.4",
+      "data-session-board-version": "0.3.5",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.4",
+        "data-session-board-version": "0.3.5",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -3621,7 +3621,7 @@ function SessionBoardSettingsPage({ t, settings }) {
 }
 
 // src/client/index.tsx
-var import_jsx_runtime8 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession"], DOCK_DEFAULT_WIDTH = 340;
+var import_jsx_runtime8 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -3803,7 +3803,7 @@ function apply(ctx) {
     warned.has(reason) || (warned.add(reason), ctx.logger?.warn?.(`dsh-session-board: ${reason}`));
   };
   ctx.inject(CORE_SERVICES, (scoped) => {
-    let sessions = scoped.get("sessions") ?? null, uiSession = scoped.get("uiSession") ?? null, jobs = scoped.get("jobs") ?? null, workspaces = scoped.get("workspaces") ?? null, scopedSlots = scoped.get("slots"), navigation = scoped.get("uiWorkspace");
+    let sessions = scoped.get("sessions") ?? null, uiSession = scoped.get("uiSession") ?? null, jobs = scoped.get("jobs") ?? null, workspaces = scoped.get("workspaces") ?? null, scopedSlots = scoped.get("slots"), navigation = scoped.get("uiWorkspace"), navigationOf = () => navigation ?? scoped.get("uiWorkspace");
     if (scopedSlots === void 0) return;
     let cleanup = new CleanupStack();
     try {
@@ -3869,14 +3869,45 @@ function apply(ctx) {
         jobs,
         workspaces,
         openSession: (id) => {
-          if (navigation === void 0 || typeof navigation.openSession != "function") {
+          let nav = navigationOf();
+          if (nav === void 0 || typeof nav.openSession != "function") {
             warn("navigation-unavailable");
             return;
           }
+          let openSubagent = () => {
+            let address;
+            try {
+              address = sessions?.subagentAddress?.(id);
+            } catch {
+              address = void 0;
+            }
+            if (address == null) return !1;
+            try {
+              return nav.openSession(address), !0;
+            } catch (error) {
+              return warn(`open-session-failed: ${String(error)}`), !0;
+            }
+          };
           try {
-            navigation.openSession(id);
+            nav.openSession(id);
           } catch (error) {
-            warn(`open-session-failed: ${String(error)}`);
+            if (openSubagent()) return;
+            if (!(workspaces?.list.getSnapshot().archivedSessionIds ?? []).includes(id) || typeof nav.unarchiveSession != "function") {
+              warn(`open-session-failed: ${String(error)}`);
+              return;
+            }
+            nav.unarchiveSession(id).then(
+              () => {
+                try {
+                  nav.openSession(id);
+                } catch (retryError) {
+                  warn(`open-session-failed: ${String(retryError)}`);
+                }
+              },
+              (unarchiveError) => {
+                warn(`open-session-failed: ${String(unarchiveError)}`);
+              }
+            );
           }
         },
         ack: (id) => {
