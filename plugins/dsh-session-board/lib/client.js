@@ -666,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.1",
+      "data-session-board-version": "0.3.2",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.1",
+      "data-session-board-version": "0.3.2",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1186,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.1",
+        "data-session-board-version": "0.3.2",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -3386,12 +3386,19 @@ async function postSynthesisModel(body) {
   }
   return payload;
 }
+async function requestHostCatalog() {
+  let payload = await postSynthesisModel({ action: "catalog" });
+  if (typeof payload != "object" || payload === null) throw new Error("REQUEST_FAILED");
+  let groups = payload.groups;
+  if (!Array.isArray(groups)) throw new Error("REQUEST_FAILED");
+  return groups;
+}
 function createSynthesisSettings(options = {}) {
   let state = {
     status: "loading",
     selection: null,
     options: [],
-    catalogStatus: options.catalog === void 0 ? "unavailable" : "idle",
+    catalogStatus: "idle",
     saving: !1,
     saved: !1,
     error: null
@@ -3401,13 +3408,10 @@ function createSynthesisSettings(options = {}) {
       for (let listener of [...listeners]) listener();
     }
   }, loadCatalog = async () => {
-    if (options.catalog === void 0) {
-      publish({ catalogStatus: "unavailable" });
-      return;
-    }
+    let source = options.catalog ?? requestHostCatalog;
     publish({ catalogStatus: "loading" });
     try {
-      let groups = parseCatalogGroups(await options.catalog());
+      let groups = parseCatalogGroups(await source());
       if (disposed) return;
       publish({ options: synthesisModelOptions(groups), catalogStatus: "ready" });
     } catch {
@@ -3529,20 +3533,6 @@ function SessionBoardSettingsPage({ t, settings }) {
 
 // src/client/index.tsx
 var import_jsx_runtime8 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession"], DOCK_DEFAULT_WIDTH = 340;
-function remoteSessionGateway(ctx) {
-  let candidates = [];
-  for (let name2 of ["remote.session", "remote"]) {
-    let service = ctx.get(name2);
-    service != null && candidates.push(service);
-  }
-  candidates.push(Reflect.get(ctx, "remote"));
-  for (let candidate of candidates) {
-    if (typeof candidate.modelCatalog == "function") return candidate;
-    let nested = candidate?.session;
-    if (nested !== void 0 && typeof nested.modelCatalog == "function") return nested;
-  }
-  return null;
-}
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -3711,17 +3701,7 @@ function apply(ctx) {
   ctx.effect(() => locale.register(NS, { zh, en }), "dsh-session-board: dictionaries"), ctx.effect(() => installStylesheet(globalThis.document), "dsh-session-board: stylesheet");
   let doc = globalThis.document;
   if (doc == null) return;
-  let t = locale.bind(NS), synthesis = createSynthesisSettings({
-    catalog: async () => {
-      let gateway = remoteSessionGateway(ctx);
-      if (gateway === null)
-        throw console.warn("dsh-session-board: remote.session gateway unavailable"), new Error("CATALOG_UNAVAILABLE");
-      let response = await gateway.modelCatalog();
-      if (response?.ok !== !0)
-        throw console.warn(`dsh-session-board: model catalog rejected: ${String(response?.error?.code)}`), new Error("CATALOG_UNAVAILABLE");
-      return response.value?.groups;
-    }
-  });
+  let t = locale.bind(NS), synthesis = createSynthesisSettings();
   ctx.effect(() => () => synthesis.dispose(), "dsh-session-board: settings controller"), ctx.effect(() => slots.inject("settings.section", () => slots.register({
     name: "settings.section",
     id: "session-board",

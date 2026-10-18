@@ -11,7 +11,7 @@
  * and `stream(GenerateOptions)`, whose ordinary text output arrives as
  * `text-delta` chunks and ends with a `finish` chunk.
  */
-import type { SynthesisModelSelection } from '../shared/synthesis.ts';
+import type { SynthesisModelCatalogGroup, SynthesisModelSelection } from '../shared/synthesis.ts';
 /** One registered provider route (`LlmProviderInfo`). */
 export interface HostModelProvider {
     readonly id: string;
@@ -106,6 +106,18 @@ export declare const SYNTHESIS_MAX_TOKENS = 8192;
  * @returns whether both the provider route and the exact model are advertised.
  */
 export declare function isKnownSynthesisModel(llm: HostLlmService, selection: SynthesisModelSelection): Promise<boolean>;
+/**
+ * List the host's currently advertised routes as picker groups.
+ *
+ * The browser cannot rely on reading another plugin's remote namespace in
+ * every host build, so the settings page asks this plugin's own route and the
+ * host answers from the same `llm` service the archiver calls. Providers with
+ * no advertised model are kept as empty groups for diagnostics; the picker
+ * flattens them away.
+ * @param llm - the host `llm` service.
+ * @returns one group per provider, in provider order.
+ */
+export declare function listSynthesisCatalog(llm: HostLlmService): Promise<SynthesisModelCatalogGroup[]>;
 /**
  * Run one one-shot completion and return its visible text.
  *

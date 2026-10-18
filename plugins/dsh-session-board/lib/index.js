@@ -4,7 +4,7 @@ var EMPTY_FEED = { acks: {}, turns: {} };
 // src/shared/synthesis.ts
 var SYNTHESIS_PREFS_KEY = "synthesis";
 var SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
-var SYNTHESIS_MODEL_CAPABILITY = 1;
+var SYNTHESIS_MODEL_CAPABILITY = 2;
 var ROUTE_PART_MAX = 200;
 function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -612,6 +612,21 @@ async function isKnownSynthesisModel(llm, selection) {
     return false;
   }
 }
+async function listSynthesisCatalog(llm) {
+  const providers = llm.listProviders();
+  const groups = [];
+  for (const provider of providers) {
+    let models = [];
+    try {
+      models = await llm.listModels(provider.id);
+    } catch {
+      models = [];
+    }
+    const rows = models.filter((model) => typeof model.id === "string" && model.id !== "").map((model) => ({ id: model.id, name: typeof model.name === "string" && model.name !== "" ? model.name : model.id }));
+    groups.push({ id: provider.id, name: typeof provider.name === "string" && provider.name !== "" ? provider.name : provider.id, models: rows });
+  }
+  return groups;
+}
 async function runSynthesisModel(llm, request) {
   const options = {
     provider: request.provider,
@@ -1110,6 +1125,15 @@ data: ${JSON.stringify(feed)}
         const pref2 = readStoredPref(store, options.warn);
         return jsonResponse(200, { ok: true, selection: selectionOf(pref2) });
       }
+      if (value.action === "catalog") {
+        try {
+          const groups = await store.catalog();
+          return jsonResponse(200, { ok: true, groups });
+        } catch (error) {
+          options.warn(`dsh-session-board: model catalog read failed: ${describeError2(error)}`);
+          return jsonResponse(500, { ok: false, error: "CATALOG_UNAVAILABLE" });
+        }
+      }
       if (value.action !== "write") return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
       const pref = readSynthesisPrefBody(value);
       if (pref === null) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
@@ -1270,7 +1294,8 @@ function apply(ctx) {
         if (table === null) throw new Error("STORE_UNAVAILABLE");
         await table.put(SYNTHESIS_PREFS_KEY, pref);
       },
-      validate: (selection) => isKnownSynthesisModel(llm, selection)
+      validate: (selection) => isKnownSynthesisModel(llm, selection),
+      catalog: () => listSynthesisCatalog(llm)
     },
     warn
   });

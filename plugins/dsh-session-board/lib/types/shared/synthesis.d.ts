@@ -33,8 +33,11 @@ export declare const SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model"
  * Host capability advertising the synthesis-model route and the plugin-side
  * model call. The browser bundle may be newer than the running host after an
  * upgrade, so the settings page probes this before offering to save.
+ *
+ * 2 adds the host-served model catalog (`action: 'catalog'`): the picker no
+ * longer depends on another plugin's browser-side remote namespace.
  */
-export declare const SYNTHESIS_MODEL_CAPABILITY = 1;
+export declare const SYNTHESIS_MODEL_CAPABILITY = 2;
 /** One provider/model row as the client catalog advertises it. */
 export interface SynthesisModelCatalogModel {
     id: string;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 — 2026-10-19
+
+- 设置页模型列表改由插件宿主侧提供：新增 `action: 'catalog'`，宿主用 `llm.listProviders()` / `llm.listModels()` 列出当前路由，浏览器不再依赖其他插件的 `remote.session` 服务（该服务在部分宿主构建中无法从本插件上下文解析，导致 0.3.1 仍提示无法读取模型列表）。
+- 宿主能力 `synthesisModel` 升到 2；读取失败时返回 `CATALOG_UNAVAILABLE` 并把真实原因写入宿主日志。
+
 ## 0.3.1 — 2026-10-19
 
 - 修复设置页“无法读取客户端模型列表”：模型目录服务在不同宿主版本里以 `remote.session` 命名空间或 `remote.session` 服务两种形态暴露，现按多路径解析。

@@ -20,6 +20,7 @@ import {
   SYNTHESIS_MODEL_PATH,
   parseSynthesisPref,
   selectionOf,
+  type SynthesisModelCatalogGroup,
   type SynthesisModelPref,
   type SynthesisModelSelection,
 } from '../shared/synthesis.ts'
@@ -83,6 +84,12 @@ export interface SynthesisModelStore {
   read(): SynthesisModelPref
   write(pref: SynthesisModelPref): Promise<void>
   validate(selection: SynthesisModelSelection): Promise<boolean>
+  /**
+   * The host's currently advertised provider/model groups. The page reads the
+   * catalog from this route instead of another plugin's browser-side remote
+   * namespace, which is not reachable from every host build.
+   */
+  catalog(): Promise<readonly SynthesisModelCatalogGroup[]>
 }
 
 /** Collaborators of {@link createBoardRoutes}. */
@@ -255,6 +262,15 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       if (value.action === 'read') {
         const pref = readStoredPref(store, options.warn)
         return jsonResponse(200, { ok: true, selection: selectionOf(pref) })
+      }
+      if (value.action === 'catalog') {
+        try {
+          const groups = await store.catalog()
+          return jsonResponse(200, { ok: true, groups })
+        } catch (error) {
+          options.warn(`dsh-session-board: model catalog read failed: ${describeError(error)}`)
+          return jsonResponse(500, { ok: false, error: 'CATALOG_UNAVAILABLE' })
+        }
       }
       if (value.action !== 'write') return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
       const pref = readSynthesisPrefBody(value)

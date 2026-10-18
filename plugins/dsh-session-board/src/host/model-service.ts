@@ -11,7 +11,7 @@
  * and `stream(GenerateOptions)`, whose ordinary text output arrives as
  * `text-delta` chunks and ends with a `finish` chunk.
  */
-import type { SynthesisModelSelection } from '../shared/synthesis.ts'
+import type { SynthesisModelCatalogGroup, SynthesisModelSelection } from '../shared/synthesis.ts'
 
 /** One registered provider route (`LlmProviderInfo`). */
 export interface HostModelProvider {
@@ -128,6 +128,35 @@ export async function isKnownSynthesisModel(
   } catch {
     return false
   }
+}
+
+/**
+ * List the host's currently advertised routes as picker groups.
+ *
+ * The browser cannot rely on reading another plugin's remote namespace in
+ * every host build, so the settings page asks this plugin's own route and the
+ * host answers from the same `llm` service the archiver calls. Providers with
+ * no advertised model are kept as empty groups for diagnostics; the picker
+ * flattens them away.
+ * @param llm - the host `llm` service.
+ * @returns one group per provider, in provider order.
+ */
+export async function listSynthesisCatalog(llm: HostLlmService): Promise<SynthesisModelCatalogGroup[]> {
+  const providers = llm.listProviders()
+  const groups: SynthesisModelCatalogGroup[] = []
+  for (const provider of providers) {
+    let models: readonly HostModelInfo[] = []
+    try {
+      models = await llm.listModels(provider.id)
+    } catch {
+      models = []
+    }
+    const rows = models
+      .filter(model => typeof model.id === 'string' && model.id !== '')
+      .map(model => ({ id: model.id, name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id }))
+    groups.push({ id: provider.id, name: typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id, models: rows })
+  }
+  return groups
 }
 
 /**

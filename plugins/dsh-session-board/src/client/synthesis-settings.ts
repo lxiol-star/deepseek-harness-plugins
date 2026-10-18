@@ -1,10 +1,10 @@
 /**
  * Settings-page controller for the synthesis-model preference.
  *
- * Three collaborators, all optional so the page degrades instead of throwing:
- * the preference route (host half), the client model catalog (the same
- * `ctx.remote.session.modelCatalog()` surface the composer's model picker
- * uses), and nothing else. The page renders this snapshot and calls `save`.
+ * Two collaborators: the preference route and the model catalog, both served
+ * by this plugin's own host half. The catalog is read from there rather than
+ * from another plugin's browser-side remote namespace, which is not reachable
+ * from every host build. The page renders this snapshot and calls `save`.
  *
  * A browser bundle can be newer than the running host, so a 404 on the read is
  * reported as `HOST_OUTDATED` rather than as a network failure.
@@ -60,7 +60,7 @@ export type SynthesisCatalogSource = () => Promise<unknown>
 
 /** Collaborators of {@link createSynthesisSettings}. */
 export interface SynthesisSettingsOptions {
-  /** Reads `groups` from the client model catalog; absent disables the picker. */
+  /** Reads raw provider groups; defaults to this plugin's own host route. */
   catalog?: SynthesisCatalogSource
 }
 
@@ -105,6 +105,19 @@ async function postSynthesisModel(body: Record<string, unknown>): Promise<unknow
 }
 
 /**
+ * Load the advertised model routes from this plugin's own host half.
+ * @returns the raw `groups` array; shape checking happens in the controller.
+ * @throws Error with the stable code the page displays.
+ */
+export async function requestHostCatalog(): Promise<unknown> {
+  const payload = await postSynthesisModel({ action: 'catalog' })
+  if (typeof payload !== 'object' || payload === null) throw new Error('REQUEST_FAILED')
+  const groups = (payload as { groups?: unknown }).groups
+  if (!Array.isArray(groups)) throw new Error('REQUEST_FAILED')
+  return groups
+}
+
+/**
  * Create the settings controller.
  * @param options - optional client model-catalog reader.
  * @returns the page-facing surface.
@@ -114,7 +127,7 @@ export function createSynthesisSettings(options: SynthesisSettingsOptions = {}):
     status: 'loading',
     selection: null,
     options: [],
-    catalogStatus: options.catalog === undefined ? 'unavailable' : 'idle',
+    catalogStatus: 'idle',
     saving: false,
     saved: false,
     error: null,
@@ -130,13 +143,10 @@ export function createSynthesisSettings(options: SynthesisSettingsOptions = {}):
   }
 
   const loadCatalog = async (): Promise<void> => {
-    if (options.catalog === undefined) {
-      publish({ catalogStatus: 'unavailable' })
-      return
-    }
+    const source = options.catalog ?? requestHostCatalog
     publish({ catalogStatus: 'loading' })
     try {
-      const groups = parseCatalogGroups(await options.catalog())
+      const groups = parseCatalogGroups(await source())
       if (disposed) return
       publish({ options: synthesisModelOptions(groups), catalogStatus: 'ready' })
     } catch {

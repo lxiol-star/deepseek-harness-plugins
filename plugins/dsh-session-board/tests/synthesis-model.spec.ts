@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSynthesisSettings } from '../src/client/synthesis-settings.ts'
 import { createBoardRoutes, BOARD_SYNTHESIS_MODEL_PATH } from '../src/host/routes.ts'
 import type { SynthesisModelStore } from '../src/host/routes.ts'
+import { listSynthesisCatalog } from '../src/host/model-service.ts'
 import type { WikiArchiver } from '../src/host/wiki-archive.ts'
 import type { SynthesisModelPref } from '../src/shared/synthesis.ts'
 import { EMPTY_FEED } from '../src/shared/types.ts'
@@ -106,6 +107,7 @@ describe('synthesis-model route', () => {
       read: () => stored,
       write: async (pref: SynthesisModelPref) => { stored = pref },
       validate: async (selection: { provider: string; model: string }) => selection.provider === 'alpha' && selection.model === 'pro',
+      catalog: async () => [{ id: 'alpha', name: 'Alpha', models: [{ id: 'pro', name: 'Pro' }] }],
     }
     return { route: route(store), stored: () => stored }
   }
@@ -153,6 +155,25 @@ describe('synthesis-model route', () => {
     expect((await handler.fetch(request({ action: 'read', extra: true }))).status).toBe(200)
   })
 
+  it('serves the host model catalog for the settings page', async () => {
+    const { route: handler } = fixture()
+    const response = await handler.fetch(request({ action: 'catalog' }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, groups: [{ id: 'alpha', name: 'Alpha', models: [{ id: 'pro', name: 'Pro' }] }] })
+  })
+
+  it('answers CATALOG_UNAVAILABLE when the host catalog read fails', async () => {
+    const handler = route({
+      read: () => ({ model: null, provider: null }),
+      write: async () => {},
+      validate: async () => true,
+      catalog: async () => { throw new Error('llm offline') },
+    })
+    const response = await handler.fetch(request({ action: 'catalog' }))
+    expect(response.status).toBe(500)
+    expect((await response.json()).error).toBe('CATALOG_UNAVAILABLE')
+  })
+
   it('answers 503 when the preference store is not wired and 500 when the write fails', async () => {
     const unwired = createBoardRoutes({
       snapshot: () => EMPTY_FEED,
@@ -167,10 +188,28 @@ describe('synthesis-model route', () => {
       read: () => ({ model: null, provider: null }),
       write: async () => { throw new Error('disk full') },
       validate: async () => true,
+      catalog: async () => [],
     })
     const response = await failing.fetch(request({ action: 'write', provider: 'alpha', model: 'pro' }))
     expect(response.status).toBe(500)
     expect((await response.json()).error).toBe('STORE_UNAVAILABLE')
+  })
+})
+
+describe('host model catalog', () => {
+  it('maps advertised providers and models into picker groups', async () => {
+    const llm = {
+      listProviders: () => [{ id: 'alpha', name: 'Alpha' }, { id: 'ghost', name: '' }],
+      listModels: async (provider: string) => {
+        if (provider === 'alpha') return [{ provider: 'alpha', id: 'pro', name: 'Pro' }, { provider: 'alpha', id: '', name: 'blank' }]
+        throw new Error('unadvertised')
+      },
+      stream: async function* () { /* unused */ },
+    }
+    await expect(listSynthesisCatalog(llm)).resolves.toEqual([
+      { id: 'alpha', name: 'Alpha', models: [{ id: 'pro', name: 'Pro' }] },
+      { id: 'ghost', name: 'ghost', models: [] },
+    ])
   })
 })
 
@@ -225,6 +264,24 @@ describe('settings controller', () => {
     await vi.waitFor(() => expect(outdated.store.getSnapshot().status).toBe('error'))
     expect(outdated.store.getSnapshot().error).toBe('HOST_OUTDATED')
     outdated.dispose()
+    vi.unstubAllGlobals()
+  })
+
+  it('reads the catalog from the plugin host route by default', async () => {
+    const bodies: unknown[] = []
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { action?: string }
+      bodies.push(body)
+      if (body.action === 'catalog') return reply(200, { ok: true, groups: catalogGroups() })
+      return reply(200, { ok: true, selection: { provider: 'alpha', model: 'pro' } })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const settings = createSynthesisSettings()
+    settings.start()
+    await vi.waitFor(() => expect(settings.store.getSnapshot().catalogStatus).toBe('ready'))
+    expect(settings.store.getSnapshot().options.map(option => option.model)).toEqual(['pro'])
+    expect(bodies).toContainEqual({ action: 'catalog' })
+    settings.dispose()
     vi.unstubAllGlobals()
   })
 

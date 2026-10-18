@@ -22,7 +22,7 @@ import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelSelection } from '
 import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec } from './domain.ts'
 import type { BoardPrefsTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
 import { BoardLedger, describeError, subscribeBoardLedger } from './ledger.ts'
-import { isKnownSynthesisModel, runSynthesisModel, type HostLlmService } from './model-service.ts'
+import { isKnownSynthesisModel, listSynthesisCatalog, runSynthesisModel, type HostLlmService } from './model-service.ts'
 import { createWikiArchiver } from './wiki-archive.ts'
 import { createBoardRoutes } from './routes.ts'
 import type { BoardFetchRoute, BoardTrustRequest, BoardWebRoute } from './routes.ts'
@@ -145,6 +145,7 @@ export function apply(ctx: Context): () => void {
         await table.put(SYNTHESIS_PREFS_KEY, pref)
       },
       validate: selection => isKnownSynthesisModel(llm, selection),
+      catalog: () => listSynthesisCatalog(llm),
     },
     warn,
   })
