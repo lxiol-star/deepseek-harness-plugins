@@ -22,7 +22,10 @@
 也可通过支持 GitHub 子目录的 DSH 插件管理器安装指定版本：
 
 ```text
+# 会话看板
 github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.2.1&path:/plugins/dsh-session-board
+# 思考弹球桌宠
+github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 ```
 
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。
