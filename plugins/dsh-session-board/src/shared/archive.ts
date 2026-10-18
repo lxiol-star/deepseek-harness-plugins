@@ -37,6 +37,7 @@ export interface ArchiveSummary {
   selected: number
   dry_run: boolean
   results: ArchiveRow[]
+  nativeArchive?: { session: string; status: 'archived' | 'already-archived' | 'empty-archived' | 'active' | 'changed' | 'unavailable' | 'wiki-failed' | 'failed' }[]
   scope?: ArchiveScope
   workflow?: WikiWorkflowResult
 }

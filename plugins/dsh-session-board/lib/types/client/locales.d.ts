@@ -9,6 +9,15 @@
 export declare const NS = "session-board";
 /** English copy. */
 export declare const en: {
+    readonly 'batch.nativeTitle': "DSH archive results";
+    readonly 'batch.native.archived': "Archived in DSH";
+    readonly 'batch.native.already-archived': "Already archived in DSH";
+    readonly 'batch.native.empty-archived': "Empty session: synthesis skipped, archived in DSH";
+    readonly 'batch.native.active': "Still active; kept in workspace";
+    readonly 'batch.native.changed': "New content arrived; kept in workspace";
+    readonly 'batch.native.unavailable': "Session unavailable; not archived";
+    readonly 'batch.native.wiki-failed': "Wiki workflow incomplete; not archived in DSH";
+    readonly 'batch.native.failed': "DSH archive rejected; selection kept for retry";
     readonly 'card.clientArchived': "Archived in DSH";
     readonly 'filter.archive': "Archive visibility";
     readonly 'filter.archiveActive': "Hide archived";
@@ -96,7 +105,7 @@ export declare const en: {
     readonly 'batch.preview': "Preview archive and synthesis";
     readonly 'batch.working': "Working…";
     readonly 'batch.confirmTitle': "Confirm archive and synthesis";
-    readonly 'batch.destination': "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Original DSH sessions are kept.";
+    readonly 'batch.destination': "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.";
     readonly 'batch.planCounts': "{count} to copy · {skipped} unchanged";
     readonly 'batch.confirm': "Confirm archive and synthesis";
     readonly 'batch.cancel': "Cancel";

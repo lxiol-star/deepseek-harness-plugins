@@ -20,6 +20,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { useCallback, useMemo, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { archiveCompletedSessions } from './native-archive.ts'
 import { completedArchiveMarks, isArchived, isArchivedInClient, reviveArchiveMarks, type ArchiveMarks } from './archive-marks.ts'
 import type { GroupingMode } from './workspace-tree.ts'
 import { BoardFilterBar } from './BoardFilterBar.tsx'
@@ -421,11 +422,24 @@ export function apply(ctx: Context): void {
       },
     })
 
+    let archiveDisposed = false
+    cleanup.add(() => { archiveDisposed = true })
     const batch = new BatchController({
       preview: ids => feed.previewArchive(ids),
       commit: async token => {
         const captured = model.getSnapshot().groups.flatMap(group => group.entries)
         const result = await feed.commitArchive(token)
+        const nativeArchive = await archiveCompletedSessions(result, {
+          captured,
+          current: () => model.getSnapshot().groups.flatMap(group => group.entries),
+          archivedIds: () => workspaces?.list.getSnapshot().archivedSessionIds ?? [],
+          archive: id => {
+            if (!navigation?.archiveSession) return Promise.reject(new Error('NATIVE_ARCHIVE_UNAVAILABLE'))
+            return navigation.archiveSession(id)
+          },
+          disposed: () => archiveDisposed,
+        })
+        result.nativeArchive = nativeArchive
         const completed = completedArchiveMarks(result, captured, Date.now())
         view.set(current => ({ ...current, archiveMarks: { ...current.archiveMarks, ...completed } }))
         return result

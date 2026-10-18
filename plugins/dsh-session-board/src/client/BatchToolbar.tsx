@@ -40,6 +40,10 @@ export function BatchToolbar({ controller, groups, visibleGroups = groups, t }: 
         <ul>{state.result.workflow.synthesis.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.synthesis.${row.status}`)}{row.error ? ` (${row.error})` : ''}<small className="sb-batch-source">{row.page}</small>{row.pages.map(page => <small key={page} className="sb-batch-source">{page}</small>)}</li>)}</ul>
         <p>{t(`batch.index.${state.result.workflow.index}`)}</p>
       </div> : null}
+      {state.result?.nativeArchive ? <div className="sb-batch-preview" aria-label={t('batch.nativeTitle')}>
+        <strong>{t('batch.nativeTitle')}</strong>
+        <ul>{state.result.nativeArchive.map(row => <li key={row.session}>{titles.get(row.session) ?? row.session}: {t(`batch.native.${row.status}`)}</li>)}</ul>
+      </div> : null}
       {state.error ? <div role="alert" className="sb-batch-error">{t('batch.error')} <span>{t((`batch.error.${state.error}` in en) ? `batch.error.${state.error}` : 'batch.error.UNKNOWN')}</span></div> : null}
     </section>
   )

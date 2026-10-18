@@ -69,6 +69,48 @@ function completedArchiveMarks(summary, captured, now) {
   return result;
 }
 
+// src/client/native-archive.ts
+async function archiveCompletedSessions(summary, options) {
+  let result = [];
+  for (let row of summary.results) {
+    let finish = (status) => {
+      result.push({ session: row.session, status });
+    };
+    if (options.disposed()) {
+      finish("unavailable");
+      continue;
+    }
+    let synthesis = summary.workflow?.synthesis.find((item) => item.session === row.session), empty = row.action === "empty";
+    if (!empty && (!["archived", "skipped"].includes(row.action) || !synthesis || !["synthesized", "skipped"].includes(synthesis.status) || summary.workflow?.index === "failed")) {
+      finish("wiki-failed");
+      continue;
+    }
+    if (options.archivedIds().includes(row.session)) {
+      finish("already-archived");
+      continue;
+    }
+    let before = options.captured.find((entry) => entry.id === row.session), current = options.current().find((entry) => entry.id === row.session);
+    if (!before || !current) {
+      finish("unavailable");
+      continue;
+    }
+    if ([before, current].some((entry) => entry.state === "running" || entry.state === "blocked" || entry.metrics.liveJobs > 0 || entry.metrics.runningSubagents > 0)) {
+      finish("active");
+      continue;
+    }
+    if (archiveRevision(before) !== archiveRevision(current)) {
+      finish("changed");
+      continue;
+    }
+    try {
+      await options.archive(row.session), finish(empty ? "empty-archived" : "archived");
+    } catch {
+      finish("failed");
+    }
+  }
+  return result;
+}
+
 // src/client/BoardFilterBar.tsx
 var import_react = require("react");
 
@@ -77,7 +119,7 @@ var DEFAULT_FILTERS = { query: "", status: "all", workspace: "", archive: "activ
 function filterGroups(groups, filters) {
   let terms = filters.query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   return groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => {
-    let archived = entry.archivedAt !== void 0 || entry.clientArchived === !0;
+    let archived = entry.clientArchived === !0 || entry.archivedAt !== void 0;
     if (filters.archive === "active" && archived || filters.archive === "archived" && !archived || filters.status === "blocked" && entry.attentionKind !== "blocked" || filters.status === "running" && entry.state !== "running" || filters.workspace !== "" && (entry.workspaceId || entry.workspacePath || entry.workspaceTitle) !== filters.workspace) return !1;
     let text = [entry.title, entry.workspaceTitle, entry.workspacePath ?? "", entry.preview.instruction, entry.preview.activity, entry.errorNote ?? "", ...entry.preview.jobs ?? []].join(`
 `).toLocaleLowerCase();
@@ -624,7 +666,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.1",
+      "data-session-board-version": "0.2.2",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -648,7 +690,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.2.1",
+      "data-session-board-version": "0.2.2",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1144,7 +1186,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.2.1",
+        "data-session-board-version": "0.2.2",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2226,7 +2268,7 @@ var BatchController = class {
       try {
         let result = await this.transport.commit(s.preview.token);
         if (this.disposed) return;
-        let incomplete = new Set(result.workflow?.synthesis.filter((row) => row.status === "failed" || row.status === "sensitive").map((row) => row.session) ?? []), succeeded = new Set(result.results.filter((row) => (row.action === "archived" || row.action === "skipped") && !incomplete.has(row.session)).map((row) => row.session));
+        let incomplete = new Set(result.workflow?.synthesis.filter((row) => row.status === "failed" || row.status === "sensitive").map((row) => row.session) ?? []), succeeded = new Set(result.nativeArchive ? result.nativeArchive.filter((row) => ["archived", "already-archived", "empty-archived"].includes(row.status)).map((row) => row.session) : result.results.filter((row) => (row.action === "archived" || row.action === "skipped") && !incomplete.has(row.session)).map((row) => row.session));
         this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", preview: null, result, error: null });
       } catch (error) {
         this.disposed || this.state.set({ ...s, phase: "idle", preview: null, error: error instanceof Error ? error.message : String(error) });
@@ -2246,6 +2288,15 @@ var import_react7 = require("react");
 
 // src/client/locales.ts
 var NS = "session-board", en = {
+  "batch.nativeTitle": "DSH archive results",
+  "batch.native.archived": "Archived in DSH",
+  "batch.native.already-archived": "Already archived in DSH",
+  "batch.native.empty-archived": "Empty session: synthesis skipped, archived in DSH",
+  "batch.native.active": "Still active; kept in workspace",
+  "batch.native.changed": "New content arrived; kept in workspace",
+  "batch.native.unavailable": "Session unavailable; not archived",
+  "batch.native.wiki-failed": "Wiki workflow incomplete; not archived in DSH",
+  "batch.native.failed": "DSH archive rejected; selection kept for retry",
   "card.clientArchived": "Archived in DSH",
   "filter.archive": "Archive visibility",
   "filter.archiveActive": "Hide archived",
@@ -2333,7 +2384,7 @@ var NS = "session-board", en = {
   "batch.preview": "Preview archive and synthesis",
   "batch.working": "Working\u2026",
   "batch.confirmTitle": "Confirm archive and synthesis",
-  "batch.destination": "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Original DSH sessions are kept.",
+  "batch.destination": "Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.",
   "batch.planCounts": "{count} to copy \xB7 {skipped} unchanged",
   "batch.confirm": "Confirm archive and synthesis",
   "batch.cancel": "Cancel",
@@ -2362,6 +2413,15 @@ var NS = "session-board", en = {
   "a11y.card": "Open session {title}",
   "a11y.groupCount": "{group}, {count} sessions"
 }, zh = {
+  "batch.nativeTitle": "DSH \u5BA2\u6237\u7AEF\u5F52\u6863\u7ED3\u679C",
+  "batch.native.archived": "\u5DF2\u5F52\u6863\u5230 DSH",
+  "batch.native.already-archived": "DSH \u4E2D\u5DF2\u5F52\u6863",
+  "batch.native.empty-archived": "\u7A7A\u4F1A\u8BDD\uFF1A\u8DF3\u8FC7\u63D0\u70BC\uFF0C\u5DF2\u5F52\u6863\u5230 DSH",
+  "batch.native.active": "\u4F1A\u8BDD\u4ECD\u5728\u8FD0\u884C\uFF0C\u4FDD\u7559\u5728\u5DE5\u4F5C\u533A",
+  "batch.native.changed": "\u4F1A\u8BDD\u5DF2\u6709\u65B0\u5185\u5BB9\uFF0C\u4FDD\u7559\u5728\u5DE5\u4F5C\u533A",
+  "batch.native.unavailable": "\u65E0\u6CD5\u786E\u8BA4\u4F1A\u8BDD\u72B6\u6001\uFF0C\u672A\u5F52\u6863",
+  "batch.native.wiki-failed": "Wiki \u6D41\u7A0B\u672A\u5B8C\u6210\uFF0C\u672A\u5F52\u6863\u5230 DSH",
+  "batch.native.failed": "DSH \u5F52\u6863\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u9009\u62E9\u4F9B\u91CD\u8BD5",
   "card.clientArchived": "DSH \u4E2D\u5DF2\u5F52\u6863",
   "filter.archive": "\u5F52\u6863\u663E\u793A",
   "filter.archiveActive": "\u9690\u85CF\u5DF2\u5F52\u6863",
@@ -2449,7 +2509,7 @@ var NS = "session-board", en = {
   "batch.preview": "\u9884\u89C8\u5F52\u6863\u4E0E\u63D0\u70BC",
   "batch.working": "\u5904\u7406\u4E2D\u2026",
   "batch.confirmTitle": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
-  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230 ~/wiki/raw/sessions/\uFF0C\u8131\u654F\u590D\u6838\u540E\u901A\u8FC7 stepx-terra \u9010\u4F1A\u8BDD\u63D0\u70BC\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u4FDD\u7559\u539F DSH \u4F1A\u8BDD\uFF1B\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
+  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230 ~/wiki/raw/sessions/\uFF0C\u8131\u654F\u590D\u6838\u540E\u901A\u8FC7 stepx-terra \u9010\u4F1A\u8BDD\u63D0\u70BC\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u6210\u529F\u540E\u5C06\u7A7A\u95F2\u4F1A\u8BDD\u5F52\u6863\u5230 DSH\uFF08\u4E0D\u5220\u9664\uFF09\uFF1B\u7A7A\u4F1A\u8BDD\u8DF3\u8FC7\u63D0\u70BC\u540E\u76F4\u63A5\u5F52\u6863\u3002\u8FD0\u884C\u4E2D\u6216\u6709\u65B0\u5185\u5BB9\u7684\u4F1A\u8BDD\u4FDD\u7559\u3002\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
   "batch.planCounts": "\u5C06\u590D\u5236 {count} \u4E2A \xB7 \u672A\u53D8\u5316 {skipped} \u4E2A",
   "batch.confirm": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
   "batch.cancel": "\u53D6\u6D88",
@@ -2527,6 +2587,14 @@ function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
         row.pages.map((page) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: page }, page))
       ] }, row.session)) }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(`batch.index.${state.result.workflow.index}`) })
+    ] }) : null,
+    state.result?.nativeArchive ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", "aria-label": t("batch.nativeTitle"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("strong", { children: t("batch.nativeTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.result.nativeArchive.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
+        titles.get(row.session) ?? row.session,
+        ": ",
+        t(`batch.native.${row.status}`)
+      ] }, row.session)) })
     ] }) : null,
     state.error ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { role: "alert", className: "sb-batch-error", children: [
       t("batch.error"),
@@ -3313,10 +3381,22 @@ function apply(ctx) {
             collapsedGroups: typeof groups == "object" && groups !== null ? { ...groups } : {}
           };
         }
-      }), batch = new BatchController({
+      }), archiveDisposed = !1;
+      cleanup.add(() => {
+        archiveDisposed = !0;
+      });
+      let batch = new BatchController({
         preview: (ids) => feed.previewArchive(ids),
         commit: async (token) => {
-          let captured = model.getSnapshot().groups.flatMap((group) => group.entries), result = await feed.commitArchive(token), completed = completedArchiveMarks(result, captured, Date.now());
+          let captured = model.getSnapshot().groups.flatMap((group) => group.entries), result = await feed.commitArchive(token), nativeArchive = await archiveCompletedSessions(result, {
+            captured,
+            current: () => model.getSnapshot().groups.flatMap((group) => group.entries),
+            archivedIds: () => workspaces?.list.getSnapshot().archivedSessionIds ?? [],
+            archive: (id) => navigation?.archiveSession ? navigation.archiveSession(id) : Promise.reject(new Error("NATIVE_ARCHIVE_UNAVAILABLE")),
+            disposed: () => archiveDisposed
+          });
+          result.nativeArchive = nativeArchive;
+          let completed = completedArchiveMarks(result, captured, Date.now());
           return view.set((current) => ({ ...current, archiveMarks: { ...current.archiveMarks, ...completed } })), result;
         }
       });

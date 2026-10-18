@@ -12,6 +12,16 @@ export const NS = 'session-board'
 
 /** English copy. */
 export const en = {
+  'batch.nativeTitle': 'DSH archive results',
+  'batch.native.archived': 'Archived in DSH',
+  'batch.native.already-archived': 'Already archived in DSH',
+  'batch.native.empty-archived': 'Empty session: synthesis skipped, archived in DSH',
+  'batch.native.active': 'Still active; kept in workspace',
+  'batch.native.changed': 'New content arrived; kept in workspace',
+  'batch.native.unavailable': 'Session unavailable; not archived',
+  'batch.native.wiki-failed': 'Wiki workflow incomplete; not archived in DSH',
+  'batch.native.failed': 'DSH archive rejected; selection kept for retry',
+
   'card.clientArchived': 'Archived in DSH',
 
   'filter.archive': 'Archive visibility',
@@ -109,7 +119,7 @@ export const en = {
   'batch.preview': 'Preview archive and synthesis',
   'batch.working': 'Working…',
   'batch.confirmTitle': 'Confirm archive and synthesis',
-  'batch.destination': 'Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Original DSH sessions are kept.',
+  'batch.destination': 'Archive to ~/wiki/raw/sessions/, then send redacted text to stepx-terra for per-session synthesis and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.',
   'batch.planCounts': '{count} to copy · {skipped} unchanged',
   'batch.confirm': 'Confirm archive and synthesis',
   'batch.cancel': 'Cancel',
@@ -144,6 +154,16 @@ export const en = {
 
 /** Chinese copy. */
 export const zh: Record<keyof typeof en, string> = {
+  'batch.nativeTitle': 'DSH 客户端归档结果',
+  'batch.native.archived': '已归档到 DSH',
+  'batch.native.already-archived': 'DSH 中已归档',
+  'batch.native.empty-archived': '空会话：跳过提炼，已归档到 DSH',
+  'batch.native.active': '会话仍在运行，保留在工作区',
+  'batch.native.changed': '会话已有新内容，保留在工作区',
+  'batch.native.unavailable': '无法确认会话状态，未归档',
+  'batch.native.wiki-failed': 'Wiki 流程未完成，未归档到 DSH',
+  'batch.native.failed': 'DSH 归档失败，已保留选择供重试',
+
   'card.clientArchived': 'DSH 中已归档',
 
   'filter.archive': '归档显示',
@@ -241,7 +261,7 @@ export const zh: Record<keyof typeof en, string> = {
   'batch.preview': '预览归档与提炼',
   'batch.working': '处理中…',
   'batch.confirmTitle': '确认归档并提炼',
-  'batch.destination': '原文归档到 ~/wiki/raw/sessions/，脱敏复核后通过 stepx-terra 逐会话提炼，最后更新索引。保留原 DSH 会话；提炼会向已配置的模型服务发送归档文本。',
+  'batch.destination': '原文归档到 ~/wiki/raw/sessions/，脱敏复核后通过 stepx-terra 逐会话提炼，最后更新索引。成功后将空闲会话归档到 DSH（不删除）；空会话跳过提炼后直接归档。运行中或有新内容的会话保留。提炼会向已配置的模型服务发送归档文本。',
   'batch.planCounts': '将复制 {count} 个 · 未变化 {skipped} 个',
   'batch.confirm': '确认归档并提炼',
   'batch.cancel': '取消',

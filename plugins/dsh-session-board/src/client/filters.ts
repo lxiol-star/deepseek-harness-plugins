@@ -9,7 +9,9 @@ export const DEFAULT_FILTERS: BoardFilters = { query: '', status: 'all', workspa
 export function filterGroups(groups: readonly BoardGroup[], filters: BoardFilters): BoardGroup[] {
   const terms = filters.query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
   return groups.map(group => ({ ...group, entries: group.entries.filter(entry => {
-    const archived = entry.archivedAt !== undefined || entry.clientArchived === true
+    // The DSH archive is mirrored, and a Wiki-completed session is archived in DSH
+    // too once the workflow finishes; both sources keep the same visibility rule.
+    const archived = entry.clientArchived === true || entry.archivedAt !== undefined
     if (filters.archive === 'active' && archived) return false
     if (filters.archive === 'archived' && !archived) return false
     if (filters.status === 'blocked' && entry.attentionKind !== 'blocked') return false

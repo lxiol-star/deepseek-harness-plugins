@@ -99,6 +99,7 @@ export interface SessionsService {
 /** The navigation service that actually switches the displayed session. */
 export interface UiWorkspaceService {
   openSession(target: string): void
+  archiveSession?: (id: string) => Promise<void>
 }
 
 /** The uiSession service face (only the members used here). */

@@ -61,7 +61,9 @@ export class BatchController {
       const result = await this.transport.commit(s.preview.token)
       if (this.disposed) return
       const incomplete = new Set(result.workflow?.synthesis.filter(row => row.status === 'failed' || row.status === 'sensitive').map(row => row.session) ?? [])
-      const succeeded = new Set(result.results.filter(row => (row.action === 'archived' || row.action === 'skipped') && !incomplete.has(row.session)).map(row => row.session))
+      const succeeded = new Set(result.nativeArchive
+        ? result.nativeArchive.filter(row => ['archived', 'already-archived', 'empty-archived'].includes(row.status)).map(row => row.session)
+        : result.results.filter(row => (row.action === 'archived' || row.action === 'skipped') && !incomplete.has(row.session)).map(row => row.session))
       this.state.set({ selected: s.selected.filter(id => !succeeded.has(id)), phase: 'idle', preview: null, result, error: null })
     } catch (error) {
       if (!this.disposed) this.state.set({ ...s, phase: 'idle', preview: null, error: error instanceof Error ? error.message : String(error) })
