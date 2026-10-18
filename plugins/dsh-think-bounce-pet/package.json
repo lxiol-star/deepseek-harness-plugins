@@ -1,0 +1,37 @@
+{
+  "name": "dsh-think-bounce-pet",
+  "version": "0.1.1",
+  "description": "Think-step bounce pet for the DeepSeek Harness Web UI: a ball launches in from a random screen edge whenever a reasoning step starts, bounces around with energy loss, can be poked or flung with the mouse, and shrinks away when the think step ends",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/9livewolf/dsh-think-bounce-pet.git"
+  },
+  "homepage": "https://github.com/9livewolf/dsh-think-bounce-pet",
+  "bugs": {
+    "url": "https://github.com/9livewolf/dsh-think-bounce-pet/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ]
+    }
+  }
+}

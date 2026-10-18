@@ -1,0 +1,7 @@
+# dsh-think-bounce-pet bundle patch: one host row carrying the dual-face package.
+# The host Loader activates the node half (lib/index.js), and dsh-client-modules
+# scans the same entry for its `dsh.client` declaration to compose the browser
+# half (lib/client.js).
+- insert:
+    - id: think-bounce-pet
+      name: dsh-think-bounce-pet

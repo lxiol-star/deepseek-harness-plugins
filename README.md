@@ -9,6 +9,7 @@
 | 插件 | 功能 | 状态 |
 | --- | --- | --- |
 | [dsh-session-board](plugins/dsh-session-board/) | 会话卡片看板、工作区树、DSH 归档同步、搜索筛选、可选 Wiki 归档提炼 | 实验性，已在 macOS Harness Dev 环境验证 |
+| [dsh-think-bounce-pet](plugins/dsh-think-bounce-pet/) | 思考弹球桌宠：常驻球/思考球、拍飞与拖拽投掷、鼠标碰撞、重力与物理参数实时可调 | 上游 0.1.1，修复 macOS 窗口顶栏拖拽；收录社区插件（MIT），已在本地验证 |
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。
 
@@ -40,6 +41,12 @@ npm pack --ignore-scripts
 
 Python/Wiki 集成测试依赖 `python3`、`zstd` 和兼容的 `wiki-archive.py`，详见插件说明。未配置这些外部条件时，相关测试会明确跳过。
 
+`dsh-think-bounce-pet` 收录的是上游构建产物（上游没有 `src/`），没有构建步骤；它的 macOS 窗口拖拽回归测试只需 `python3` 和一个 Chromium 系浏览器：
+
+```sh
+bash plugins/dsh-think-bounce-pet/tests/drag-guard/run.sh
+```
+
 ## 贡献
 
 欢迎通过 Issue 提交问题，提供 DSH 版本、操作系统、插件版本和复现步骤。分享日志前请移除密钥、个人路径和会话正文中的敏感信息。
@@ -49,3 +56,5 @@ Python/Wiki 集成测试依赖 `python3`、`zstd` 和兼容的 `wiki-archive.py`
 ## License
 
 [Apache-2.0](LICENSE)。第三方依赖保留各自许可证。
+
+`dsh-think-bounce-pet` 收录自上游 [9livewolf/dsh-think-bounce-pet](https://github.com/9livewolf/dsh-think-bounce-pet)（MIT，版权归上游作者），来源与版本记录见其 [UPSTREAM.md](plugins/dsh-think-bounce-pet/UPSTREAM.md)。
