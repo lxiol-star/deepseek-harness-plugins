@@ -21,7 +21,7 @@
 也可通过支持 GitHub 子目录的 DSH 插件管理器安装指定版本：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.2.0&path:/plugins/dsh-session-board
+github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.2.1&path:/plugins/dsh-session-board
 ```
 
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。
