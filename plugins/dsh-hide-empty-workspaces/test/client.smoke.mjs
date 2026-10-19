@@ -14,7 +14,7 @@ function check(name, condition) {
   console.error(`FAIL ${name}`)
 }
 
-function boot({ phase = 'ready', items, stored = null }) {
+function boot({ phase = 'ready', items, stored = null, includeArchived = null, archivedSessionIds = [] }) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <div id="sidebar">
       <section class="group" data-group="a">
@@ -32,8 +32,9 @@ function boot({ phase = 'ready', items, stored = null }) {
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0)
   window.cancelAnimationFrame = (handle) => window.clearTimeout(handle)
   if (stored !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces', stored)
+  if (includeArchived !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.includeArchived', includeArchived)
 
-  let snapshot = { phase, items }
+  let snapshot = { phase, items, archivedSessionIds }
   const listeners = new Set()
   const service = {
     list: {
@@ -133,7 +134,40 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.window.close()
 }
 
-// 6. localStorage opt-out disables the filter without uninstalling.
+// 6. Workspaces whose sessions are all archived are hidden too.
+{
+  const world = boot({ items: [
+    { workspaceId: 'ws-a', sessionIds: ['s1'] },
+    { workspaceId: 'ws-b', sessionIds: ['s2', 's3'] },
+    { workspaceId: 'ws-c', sessionIds: ['s4'] },
+  ], archivedSessionIds: ['s2', 's3'] })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('archived-only Workspace is hidden', world.hidden('ws-b'))
+  check('Workspaces with visible sessions stay', !world.hidden('ws-a') && !world.hidden('ws-c'))
+  const diag = world.window.__dshHideEmptyWorkspaces
+  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.1.1' && diag.state === 'ready')
+  check('diagnostics report the hidden id', Array.isArray(diag.hidden) && diag.hidden.includes('ws-b'))
+  world.dispose()
+  world.window.close()
+}
+
+// 7. includeArchived=1 restores the original "zero sessions" rule.
+{
+  const world = boot({ items: [
+    { workspaceId: 'ws-a', sessionIds: ['s1'] },
+    { workspaceId: 'ws-b', sessionIds: ['s2'] },
+    { workspaceId: 'ws-c', sessionIds: [] },
+  ], archivedSessionIds: ['s2'], includeArchived: '1' })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('includeArchived keeps archived-only Workspace visible', !world.hidden('ws-b'))
+  check('includeArchived still hides zero-session Workspace', world.hidden('ws-c'))
+  world.dispose()
+  world.window.close()
+}
+
+// 8. localStorage opt-out disables the filter without uninstalling.
 {
   const world = boot({ items, stored: '0' })
   world.exported.apply(world.ctx)

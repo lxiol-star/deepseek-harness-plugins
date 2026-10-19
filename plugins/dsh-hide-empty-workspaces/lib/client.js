@@ -1,10 +1,14 @@
 /**
  * Browser half of dsh-hide-empty-workspaces.
  *
- * Workspaces with no sessions are hidden from the native sidebar by marking
- * their group section. Emptiness comes from the Workspace Controller snapshot
- * (`sessionIds`), never from rendered rows: a collapsed group renders no
- * session rows, so counting the DOM would hide working directories.
+ * A Workspace is hidden when it has no *visible* sessions: sessions count when
+ * they are not in the Workspace Controller's archive set. Emptiness comes from
+ * the snapshot (`items[].sessionIds` minus `archivedSessionIds`), never from
+ * rendered rows: a collapsed group renders no session rows, so counting the DOM
+ * would hide working directories.
+ *
+ * Diagnostics are published at `window.__dshHideEmptyWorkspaces` so a running
+ * app can confirm the bundle loaded and which Workspaces it hid.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-hide-empty-workspaces',
@@ -21,16 +25,23 @@ window.__ModuleLoader__.load({
     const ROW_PREFIX = 'workspace:'
     /** Setting `0` shows empty Workspaces again without uninstalling. */
     const STORAGE_KEY = 'dsh.hideEmptyWorkspaces'
+    /** Setting `1` also counts archived sessions as visible. */
+    const INCLUDE_ARCHIVED_KEY = 'dsh.hideEmptyWorkspaces.includeArchived'
+    /** Plugin version reported by the diagnostics object. */
+    const VERSION = '0.1.1'
 
     /**
-     * Read the enabled flag.
-     * @returns true when the filter should run; storage failures keep the default.
+     * Read a boolean localStorage flag.
+     * @param key - storage key.
+     * @param fallback - value used when storage is unavailable.
+     * @returns the stored boolean, or the fallback.
      */
-    function enabled() {
+    function readFlag(key, fallback) {
       try {
-        return localStorage.getItem(STORAGE_KEY) !== '0'
+        const value = localStorage.getItem(key)
+        return value === null ? fallback : value !== '0'
       } catch {
-        return true
+        return fallback
       }
     }
 
@@ -57,7 +68,23 @@ window.__ModuleLoader__.load({
      * @param ctx - browser plugin context.
      */
     function apply(ctx) {
-      const workspaces = ctx.get('workspaces')
+      const diagnostics = {
+        version: VERSION,
+        state: 'loading',
+        hidden: [],
+        includeArchived: false,
+        error: null,
+      }
+      window.__dshHideEmptyWorkspaces = diagnostics
+
+      let workspaces
+      try {
+        workspaces = ctx.get('workspaces')
+      } catch (error) {
+        diagnostics.state = 'error'
+        diagnostics.error = String(error)
+        throw error
+      }
 
       const style = document.createElement('style')
       style.setAttribute('data-dsh-hide-empty-style', '')
@@ -69,21 +96,39 @@ window.__ModuleLoader__.load({
       /** Apply the current snapshot to the rendered Workspace rows. */
       function refresh() {
         frame = 0
-        const snapshot = workspaces.list.getSnapshot()
-        if (!snapshot || snapshot.phase !== 'ready' || !enabled()) {
-          clearMarks()
-          return
-        }
-        const empty = new Set()
-        for (const item of snapshot.items) {
-          const ids = item !== undefined && item !== null ? item.sessionIds : undefined
-          if (ids === undefined || ids.length === 0) empty.add(String(item.workspaceId))
-        }
-        for (const row of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) {
-          const key = (row.getAttribute('data-row-key') || '').slice(ROW_PREFIX.length)
-          const target = sectionOf(row)
-          if (empty.has(key)) target.setAttribute(ATTR, '')
-          else target.removeAttribute(ATTR)
+        try {
+          const snapshot = workspaces.list.getSnapshot()
+          diagnostics.state = snapshot !== undefined && snapshot !== null && snapshot.phase === 'ready'
+            ? 'ready'
+            : 'waiting'
+          if (diagnostics.state !== 'ready' || !readFlag(STORAGE_KEY, true)) {
+            clearMarks()
+            diagnostics.hidden = []
+            return
+          }
+          const includeArchived = readFlag(INCLUDE_ARCHIVED_KEY, false)
+          const archived = new Set((snapshot.archivedSessionIds || []).map(String))
+          const empty = new Set()
+          for (const item of snapshot.items) {
+            const ids = item !== undefined && item !== null && item.sessionIds !== undefined
+              ? item.sessionIds
+              : []
+            const visible = includeArchived
+              ? ids.length
+              : ids.filter((id) => !archived.has(String(id))).length
+            if (visible === 0) empty.add(String(item.workspaceId))
+          }
+          diagnostics.includeArchived = includeArchived
+          diagnostics.hidden = [...empty]
+          for (const row of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) {
+            const key = (row.getAttribute('data-row-key') || '').slice(ROW_PREFIX.length)
+            const target = sectionOf(row)
+            if (empty.has(key)) target.setAttribute(ATTR, '')
+            else target.removeAttribute(ATTR)
+          }
+        } catch (error) {
+          diagnostics.state = 'error'
+          diagnostics.error = String(error)
         }
       }
 
@@ -103,7 +148,7 @@ window.__ModuleLoader__.load({
           subtree: true,
         })
         const onStorage = (event) => {
-          if (event.key === STORAGE_KEY) schedule()
+          if (event.key === STORAGE_KEY || event.key === INCLUDE_ARCHIVED_KEY) schedule()
         }
         window.addEventListener('storage', onStorage)
         schedule()

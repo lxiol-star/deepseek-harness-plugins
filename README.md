@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | [dsh-session-board](plugins/dsh-session-board/) | 会话卡片看板、工作区树、DSH 归档同步、搜索筛选、可选 Wiki 归档提炼 | 实验性，已在 macOS Harness Dev 环境验证 |
 | [dsh-think-bounce-pet](plugins/dsh-think-bounce-pet/) | 思考弹球桌宠：常驻球/思考球、拍飞与拖拽投掷、鼠标碰撞、重力与物理参数实时可调 | 上游 0.1.1，修复 macOS 窗口顶栏拖拽；收录社区插件（MIT），已在本地验证 |
-| [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏只显示有会话的工作区；按 Workspace 快照判定，不删注册、不改会话 | 0.1.0，jsdom 冒烟通过，尚未在 GUI 挂载验证 |
+| [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏只显示有未归档会话的工作区；按 Workspace 快照判定，不删注册、不改会话 | 0.1.1，jsdom 冒烟通过，尚未在 GUI 挂载验证 |
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。
 
@@ -28,7 +28,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.2.1&path:/plugin
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.1.0&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.1.1&path:/plugins/dsh-hide-empty-workspaces
 ```
 
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。
