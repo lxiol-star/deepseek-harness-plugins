@@ -1,0 +1,4 @@
+# Hides Workspaces that have no sessions from the native sidebar.
+- insert:
+    - id: hide-empty-workspaces
+      name: 'dsh-hide-empty-workspaces'

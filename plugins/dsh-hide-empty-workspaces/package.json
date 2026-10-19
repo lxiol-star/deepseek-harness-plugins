@@ -1,0 +1,51 @@
+{
+  "name": "dsh-hide-empty-workspaces",
+  "version": "0.1.0",
+  "description": "Hide DeepSeek Harness workspaces that have no sessions from the native sidebar.",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lxiol-star/deepseek-harness-plugins.git",
+    "directory": "plugins/dsh-hide-empty-workspaces"
+  },
+  "homepage": "https://github.com/lxiol-star/deepseek-harness-plugins/tree/main/plugins/dsh-hide-empty-workspaces",
+  "bugs": {
+    "url": "https://github.com/lxiol-star/deepseek-harness-plugins/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "sidebar",
+    "workspace"
+  ],
+  "scripts": {
+    "test": "node test/client.smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    },
+    "manifestVersion": 1
+  }
+}
