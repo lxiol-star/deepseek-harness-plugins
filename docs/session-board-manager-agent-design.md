@@ -26,7 +26,7 @@
 
 **非目标**
 
-- 不把完整 DSH 聊天 UI 塞进面板（轻量 transcript + 跳转主界面）。
+- 不重造完整聊天 UI：优先嵌入官方 `conversation.content`（embedded variant）；契约不可用时降级为轻量 transcript，并始终提供「在主界面打开」。
 - 不代替用户做归档、删除、停止等破坏性动作（除显式指令 + DSH 原生 approval 路径）。
 - 不改官方 bundle 行为；不引入运行时 `@deepseek-ai/*` 依赖（交接文档 §3.4）。
 - 不做跨设备/跨实例同步（桌面、Dev3 各自独立）。
@@ -61,7 +61,7 @@ DSH 里每个会话都有自己的事件流（`session/event`：turn/step 边界
 
 ```text
 ┌──────────────────────────── Client（浏览器/Electron renderer）────────────────────────────┐
-│  管理中心面板（dock tab / overlay）                                                       │
+│  管理中心面板（shell.overlay 抽屉；dock tab 仅降级）                                      │
 │   ┌ 工作区看板（复用 BoardModel 数据，聚合状态）                                          │
 │   ├ 选中工作区的会话列表（checkbox、状态、耗时）                                          │
 │   ├ 任务/进度卡（来自 manager task 域 + mux 派生）                                        │
@@ -76,7 +76,7 @@ DSH 里每个会话都有自己的事件流（`session/event`：turn/step 边界
 │  ├ 订阅 session/event ─┐                 ├ 确保管理员会话存在            ├ 任务表（域 v1）  │
 │  ├ agent/created|disposed                 ├ 投递消息/唤醒（预算）          ├ 任务-会话映射   │
 │  ├ subagent/start|end   ├→ 就绪队列 ────→ ├ 注册 agent 作用域工具          └ 进度派生        │
-│  ├ jobs / domain/changed┘  snapshot+delta └ agent.inject 选区上下文                         │
+│  ├ jobs / domain/changed┘ snapshot+delta  └ 动态 systemPrompt.context / 选区 mirror        │
 └──────────────────────────────────────────┬────────────────────────────────────────────────┘
                                            │ sessionController.prompt / agent.inject
                                            ▼
@@ -91,86 +91,154 @@ DSH 里每个会话都有自己的事件流（`session/event`：turn/step 边界
 
 ## 5. 事件源清单（Host）
 
-| 源 | 事件 / API | 模式 | 用途 | 证据 |
-| --- | --- | --- | --- | --- |
-| 会话 | `session/event`（`turn/start`、`turn/end`、`step/start`、`step/end`、`assistant/message`、`tool/call`、`tool/result`、`user/message`） | 实时、可回放（会话日志） | 忙碌/完成/出错/最后活动 | `packages/core/session/src/types.ts:282`；现有订阅示例 `plugins/dsh-session-board/src/host/ledger.ts:522` |
-| 会话状态 | `agent/status`、`agent/error`、`agent/created`、`agent/disposed` | 实时 | 运行中/空闲/退出 | `packages/core/agent-loop/src/agent.ts:140`、`packages/core/agent/src/index.ts:245` |
-| 会话列表 | `api-session/added|removed|status|activity|error` | 实时 | 面板会话行增量 | `packages/api/session-controller` |
-| 子代理 | `subagent/start`、`subagent/end` | 实时 | 任务会话的子代理进度 | `packages/subagent/subagent` |
-| 作业 | jobs 服务（客户端已用 `jobs` 快照） | 快照 | 后台任务数、进度 | `plugins/dsh-session-board/src/client/model.ts` 的 `jobs` |
-| 工作区 | `domain/changed`（workspace 域）、`workspace/session-activity`、`workspace/session-stop` | 实时 | 工作区增删改、归档前活动判定 | `packages/api/workspace-controller/src/feed.ts`、`packages/workspace/workspace/src/index.ts` |
-| 调度/目标 | `schedule/changed`、`goal/changed` | 实时 | 任务与定时/目标关联（后续） | `packages/schedule`、`packages/goal` |
-| 面板 UI | 选区 POST、消息 POST | 请求 | 用户显式动作 | 本文 §9 |
+下表由独立调研核对过源码（DSH `0.2.1-rc.2`），并区分「实时事件 / 可回放」两类——mux 的 LT 快照只能依赖可回放或可枚举的真相，不能依赖 live-only 事件。
 
-> 已确认可复用：session-board 的 Host/Client 分层、SSE feed + revision 栅栏、storage 域（normalize-not-throw）、`ctx.sessionProjections`。
+| 源 | 事件 / API | 模式 | 可回放 | 证据 |
+| --- | --- | --- | --- | --- |
+| 会话生命周期 | `session/created`、`session/disposed` | emit（scope 过滤） | ❌ 仅活注册表 | `packages/core/session/src/index.ts:54,63` |
+| **会话日志** | `session/event`（提交后 fire-and-forget，监听器异常被包含） | emit | ✅ 日志 + seq/time | `packages/core/session/src/index.ts:74` |
+| turn/step | `turn/start`、`step/start`、`step/end`、`turn/end{reason}` | durable | ✅ | `packages/core/session/src/types.ts:289–298` |
+| turn 结果 | `TurnEndReasonMap`：completed / aborted / blocked / error / max-tokens / interrupted / forked | durable | ✅ | `packages/core/session/src/types.ts:202–230` |
+| 工具 | `tool/call`、`tool/result`（含 `error`、`meta`） | durable | ✅ | `packages/core/session/src/types.ts:362,376` |
+| 用户输入 | `user/message`（`source.kind`：user / inject / schedule / goal…） | durable | ✅ | `packages/core/session/src/types.ts:310` |
+| 模型输出 | `assistant/message`（+usage）、`assistant/attempt`、`llm/retry` | durable | ✅ | `packages/core/session/src/types.ts:339`；`packages/llm/llm-retry/src/types.ts:7` |
+| 审批（审计） | `approval/asked`、`approval/decided`（log-only，不进模型面） | durable | ✅ | `packages/interaction/user-approval/src/types.ts:44,55` |
+| 审批/提问（实时） | `approval/request`、`user-questions/request`（waterfall，agent 作用域） | waterfall | ❌ | `.../user-approval/src/types.ts:87`；`.../user-questions/src/types.ts:157` |
+| 作业（审计） | `job/registered`、`job/settled`（log-only） | durable | ✅ | `packages/jobs/jobs/src/types.ts:59,64` |
+| 作业（实时） | `ctx.jobs.events.subscribe({owner｜owners})` → registered / progress / stopping / settled / removed / output | emit（提交后） | ❌（settled 投影兜底） | `packages/jobs/jobs/src/types.ts:255,298`；注册表 `packages/jobs/jobs/src/index.ts:88,103,120` |
+| 子代理（实时） | `subagent/start`、`subagent/end` | emit | ❌ | `packages/subagent/subagent/src/lifecycle.ts:49,50,68` |
+| 子代理（可查） | `listChildren` / `listDescendants` / `list` | async 读 | 来自持久化 | `packages/subagent/subagent/src/index.ts:405,425,581` |
+| api-session | `api-session/added｜removed｜status｜activity｜error` | emit | ❌（从 `session/*` 重derive） | `packages/api/session-controller/src/types.ts:609–636` |
+| Agent | `agent/created`、`agent/disposed`、`agent/status{idle｜running}`、`agent/error` | emit | ❌ | `packages/core/agent/src/runtime-types.ts:261,270,280,393` |
+| 投影 | `ctx.sessionProjections.onChanged(session,key,value,seq)` / `stateOf` | 同步 delta + baseline | 由日志折叠 | `packages/session/session-projection/src/index.ts:302,320` |
+| 工作区域 | `domain/changed`（进程级、覆盖所有域） | emit（durable 后） | ✅ 域是真相 | `packages/storage/storage-domain/src/events.ts:46`；过滤先例 `packages/api/workspace-controller/src/feed.ts:102` |
+| 工作区 feed | baseline + upsert/remove/order/archived/pinned/replace | 每 follower 异步生成 | ✅ | `packages/api/workspace-controller/src/feed.ts:75,88` |
+| 归档准入 | `workspace/session-activity`（waterfall，必须 `next()`） | waterfall | 按需 | `packages/workspace/workspace/src/index.ts:129` |
+| 目标 | `goal/change`（durable）/ `goal/changed`（scoped live） | 双轨 | durable 中继 | `packages/goal/goal/src/domain.ts:66,114` |
+| 调度 | `schedule/change`（durable）/ `schedule/changed()`（无 payload，触发 refetch） | 双轨 | ✅ | `packages/schedule/schedule/src/types.ts:365,478` |
+| 任务/待办 | `todo/write`；实验性 `team/task`、`team/member` | durable | ✅ | `packages/todo/tool-todo/src/types.ts:31`；`packages/experimental/agent-team/src/types.ts:230,232` |
+| 会话协议 | `session/title`、`plan/mode`、`permission/preset`、`sandbox/mode`、`approval/policy`、`model/selection` | durable | ✅ | `packages/core/session/src/known-event-types.ts:49–84` |
+| 唤醒面 | `agent.followup/send/steer/inject`、`whenIdle`、`runMaintenance` | API | 经 `agent/inbox/spliced` 持久化 | `packages/core/agent/src/runtime-types.ts:191–241` |
+
+> 注意：**冷会话不会发 `session/event`**；面板的会话列表必须用现有 client 服务的列表/快照（`api-session` list + `session_controller.follow`），mux 只维护「活跃源」的 LT/ET 状态。
+
+**调研订正（两条会影响实现计划）**
+
+1. **现有 session-board feed 没有 revision 栅栏**：`src/host/routes.ts:134` 发的是裸的全量帧，`src/client/feed.ts:121` 无条件应用；当前唯一的顺序保证是 `ledger.ts:497` 的 per-session 写链。所以「revision 栅栏」是本设计新增的工作，不是复用。（此前以为已有，已按此修正 §6。）
+2. **`approval/request`、`user-questions/request` 是 waterfall 而不是 emit**：mux 若要监听必须始终 `await next()`，否则会截断审批链。更安全的做法是从 durable 的 `approval/asked` / `approval/decided` 事件派生「等待输入」状态；面板同理。
 
 ## 6. EventMux 设计
 
-### 6.1 数据结构（Host，内存 + 由会话日志派生）
+### 6.1 数据结构（Host，内存；真相来自会话日志/域）
 
 ```ts
-type SourceId = `session:${string}` | `job:${string}` | `subagent:${string}` | `workspace:${string}` | `task:${string}`
+type SourceId = `session:${string}` | `agent:${string}` | `job:${string}`
+              | `subagent:${string}` | `workspace:${string}` | `schedule:${string}` | `goal:${string}`
+type Priority = 'needs-input' | 'error' | 'completed' | 'progress'   // 声明顺序即优先级
+type EdgeKind = 'ask-open' | 'ask-close' | 'turn-end' | 'turn-start' | 'tool-result'
+              | 'job-settled' | 'subagent-end' | 'workspace-change' | 'schedule-due'
+              | 'goal-change' | 'title' | 'progress'
+
+interface Edge { kind: EdgeKind; at: number; priority: Priority; key: string }  // key 用于去重
 
 interface SourceState {
-  readonly id: SourceId
-  seq: number                       // 最后折叠的 session seq / 事件序号，防乱序
-  lastAt: number
-  phase: 'idle' | 'running' | 'waiting' | 'error' | 'done' | 'archived'
-  attention: readonly Attention[]   // needs-input / approval / error / task-done…
-  facts: JsonValue                  // 折叠后的事实（耗时、工具、最后预览）
+  id: SourceId
+  interest: { progress: boolean; terminal: boolean; needsInput: boolean }  // epoll event mask
+  level: unknown            // LT 真相：snapshot() 返回的内容
+  seq: number               // 每源序号守卫：丢弃 seq <= this 的输入
+  revision: number          // 最近改变 level 的 mux revision
+  edges: Deque<Edge>        // ET 事件，单源上限 256，全局 4096
+  dropped: number           // 溢出计数；>0 时下一个 digest 带 gaps:true
+  lastEventAt: number
+  oneshot?: EdgeKind        // 已武装 → 只唤醒一次，自动解除（EPOLLONESHOT）
+  terminalTtlMs: number     // 终态源淘汰 TTL；活源为 Infinity
 }
-
-interface MuxSnapshot { revision: number; sources: Record<SourceId, SourceState> }
-interface MuxDelta { revision: number; upserts: SourceState[]; removes: SourceId[] }
 ```
 
 ### 6.2 API
 
 ```ts
 class EventMux {
-  snapshot(): MuxSnapshot
-  follow(signal: AbortSignal): AsyncIterable<MuxDelta>   // 给面板 SSE/测验用
-  readiness(): readonly ReadyItem[]                      // 给管理员 digest 用（按优先级排序）
-  arm(sourceId: SourceId): void                          // EPOLLONESHOT 重新武装
-  dispose(): Promise<void>
+  register<S>(source: SourceDescriptor<S>): () => void   // { id, priority, interest, apply(prev,input): S }
+  unregister(id: SourceId): void                          // 幂等；session/disposed 自动触发
+  touch(id: SourceId, edge: Edge): void                   // EPOLLIN：入边 + 标就绪
+  setLevel(id: SourceId, level: unknown, seq: number): void // LT 真相替换，revision++
+  armOneshot(id: SourceId, kind: EdgeKind): void
+  disarm(id: SourceId): void
+  snapshot(): { revision: number; at: number; sources: Record<SourceId, { priority; level }> }
+  follow(signal: AbortSignal): AsyncIterable<MuxFrame>     // baseline 后 delta/removed/reset
+  wait(signal: AbortSignal, opts?: { floor?: Priority; timeoutMs?: number }): Promise<Ready[]>
+  stats(): { sources: number; queued: number; dropped: number; revisions: number }
+  close(): void
 }
+type MuxFrame = { type: 'baseline'; revision: number; snapshot: Snapshot }
+              | { type: 'delta'; revision: number; id: SourceId; level: unknown }
+              | { type: 'removed'; revision: number; id: SourceId }
+              | { type: 'reset'; revision: number; reason: 'gap' | 'overflow' | 'resync' }
 ```
 
-- **注册**：插件启动时对 `ctx.agents.list()` 与 `agent/created` 建立源；`session/event` 首次见到新会话自动注册；`domain/changed`/`agent/disposed` 触发注销。
-- **折叠**：一个 `session/event` 监听器内同步更新 `SourceState`（O(1)），不 await 任何 I/O；持久化事实（任务进度、最后 turn 结果）经 TaskLedger 异步落库。
-- **发布**：变更标脏，`setTimeout(200–500ms)` 合并后广播一次；同源只保留最新；revision 单调递增，客户端过期 delta 丢弃并走全量 resync。
-- **就绪优先级**：`needs-input/approval` > `error/cancel` > `task-done/task-blocked` > `long-running` > `progress`。
-- **有界**：每源保留最近 K 条 attention、全局队列上限（例如 200）并记录丢弃计数；丢弃只影响「值得自动唤醒」的提示，不影响面板 LT 快照。
+### 6.3 epoll 映射
 
-### 6.3 唤醒策略（默认保守）
+| epoll | EventMux |
+| --- | --- |
+| `epoll_create` | 每插件 fiber 一个 `EventMux`（`ctx.effect` 释放） |
+| `epoll_ctl ADD/MOD/DEL` | `register` / `setLevel`+`armOneshot` / `unregister`（disposer 走 `ctx.effect`） |
+| `epoll_wait` | `wait(signal,{floor})` → 就绪集合按 `(优先级, firstReadyAt)` 排序 |
+| fd | `SourceId` 字符串（**不**存 Agent/Session 引用，避免陈旧引用） |
+| `EPOLLIN`（水平） | `snapshot()`/`level`：条件持续成立就一直就绪（如一个未关闭的 ask） |
+| `EPOLLET`（边缘） | `edges` 双端队列，只有读者游标推进才消费 |
+| `EPOLLONESHOT` | `armOneshot` + 自动 `disarm`：一个 ask/error 只唤醒一次 |
+| `EPOLLHUP/ERR` | `unregister` → `{type:'removed'}`，状态淘汰 |
+| `EPOLLPRI` | needs-input > error > completed > progress |
+
+### 6.4 唤醒策略（默认保守）
 
 ```ts
 interface WakePolicy {
-  enabled: false                      // 默认关闭；面板开关打开才启用
-  maxAutoWakesPerMinute: 1
-  maxAutoWakesPerHour: 6              // 可配
-  minPriority: 'needs-input' | 'error' // 只在这些就绪项上自动唤醒
-  quietHours?: { start: string; end: string }
-  onlyWhenManagerIdle: true
-  budgetRemaining(): number
+  minIntervalMs: number   // 15_000：两次唤醒的硬下限
+  batchWindowMs: number   // 2_000：首个就绪边后合并窗口
+  quietMs: number         // 5_000：completed 类需安静一段时间才唤醒
+  wakeOn: Priority[]      // 默认 ['needs-input','error']
+  digestMaxItems: number  // 20
+  digestMaxBytes: number  // 4096
+  dedupeTtlMs: number     // 300_000：同一个 Edge.key 不重复上报
+  maxOutstanding: number  // 1：永不同时排队第二个 digest
 }
 ```
 
-- 用户发消息永远直接唤醒（不受预算限制）。
-- `watch` 工具可以让管理员对某个工作区/会话显式订阅更高优先级（例如「任务会话结束/失败时叫我」）。
-- 所有自动唤醒都投递**一个 digest**（就绪项摘要 + 选区 + 自上次唤醒以来的变化），而不是逐事件投递。
-- 每次唤醒在任务/事件流里留痕，面板显示「最近自动唤醒原因」。
+规则：
 
-### 6.4 失败模式与对策
+1. 仅当 `ctx.agents.get(managerId)?.status === 'idle'` 时唤醒；运行中就把边留在有界队列里、**跳过**唤醒——绝不能「每事件一条 prompt」（每个 inbox 消息都会成为一个独立 turn）。
+2. 一次唤醒只发**一个 digest**：按优先级取前 N 条 + `dropped/gaps` 计数 + 指向 `snapshot()` 的入口。
+3. 投递方式：`sessionController.prompt`（与 GUI 发送同路径，`requestId` 幂等，内部 `resolveAgent` 自动冷恢复）。v1 里 digest 以 `[系统就绪摘要]` 前缀的普通用户消息投递（可审计）；若后续需要精确的 `source.kind='inject'`，再评估结构化构造 UserMessage（插件运行时不能 import `@deepseek-ai/dsh-llm`，见交接文档 §3.4）。
+4. `needs-input`/`error` 用 oneshot：唤醒一次后自动解除，条件仍成立时靠下一轮 LT 快照重arm。
+5. 用户消息永远直通唤醒，不受预算限制。
+
+### 6.5 合并、去重、序号
+
+- **同源合并**：每源每 `EdgeKind` 只保留一条待上报边（`level` 已存真相，边只表示「有新闻」）；50 个 `tool/result` 折叠成 1 条带 `count` 的边。
+- **去重**：`Edge.key` = `ask:<id>` / `turn:<turn>` / `job:<id>:settled` / `subagent:<runId>` / `workspace:<id>:<op>`；`dedupeTtlMs` 内抑制，LRU 上限 1024。
+- **序号守卫**：每源 `seq` 丢弃旧输入；mux revision 全局单调；follow 端拒绝 `revision <= lastSeen`，缺口时强制 `reset` + 全量 `snapshot()`。
+- **强制过滤**：丢弃 job `output` 事件（参考 `packages/api/job-controller/src/rows.ts:37`）、丢弃 `assistant/*` 流正文、`tool/result` 只保留 `{callId,name,isError,bytes}` 元数据，绝不把大内容拷进边。
+
+### 6.6 溢出与淘汰
+
+- 上限：单源 256 条边、全局 4096 条；溢出时**先丢低优先级再丢最旧**，递增 `dropped`，向 follower 发 `{type:'reset', reason:'overflow'}`，并在下一个 digest 标 `gaps:true`（管理员先 `snapshot()` 再行动）。
+- 终态源（settled job / ended subagent / 结束的 schedule）保留 `terminalTtlMs`（10 分钟）后淘汰；`session/disposed`/`job removed` 立即注销。
+
+### 6.7 失败模式与对策
 
 | 失败 | 对策 |
 | --- | --- |
-| 面板断线/重连 | `snapshot()` 全量 + revision；客户端丢弃过期 delta |
-| 事件风暴（长工具输出、并行会话） | 同源合并、每源 folding 不带 I/O、全局丢弃计数 |
-| 管理员忙 | 就绪队列不投递；`onlyWhenManagerIdle` 保证不重入 |
-| 会话被归档/删除 | 注销源；任务标记 `orphaned` 并提示管理员 |
-| 插件卸载 | mux 的订阅、SSE 流、定时器全部走 `ctx.effect` 释放 |
-| 宿主重启 | 内存状态丢弃，从会话日志/任务域重建；管理员会话命令式冷恢复 |
+| 面板断线/重连，live 事件无重放 | 每代 `follow` 先发一份 baseline；revision 缺口 → `reset` + `snapshot()`；冷会话列表由现有 `api-session` 列表/`follow` 快照补齐 |
+| 长工具输出 / job output 风暴 | 元数据边 + 过滤 `output` + 同源合并 + digest 字节上限 |
+| 管理员忙 | `maxOutstanding=1`、skip-while-busy、下次空闲聚合；始终报告 `dropped/gaps` |
+| 唤醒风暴/自震荡 | 默认只唤醒 needs-input/error；`minIntervalMs` 下限；管理员自己的源 `interest.progress=false` |
+| waterfall 误用破坏审批链 | 审批/提问状态从 durable `approval/asked|decided` 派生；若监听 waterfall，必须 `await next()` |
+| 持久化写交错 | 复用 ledger 的 per-session 写链（`ledger.ts:497`），mux 不直接碰域写 |
+| 快照过大 | 一个合并窗口一帧；超过约 2k 源时改增量 + 周期性 baseline |
+| 重复/乱序投递 | `domain/changed` 过滤 `domain==='workspace'`；每源 seq 守卫；`removed` 视为终局 |
+
 
 ## 7. 管理 Agent 设计
 
@@ -180,9 +248,10 @@ interface WakePolicy {
 - 建议给它一个专用工作区（例如 `~/Documents/deepseek-harness/dsh-console`）或复用用户的默认工作区；工作区路径可配置。好处：侧栏可见、cwd 合理、能直接在工作区目录里读写。
 - **常驻 = 可随时唤醒，不是一直跑模型**：
   - 面板发消息 → Host route → `sessionController.prompt(...)`；内部 `resolveAgent` 自动冷恢复并去重并发恢复（证据 `packages/api/session-controller/src/agent.ts:200`、`commands.ts:513`）。
-  - 冷恢复同样会触发 `agent/created`（带 `source`），插件据此在恢复出来的 Agent 作用域里重新注册管理工具/系统提示，所以「工具只在管理员会话里存在」在冷启动路径同样成立。
+  - 冷恢复同样会触发 `agent/created`（`source` 含 `resume`，证据 `packages/core/agent/src/runtime-types.ts:125,261`），插件据此在恢复出来的 Agent 作用域里重新注册管理工具/系统提示，所以「工具只在管理员会话里存在」在冷启动路径同样成立。
+  - **现状没有 idle 回收**：调研确认 core/host/bundle 里没有任何 idle-timeout；`sessionController` 的 resume 路径还会丢弃 `AgentHandle`（`agent.ts:440-444`），因此 GUI 打开过的会话在本进程内一直保活。结论：`agents.get(managerId)` 大概率在线，但**绝不能假设**（重启后必为冷），一切以 `sessionController.prompt` 的自动恢复为准。
   - 空闲时管理员不运行，不产生 token 成本；会话本身持久化。
-  - 插件不长期持有 Agent handle（避免和 GUI/归档的生命周期打架）；需要在线注入时用 `ctx.agents.get(id)` 判断。
+  - 插件不长期持有 Agent handle：`sessionController.create` 没有 setup 钩子，且 `AgentHandle` 是唯一的销毁能力（`packages/core/agent/src/index.ts:146-163`），拿别人的 handle 反而制造生命周期冲突；用 `agent/created` 做作用域注册即可。
 - 插件卸载/重载：会话保留；重新加载后按需恢复。
 
 ### 7.1.1 上下文注入：用动态 system prompt context，而不是 inbox 消息
@@ -194,15 +263,28 @@ interface WakePolicy {
 
 `sessionController.prompt` 只用于「用户真的发了一句话」，`systemPrompt.context` 用于「上下文」；两者职责分开。
 
+### 7.1.2 首次创建（懒创建流程）
+
+1. 首次需要管理员时（面板打开 or 第一条消息），插件读域里的 `managerSessionId`；没有就创建：
+   - 确保管理目录存在（Host 进程直接 `mkdir -p`，例如 `~/Documents/deepseek-harness/dsh-console`），经 `workspaceRegistry.resolveByPath` → `create` 注册成工作区（同 `dsh-workspace-autoregister` 的调用方式）；
+   - `sessionController.create({ workspaceId })`（workspaceId 与 cwd 二选一，传 workspaceId 时 cwd 自动取工作区路径）得到会话 id；
+   - 可选：调用会话重命名设置为「DSH 管理台」，并把 id 写回插件域（幂等，重试复用同一个 id）。
+2. **创建后立即 prompt**：新建的空白会话在侧栏是隐藏的（`blank` 直到第一次 `turn/start`），而冷列表又要求 `header.cwd` 存在——所以「创建 → 立刻发第一条消息」既让会话可见，也避免用户看到一个空白管理员行。首次创建失败/未选模型时面板显示可重试错误。
+3. 模型选择：管理员会话沿用 profile 默认模型；若 profile 没有默认模型，创建仍成功，但第一次 prompt 会报「未选模型」——面板要把这个错误显式展示并给「选择模型」入口（复用主界面模型选择）。
+4. 并发保护：首次创建与冷恢复都串行化（插件内 promise 链），避免两个面板请求各建一个管理会话；`sessionController.create` 支持传入 `sessionId` 做幂等复用。
+5. 失败：创建/注册失败只影响管理中心 tab（显示可重试错误），不影响看板。
+
 ### 7.2 工具集（只在管理员 Agent 的作用域注册）
 
-注册模式照抄 agent-team：`agent/created` 时按 `agent.id === managerSessionId` 匹配，`agent.ctx.tools.register(defineTool(...))`，`agent/disposed`/插件卸载时释放（证据 `packages/experimental/tool-agent-team/src/index.ts:169,423`）。
+注册机制：`ctx.on('agent/created', ({ agent }) => ...)` 里按 `agent.id === managerSessionId` 匹配，然后 `agent.ctx.tools.register(defineTool(...))`；`agent/disposed` 与插件卸载时释放。`agent/created` 在**创建和冷恢复两条路径**都会触发（`source` 分别是 `startup`/`resume`），这是 `sessionController.create` 没有 setup 钩子时唯一可靠的挂载点；模式照抄 agent-team（`packages/experimental/tool-agent-team/src/index.ts:169,423`）。
+
+> 备选方案：用 `ctx.agentPresets.register({ id: 'manager', plugins: [...] })` 注册一个运行时预设，把管理工具打包进预设，`sessionController.create({ agentPreset: 'manager' })`。适合以后把「管理能力」做成可分发预设；M1 用 `agent/created` 更简单，也避免与 profile 预设命名冲突。
 
 | 工具 | 作用 | 只读? |
 | --- | --- | --- |
 | `workspace_overview` | 工作区列表 + 聚合状态 + 会话数 + 任务数 | ✅ |
 | `workspace_sessions` | 指定工作区的会话（标题、状态、最后活动、归档、任务） | ✅ |
-| `session_status` | 单会话/任务会话的运行状态、最后结果、等待事项、后台作业 | ✅ |
+| `session_status` | 单会话/任务会话的运行状态、最后结果、等待事项、冷进度（`sessionController.projections`：turnBoundary/sessionStats/goal） | ✅ |
 | `read_selection` | 面板当前勾选的工作区/会话 | ✅ |
 | `assign_task` | 在工作区创建会话并投递任务 brief，登记任务 → 会话映射 | ❌ |
 | `list_tasks` / `update_task` | 任务看板维护（claim、blocked、done、notes） | ❌ |
@@ -211,11 +293,19 @@ interface WakePolicy {
 
 配套 `systemPrompt.section`（角色、工具契约、选区协议、成本约束）+ `systemPrompt.context`（当前选区、最近就绪项、任务概览）。
 
+**读取边界（调研结论）**：
+
+- 其它会话的后台作业不能通过 `ctx.jobs` 读——`ctx.jobs.list/get/read` 的 `caller` 必须是该作业的属主会话；管理工具只能从**目标会话的 durable 事件**（`job/registered`/`job/settled`、`tool/result`）或 `sessionController.projections` 派生进度。
+- `sessionController.cancel`、`ctx.goals.get(agent)`、`agents.get(id).status` 都是 live-only；冷会话要把 `sessionController.projections({sessionId})` 作为事实来源。
+- `subagents.prompt` 只用于「有 live 直接父会话的 subagent 子会话」，不能给普通会话发消息；跨普通会话只能走 `sessionController.prompt`。
+
 ### 7.3 能力边界
 
 - 管理员可创建会话、发消息、维护任务；**不可**归档/删除会话、停止他人任务——除非用户显式要求，且走 DSH 原有 approval 路径。
 - 面板默认只把**结构化元数据**（id/标题/状态/耗时）放进管理员上下文；会话正文由管理员按需用只读工具拉取，并在面板标识「已读取正文」。
 - 模型沿用 profile 默认选择，不写死 provider（交接文档 §7.3）；管理员会话的模型可单独选择（复用会话模型选择机制）。
+- **API 边界（调研结论）**：`sessionController.prompt` 的 provenance 恒为 `user`（`packages/api/session-controller/src/index.ts:478-485`），自动 digest 只能以「用户消息」形态出现（v1 接受，前缀标明系统来源）；`cancel`/`goals.get`/`agent.status` 是 live-only；`subagents.prompt` 只对「有 live 直接父会话的 subagent 子会话」有效；没有 `agents.sendMessage`。因此管理员对普通会话的唯一写入口是 `sessionController.prompt`。
+- 管理员会话由 `sessionController` 创建，插件**拿不到可销毁的 handle**（`AgentHandle` 是唯一销毁能力）；不假设能主动结束管理员会话，靠归档/用户操作或宿主退出。
 
 ## 8. 任务模型（插件新存储域 v1）
 
@@ -241,83 +331,125 @@ manager_tasks: Map<taskId, {
 }>
 ```
 
-- 状态机：`pending → assigned → running → blocked|done|failed`；`running` 与进度由 mux 从会话事件派生（turn 结束、错误、等待输入），**不由模型口述**；`done/failed` 需要管理员显式标记（附证据摘要），面板显示模型声明与事件证据。
+- 状态机：`pending → assigned → running → blocked|done|failed`；`running` 与进度由 mux 从会话事件派生（turn 结束、错误、等待输入；作业事实取该会话日志里的 `job/registered|settled`/`tool/result`，或 `sessionController.projections`，**不能**直接读别人的 `ctx.jobs`），**不由模型口述**；`done/failed` 需要管理员显式标记（附证据摘要），面板显示模型声明与事件证据。
 - 与 DSH 原生对象的关系：任务不是 `goal`，但可以带 `goalId` 关联（M4）；不复制 DSH 的真相（会话/作业状态仍以 DSH 服务为准）。
 - 域打不开时降级为内存任务表（面板仍可用，重启丢任务记录），不阻塞插件（交接文档 §4.2/§7.7）。
 
 ## 9. 面板 UI 设计
 
-### 9.1 位置与形态
+### 9.1 位置与形态（调研结论：overlay 抽屉优先，dock tab 降级）
 
-- **M1–M3**：dock 列增加 tab：「看板」/「管理中心」。复用现有 `attachDock` DOM 契约与 CSS 变量，不新开列。
-- **M4**：管理中心可另开全屏 overlay（复用 `shell.overlay` 注册模式，参考 `BoardOverlay`）。
-- 面板三段式（纵向）：工作区看板（可折叠）→ 选中工作区的会话列表（checkbox）→ 任务/进度 + 输入框。
-- 响应式：窄屏只保留选中会话列表与输入框；工作区看板折叠为下拉。
+**主方案：新增一个 `shell.overlay` 列表条目 `session-board.manager`，画成右侧抽屉。** 理由（均为源码核对）：
 
-### 9.2 选区同步
+- `shell.overlay` 是 additive list seat，跨主面板导航常驻（`packages/client/ui-layout/src/client/index.ts:105`、`AppFrame.tsx:249,292`）；
+- overlay 层是 `position:absolute`，不会干扰现有 dock adapter 的 in-flow 列检测（`AppFrame.module.css:281-286`、`dock-adapter.ts:153`）；
+- **它在 slot 树内**，因此可以用 `SessionProvider` + `renderFactorySlot('conversation.content', { variant: 'embedded' })` 嵌入**官方聊天**：输入框、模型选择、流式、工具卡全部白送，和 ui-subagent 侧栏聊天是同一套做法（`packages/client/ui-subagent/src/client/sidebar-chat/index.tsx:129-169`）；
+- 现有 dock 列是手工 DOM 根、不在 slot 树内（`plugins/dsh-session-board/src/client/index.tsx:599-605`），**无法**嵌入官方聊天，只能自绘 transcript——所以 dock tab 只作为降级形态。
 
-1. 勾选变化 → 客户端 store 乐观更新（本地持久化）；
-2. debounce 300ms → `POST /api/session-board/manager/selection`，body：`{ workspaceIds, sessionIds, capturedAt }`；
-3. Host 校验工作区/会话存在 → 保存到 `manager_state`（只改域状态，**不影响**管理员会话日志，也不唤醒模型）；
-4. 管理员下一次被唤醒时，`systemPrompt.context` 动态渲染最新选区（见 §7.1.1），无需 inbox 消息；
-5. 面板显示「选区已同步」状态与「清空选区」。
+面板（抽屉）自上而下：
 
-### 9.3 对话与回复渲染
+1. **工作区看板**：复用 `buildWorkspaceNodes`（`src/client/workspace-tree.ts:8-46`）与 `BoardModel.groups`，每个工作区一行/一 tile，显示聚合状态（运行中/等待输入/出错/任务数）；点击设置 `focusedWorkspaceId`。
+2. **会话列表**：复用 `BoardList`/`SessionCard` 的只读部分（`BoardList.tsx:100-124`、`SessionCard.tsx:150-173`），过滤到 `focusedWorkspaceId`；checkbox + aria 已有现成结构（`SessionCard.tsx:160-171`），但**不复用 `BatchController`**（它带归档阶段与 50 条上限：`src/client/batch.ts:5-11,82`、`src/shared/archive.ts:51`）。
+3. **官方聊天**：`<SessionProvider session={managerReference}>` + `renderFactorySlot('conversation.content', { variant:'embedded', phase, hero }, …)`（见 §9.3）。
 
-- 发送：面板 composer → `POST /api/session-board/manager/prompt { text, requestId }`；Host 组装「选区块 + 任务上下文 + 用户文本」→ `sessionController.prompt`（queue 模式）。与 GUI 发送路径一致，保证持久化/审计一致。
-- 渲染（推荐方案）：客户端 `sessions.retain(managerSessionId)`，用 `binding.session` + `eventSource` 渲染**轻量 transcript**：用户消息、assistant 文本（流式片段合并）、工具调用摘要（一行）、错误一行；不上完整 markdown/工具卡片。超出 N 条折叠为「查看更早」。
-- 兜底：面板顶部「在主界面打开」→ `uiWorkspace.openSession(managerSessionId)`，完整聊天/工具卡片都在主界面。
-- 备选方案（不推荐首发）：直接把官方聊天节点嵌进面板（`uiConversation` 内部结构复杂、版本敏感）。
-- 流式：订阅 `assistant-stream`（会话事件的高频帧）做打字机效果，终态以 `session/event` 为准。
+响应式/无障碍：
+
+- 抽屉覆盖内容而非挤压布局；处理 macOS 顶栏留白（沿用 `css.ts:675-677` 的既有偏移做法）、`pointer-events:auto`；
+- **不**抢焦点（只有全屏看板用 `modal-focus.ts`）；窄屏变整屏抽屉；
+- 新样式只用 `--dsw-*` 主题 token；新增 `:hover` 规则要包 `@media (hover:hover)`（现有样式有未 gating 的先例，`css.ts:167,231,341,540`）；
+- 新文案必须 `en`+`zh` 同步（`tests/locales.spec.ts` 会校验键集合/占位符/空串）。
+
+### 9.2 选区同步与「发给管理员」
+
+**选区状态**
+
+- 客户端 `ManagerController`（新 store，扩展现有 ViewState/localStorage：`src/client/index.tsx:105-127,444-462`）保存 `{managerSessionId?, focusedWorkspaceId, selected, wakeEnabled}`；
+- 需要让管理 Agent 的工具看到选区时，才写 Host durable mirror（`POST /api/session-board/manager/selection`），由 `manager_state` 保存；纯前端勾选可以只留在本地（churn 不进 Host）。
+
+**发送路径（关键决策）**
+
+- 面板发消息**不新增 Host prompt 路由**，直接用客户端官方 remote 路径：`sessions.retain(managerSessionId, { source: 'sessionBoardManager' })` → `await reference.ready` → `reference.binding.session.prompt([{ type:'text', text }], 'queue')`（GUI 的发送就是这个路径：`packages/client/ui-conversation/src/client/service.ts:210-213` → `packages/api/session-controller/src/client/sessions/session.ts:271-277` → Host `@Remote('prompt')`）。
+- 理由：消息本来就必须落到会话日志（模型可见 ⟺ 已记录），Host 再包一层只会重复实现并绕开现有鉴权/去重；`requestId` 去重、断线重试都由该路径保证。
+- 「发送选区」是一个显式按钮（一次点击 = 一条排队消息）；可选的自动同步只在 ≥500ms 防抖后发一条摘要，并在 UI 标注「会消耗一次模型调用」。
+- 选区的**动态上下文**仍由 Host 的 `systemPrompt.context` 提供（§7.1.1）：不需要每次勾选都发消息，管理员下次被唤醒时自动看到最新选区。
+
+### 9.3 对话与回复渲染（三方案对比）
+
+| 方案 | 做法 | 优点 | 缺点 |
+| --- | --- | --- | --- |
+| **(a) 嵌入官方聊天（推荐）** | `SessionProvider` + `conversation.content` factory 的 `embedded` variant，子 slot `session-board.manager.chat`（single/session scope）提供 `SessionProvider` | 输入框、模型选择、流式、工具卡、审批提示全部复用官方实现；和侧栏子代理聊天同款 | 依赖 in-tree `conversation.content`/`embedded` 契约，版本漂移要探测降级 |
+| (b) 轻量 transcript | `sessions.retain` → `binding.session.projections.faceOf('turnOutline')`（每轮 `{turn,seq,prompt,response≤120}`）或 `binding.eventSource`（durable + `assistant/live-chunk`） | 位置无关、数据有界、实现简单 | 自绘格式/滚动，预览截断，无审批 UI，按消息而非按 token 发布 |
+| (c) 打开主界面 | `uiWorkspace.openSession(managerSessionId)` | 零重复 | 不是「面板内对话」 |
+
+**推荐**：抽屉用 (a)；(b) 作为 `conversation.content` 不可用/契约变更时的降级；面板头部始终提供 (c) 的「在主界面打开」。管理员的 approval/待回答交互在面板里不可操作 → 显示 pending 状态 + 引导到主界面。
+
+注册骨架（示意）：
+
+```ts
+scopedSlots.inject('shell.overlay', () => scopedSlots.register({
+  name: 'shell.overlay',
+  id: 'session-board.manager',
+  order: 60,                    // 现有看板是 40
+  locale: NS,
+  children: { 'session-board.manager.chat': { kind: 'single', scope: 'session' } },
+  inject: () => ({ face: managerFace }),
+}, ManagerDrawerSlot))
+```
 
 ### 9.4 任务/进度展示
 
 - 任务卡：标题、状态色、关联工作区/会话、最近事件时间、进度摘要（来自 mux 派生的 turn/作业事实）。
-- 点击任务 → 打开关联会话（复用现有 `uiWorkspace.openSession` 路径）。
-- 自动唤醒开关 + 预算剩余 + 「暂停自动管理」。
+- 点击任务 → `uiWorkspace.openSession(task.sessionId)`（复用现有导航路径，`src/client/index.tsx:507-553`）。
+- 自动唤醒开关 + 预算剩余 + 「暂停自动管理」；每次自动唤醒在面板留痕（原因 + 摘要）。
 
-### 9.5 文案与无障碍
+### 9.5 新增客户端模块（建议）
 
-- 中英双语（`locales.ts` 键集合同步，交接文档 §7.10）；键盘可达、focus 管理；减少动态效果；不使用硬编码颜色（用主题 token）。
+1. `src/client/manager/controller.ts`：`ManagerController`（选区、focused workspace、managerSessionId、phase），沿用现有 store/hooks 模式；
+2. `src/client/manager/session-link.ts`：`sessions.retain` 生命周期（`CleanupStack` 释放）、`ready`、`send`、状态；只把 `SessionReference` 交给 `SessionProvider`；
+3. `src/shared/manager.ts`：纯函数 `buildSelectionMessage(...)`、`managerPhase(...)`，像 `batch.ts` 一样单测；
+4. 可选 durable mirror（跨设备/给工具读）：复用现有 prefs 域的额外 key，不升域版本（normalize-not-throw，交接文档 §4.2）。
 
-## 10. 协议草案（Host routes）
+## 10. 协议草案
 
-全部走 `connection.fetch`（自动 Host/Origin + 浏览器会话校验）；mux 的 SSE 若用裸 `webServer.register` 必须自己调 `requestRejection`（交接文档 §7.6）。
+**大部分交互不需要新路由**：面板 → 管理员的消息走客户端 `session.prompt`（见 §9.2）；面板数据来自现有 client 服务（sessions/workspaces/jobs/uiSession）与 mux SSE。新增路由只承载**durable 事实**与 mux 快照/增量。
 
-| 方法/路径 | 请求 | 响应 |
-| --- | --- | --- |
-| `GET /api/session-board/manager/state` | — | `{ managerSessionId, selection, tasks, muxRevision, wakePolicy }` |
-| `POST /api/session-board/manager/selection` | `{ workspaceIds, sessionIds }` | `{ accepted, revision }` |
-| `POST /api/session-board/manager/prompt` | `{ requestId, text }` | `{ accepted }` / 结构化错误 |
-| `POST /api/session-board/manager/task` | `{ action: 'create'｜'update', task }` | `{ task }` |
-| `GET /dsh-session-board/mux/stream` | — | SSE：`{ type: 'snapshot'｜'delta', revision, ... }` |
+| 方法/路径 | 请求 | 响应 | 说明 |
+| --- | --- | --- | --- |
+| `GET /api/session-board/manager/state` | — | `{ managerSessionId?, selection, tasks, muxRevision, wakePolicy }` | 面板初始化 / 断线重连；`connection.fetch` 自带信任栅栏 |
+| `POST /api/session-board/manager/selection` | `{ workspaceIds, sessionIds }` | `{ accepted, revision }` | durable 选区 mirror（给管理工具与动态上下文用） |
+| `POST /api/session-board/manager/task` | `{ action: 'create'｜'update', task }` | `{ task }` | 面板任务卡操作；管理工具走同一域 |
+| `GET /dsh-session-board/mux/stream` | — | SSE：`baseline` / `delta` / `removed` / `reset` + revision | 裸 `webServer` 路由必须自己调 `requestRejection`（交接文档 §7.6） |
 
-管理员收到的 user message 示例（Host 组装）：
+选区消息格式（客户端在发送时组装进一条 user message，服务端无需再拼）：
 
 ```text
 [选区] 工作区 A（3 会话，其中 1 个运行中）；会话 s1（等待输入）、s2（已完成）
-[任务] 任务 t1「重构缓存层」→ 会话 s3 运行中（12 分钟）
+[任务] t1「重构缓存层」→ s3 运行中（12 分钟）
 [用户] 把 s1 卡住的问题整理一下，然后给工作区 B 建一个任务
 ```
+
+（`[任务]` 段可选，由客户端从 `GET /manager/state` 拿到的任务快照组装；管理员也可以自己用工具查。）
 
 ## 11. 安全、成本与可靠性
 
 - **写入边界**：管理员只做「建会话 / 发消息 / 任务记录 / 选区」；归档、删除、停止必须走用户显式指令与 DSH 原生 approval。面板按钮与工具提示明确标注。
 - **数据最小化**：默认只同步结构化元数据；拉取会话正文要显式（工具调用记录 + 面板标记）。
-- **成本控制**：自动唤醒默认关；预算、优先级、静默时段、`onlyWhenManagerIdle`；一次唤醒一个 digest；面板显示预算消耗。
+- **成本控制**：自动唤醒默认关；预算、优先级、静默时段、`onlyWhenManagerIdle`；一次唤醒一个 digest；面板显示预算消耗。「发送选区」是显式动作（= 一条排队消息），勾选本身不发消息。
 - **幂等**：消息带 `requestId`；任务更新带 revision（CAS）；重复的选区同步合并。
 - **可观测**：所有自动唤醒、任务状态迁移、mux 丢弃计数写 `ctx.logger`（前缀 `dsh-session-board:`）+ 面板「最近活动」。
-- **卸载/降级**：任何新增域/路由/连接失败都降级（面板只读或隐藏管理中心 tab），不阻塞现有看板（交接文档 §4.2）。
+- **waterfall 安全**：`approval/request`、`user-questions/request`、`workspace/session-activity` 都是 waterfall；mux 不直接订阅它们，靠 durable 的 `approval/asked|decided` 派生；任何必须监听 waterfall 的场合都要 `await next()`，否则会破坏审批/归档链。
+- **UI 生命周期**：抽屉持有 `sessions.retain` 的 manager 引用，必须在 CleanupStack 里 release（否则历史/流一直开着）；`conversation.content`/`embedded` 是 in-tree 契约，必须做能力探测 + 轻量 transcript 降级，不能假定永远存在。
+- **卸载/降级**：任何新增域/路由/连接失败都降级（面板只读或隐藏管理中心入口），不阻塞现有看板（交接文档 §4.2）。
 
 ## 12. 里程碑
 
 | 阶段 | 内容 | 产出/验收 |
 | --- | --- | --- |
-| **M0 技术验证**（1–2 天） | Host route → `sessionController.prompt` 冷恢复并唤醒管理员会话；`agent/created` 注册一个测试工具；单会话事件折叠进 mux snapshot | 合成数据脚本/单测通过；手测可在面板原型上发一条消息得到回复 |
-| **M1 只读 mux + 面板骨架**（3–5 天） | EventMux + snapshot/delta + SSE；dock tab；工作区看板与会话列表（只读，复用 BoardModel） | 组件测试 + Host 路由测试；看板数据与现有 Board 一致 |
-| **M2 对话 + 选区**（3–5 天） | prompt route、轻量 transcript、选区同步（inject 不唤醒）、打开主会话 | 选区/消息端到端手测；断线重连 resync |
+| **M0 技术验证**（1–2 天） | ① 客户端 `sessions.retain(manager)` + `session.prompt` 冷恢复并唤醒；② `agent/created` 作用域注册测试工具；③ 动态 `systemPrompt.context` 生效；④ overlay 抽屉里 `SessionProvider` + `conversation.content`（embedded）能渲染管理会话 | 合成数据单测/脚本通过；手测在抽屉原型里发消息能得到回复；§15 清单全绿 |
+| **M1 只读 mux + 抽屉骨架**（3–5 天） | 纯 `EventMux`/`WakePolicy`（`src/host/mux/`）+ 单测；按顺序接 `session/event` + `agent/status` + `jobs.events`，面板 SSE 改 revision 增量（当前 feed 无栅栏，是新工作），再加 `subagent/*` / `domain.changed`；`shell.overlay` 抽屉 + 工作区看板 + 会话列表（只读，复用 BoardModel） | mux 单测（合并/去重/溢出/断线 reset）；抽屉组件测试；数据与现有 Board 一致 |
+| **M2 对话 + 选区**（3–5 天） | 嵌入官方聊天（`SessionProvider` + `conversation.content`，带能力探测与轻量 transcript 降级）；「发送选区」= retain→`session.prompt`；选区 durable mirror + 动态 system prompt context；「在主界面打开」 | 选区/消息端到端手测；断线重连 resync；审批 pending 状态正确引导 |
 | **M3 任务 + 管理工具**（5–8 天） | 任务域、`assign_task`/`update_task`/`report_progress`、任务卡与进度派生、watch | 任务状态机单测；派单→会话→进度→完成闭环 |
-| **M4 自动化与打磨**（5 天+） | 自动唤醒预算/静默/暂停、overlay 形态、i18n 完善、性能与回归、按 §6 发版 | 全量 `npm run check` 绿；版本 0.4.0 发布 |
+| **M4 自动化与打磨**（5 天+） | 自动唤醒预算/静默/暂停、面板留痕、i18n 完善、响应式与性能、回归、按 §6 发版 | 全量 `npm run check` 绿；版本 0.4.0 发布 |
 
 每个阶段都按交接文档 §5 闭环（`npm run check` → `npm run build` → 安装到验证实例 → 完全重启 → 手测），并按 §6 发布（版本递增、CHANGELOG、SHA256SUMS）。
 
@@ -325,19 +457,21 @@ manager_tasks: Map<taskId, {
 
 **风险**
 
-1. **成本失控**：自动唤醒是最容易失控的点 → 默认关闭 + 预算 + digest 合并；面板显著展示。
+1. **成本失控**：自动唤醒是最容易失控的点 → 默认关闭 + 预算 + digest 合并；「发送选区」显式化；面板显著展示消耗。
 2. **权限越界**：管理员若被赋予破坏性工具，误操作影响真实工作区 → 默认只读 + 建会话/发消息，破坏性动作走用户指令与 approval。
-3. **宿主版本差异**：客户端聊天/流式接口在 0.2.1-rc.2 与 alpha 之间有差异（交接文档 §2.3）→ 先做轻量 transcript，避免依赖内部聊天节点。
-4. **事件语义缺口**：approval/user-question 的「等待输入」是否都有 durable session 事件需要 M0 核对；没有的话要靠客户端快照补充。
-5. **任务完成判定**：模型自述完成不可信 → 进度/完成以 turn 结束、错误、作业事实为证据，面板并列显示。
-6. **多实例**：桌面与 Dev3 各自有独立 store，管理员会话不跨实例；配置里需标明。
-7. **长历史**：管理员会话会越来越长 → 摘要/分页、必要时 fork 新会话（保留审计）。
+3. **依赖 in-tree 聊天契约**：`conversation.content`/`embedded` 是 DSH 内部契约，升级可能改名/改形状 → 能力探测 + 轻量 transcript 降级 + 主界面打开兜底（M0 先验证）。
+4. **dock 契约版本敏感**：现有 dock adapter 认不出布局就整体不挂载 → 管理中心入口放 overlay，dock 只作为降级形态，不能只依赖 dock。
+5. **宿主 API 漂移**：Host 请求/返回值类型必须由插件重新声明（不能 import），升级可能静默漂移 → 固定验证过的版本、fail loud（交接文档 §2.3）。
+6. **事件语义缺口**：approval/user-question 的「等待输入」是 waterfall 且非 durable 事件；面板状态从 `approval/asked|decided` 派生，M0 核对覆盖度。
+7. **任务完成判定**：模型自述完成不可信 → 进度/完成以 turn 结束、错误、作业事实为证据，面板并列显示。
+8. **多实例**：桌面与 Dev3 各自有独立 store，管理员会话不跨实例；配置里需标明。
+9. **长历史**：管理员会话会越来越长 → 摘要/分页、必要时 fork 新会话（保留审计）。
 
 **开放问题**
 
 1. 任务的最终归属：独立任务域 vs DSH `goal` vs 复用 Agent Teams 任务板？（建议：先独立域，后续把 task 投影成 goal/team task 二选一）
 2. 是否需要「每个工作区一个管理员」？先做单例，多实例是 M5+。
-3. 自动唤醒是否用 DSH `schedule` 计时器来做「定时巡检」，而不是纯事件驱动？
+3. 自动唤醒是否用 DSH `schedule` 计时器做「定时巡检」，而不是纯事件驱动？
 4. 管理员是否应该默认拥有 `subagent` 工具（自己派子代理干活）？建议 M3 再放开。
 5. 面板是否要支持「拖拽会话到任务区」的交互（更直观的派任务）？
 
@@ -345,15 +479,17 @@ manager_tasks: Map<taskId, {
 
 | 结论 | 证据 |
 | --- | --- |
-| `sessionController.prompt` 自动 resolve/冷恢复，且并发 resume 去重 | `packages/api/session-controller/src/index.ts:461`、`commands.ts:319,513`、`agent.ts:200,278` |
-| 普通会话创建/复用 + 工作区挂载 | `packages/api/session-controller/src/commands.ts:111` |
-| Agent 作用域工具注册与清理 | `packages/experimental/tool-agent-team/src/index.ts:169,423` |
-| Agent 生命周期事件、冷恢复也触发 `agent/created`（`source` 含 `resume`） | `packages/core/agent/src/runtime-types.ts:125,261`、`packages/core/agent/src/index.ts:539` |
-| 动态 system prompt context（`text` 可为函数，每次组装读取最新值） | `packages/core/system-prompt/src/index.ts:79` |
-| 后台作业 Host 侧只读（`ctx.jobs.list(caller?)` + 事件） | `packages/jobs/jobs/src/index.ts:88` |
-| `session/event` 语义与类型 | `packages/core/session/src/types.ts:282`；现有订阅 `plugins/dsh-session-board/src/host/ledger.ts:522` |
-| 现有 Host/Client 分层、SSE feed、storage 域、dock/overlay slot | `plugins/dsh-session-board/src/{host/plugin.ts,host/routes.ts,host/ledger.ts,client/index.tsx,client/dock-adapter.ts}` |
-| 客户端保留会话并渲染/发送 | `packages/api/session-controller/src/client/contract/sessions.ts`、`packages/client/ui-conversation/src/client/service.ts:211,286` |
+| `sessionController.prompt` 自动 resolve/冷恢复，并发 resume 去重；`mode:'queue'` 走 `agent.followup` | `packages/api/session-controller/src/index.ts:461`、`commands.ts:319,513`、`agent.ts:200,278` |
+| 普通会话创建/复用 + 工作区挂载；**没有 setup 钩子**；workspaceId XOR cwd | `packages/api/session-controller/src/commands.ts:104,111`、`agent.ts:387-401,563-580` |
+| 无 idle 回收；`resumeObserved` 丢弃 handle；`AgentHandle.dispose` 是唯一销毁能力 | `packages/core/agent/src/index.ts:146-163`、`packages/api/session-controller/src/agent.ts:440-444` |
+| Agent 作用域工具注册与清理；`agent/created` 在创建与冷恢复都触发；`tools.restrict` 只过滤继承工具 | `packages/experimental/tool-agent-team/src/index.ts:169,423`、`packages/core/agent/src/runtime-types.ts:125,261`、`packages/core/tools/src/index.ts:1105-1219` |
+| 动态 system prompt context（`text` 可为函数） | `packages/core/system-prompt/src/index.ts:79` |
+| 其它会话的后台作业不能跨属主读取（caller 必须是属主） | `packages/jobs/jobs/src/index.ts:120-163` |
+| `session/event` 语义与类型；turn 结果枚举；审批 durability 与 waterfall 区别 | `packages/core/session/src/types.ts:202-230,282-376`、`packages/interaction/user-approval/src/types.ts:44,55,87` |
+| 现有 Host/Client 分层、SSE feed（无 revision 栅栏）、storage 域、dock/overlay slot | `plugins/dsh-session-board/src/{host/plugin.ts,host/routes.ts,host/ledger.ts,client/index.tsx,client/dock-adapter.ts}`、`packages/api/workspace-controller/src/feed.ts:75-196` |
+| 面板应放在 `shell.overlay`，可嵌入官方聊天；`session.prompt` 是客户端发送路径 | `packages/client/ui-layout/src/client/index.ts:105`、`packages/client/ui-subagent/src/client/sidebar-chat/index.tsx:129-169`、`packages/api/session-controller/src/client/contract/sessions.ts:58`、`packages/client/ui-conversation/src/client/service.ts:210-213` |
+| 官方聊天 factory / SessionProvider 作用域 | `packages/client/ui-conversation/src/client/contract/slots.ts:303-318`、`packages/client/ui-renderer/src/client/scoped-slots.tsx:556,586-592` |
+| `BatchController` 有归档阶段与 50 条上限，不能复用于管理选区 | `plugins/dsh-session-board/src/shared/archive.ts:51`、`src/client/batch.ts:5-11,82` |
 | Agent Teams 的 Lead/任务板/消息先例 | `packages/experimental/agent-team/README.md`、`src/roster.ts`、`src/task-board.ts` |
 | 插件运行时依赖/注入/重启/版本规则 | `docs/plugin-development-handoff.md` §3.3–§3.4、§6、§7 |
 
@@ -361,13 +497,13 @@ manager_tasks: Map<taskId, {
 
 | # | 要验证的假设 | 做法 | 通过标准 |
 | --- | --- | --- | --- |
-| 1 | Host 插件能直接调 `sessionController.prompt` 冷恢复管理员会话 | 临时脚本/测试：向一个**未在线**的已持久化会话 prompt | 会话恢复并产生 turn；重复调用不重复恢复 |
-| 2 | 冷恢复会触发 `agent/created`，可据此注册 scoped 工具 | 临时 Host 插件监听 `agent/created`，对固定 id 注册一个 echo 工具 | 恢复后的会话能看到并调用该工具 |
-| 3 | 动态 `systemPrompt.context` 每次组装读域状态 | 注册 `text: () => 选区摘要`，改域状态后发下一轮 | 模型请求里的上下文随状态变化；无额外 inbox 消息 |
-| 4 | 全局 `session/event` 订阅 + O(1) 折叠扛得住多会话 | 复用 session-board ledger 既有订阅，加 mux 折叠与 coalesce | 无阻塞、无漏事件；繁忙时 CPU 可接受 |
-| 5 | mux digest 质量：只把「值得管理」的状态变化算就绪 | 合成事件流（等待输入/错误/完成/长跑）跑单测 | 就绪集合符合优先级、无重复、预算生效 |
-| 6 | 面板能保留管理员会话、发送消息、渲染轻量 transcript | client 原型用 `sessions.retain` + `binding.session.prompt` + eventSource | 发消息/流式回复/错误显示正常；断线重连正常 |
+| 1 | 客户端能 retain 管理员会话并冷恢复 | 面板原型：`sessions.retain` → `session.prompt` 向**未在线**的已持久化会话发消息 | 会话恢复并产生 turn；重复调用不重复恢复；错误码可展示 |
+| 2 | 冷恢复触发 `agent/created`，可注册 scoped 工具 | 临时 Host 插件监听 `agent/created`，对固定 id 注册 echo 工具 | 恢复后的会话能看到并调用该工具 |
+| 3 | 动态 `systemPrompt.context` 每次组装读域状态 | 注册 `text: () => 选区摘要`，改域状态后发下一轮 | 请求上下文随状态变化；无额外 inbox 消息 |
+| 4 | 全局 `session/event` 订阅 + O(1) 折叠扛得住多会话 | 复用 session-board ledger 订阅，加 mux 折叠/coalesce | 无阻塞、无漏事件；繁忙时 CPU 可接受 |
+| 5 | mux digest 质量与预算 | 合成事件流（等待输入/错误/完成/长跑）单测 | 就绪集合符合优先级、无重复、预算生效 |
+| 6 | overlay 抽屉能嵌入官方聊天 | 注册 `shell.overlay` + 子 slot，`SessionProvider` + `conversation.content`（`embedded`）渲染管理会话 | 输入框/流式/工具卡可用；不可用时能探测并回退轻量 transcript |
 | 7 | 在运行中的 Dev3 上无模型额度验证 | 交接文档 §5.3 的 CDP 方法（渲染 9262 / Host inspector 9270） | 不改用户数据即可触发并断言 |
+| 8 | 目标 DSH 版本存在所需契约 | 对 `conversation.content`、`embedded` variant、`sessions.retain`、`session.prompt` 做运行时能力探测 | 缺失时面板降级而不是白屏 |
 
-M0 通过后再开 M1，避免把「面板 UI」建在一个没验证的 Agent 通道上。
-
+M0 通过后再开 M1，避免把「面板 UI」建在一个没验证的 Agent 通道/聊天契约上。
