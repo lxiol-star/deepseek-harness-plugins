@@ -12,7 +12,9 @@
  * is a genuine control — the title is a real `<button>`, selection is a real
  * `<input type="checkbox">` — and no parent key handler intercepts their keys.
  * Clicking the card's dead space still opens the session, but only when the
- * click hit no control and selected no text.
+ * click hit no control and selected no text. Opening a session is never
+ * disabled by a running batch: the user must be able to switch away while a
+ * preview or archive is in progress.
  */
 import { memo, useState, type CSSProperties, type MouseEvent, type ReactElement } from 'react'
 import { formatElapsed, formatTokensPerSecond } from '../shared/metrics.ts'
@@ -28,8 +30,8 @@ export interface SessionCardProps {
   onAck: (id: string) => void
   selected?: boolean
   onToggleSelect?: (id: string) => void
-  /** True while a batch write owns the selection: the checkbox is disabled. */
-  interactionDisabled?: boolean
+  /** True while a batch write owns the selection: only the checkbox is disabled. */
+  selectionDisabled?: boolean
 }
 
 /**
@@ -91,7 +93,7 @@ function SessionCardBody({
   onAck,
   selected = false,
   onToggleSelect,
-  interactionDisabled = false,
+  selectionDisabled = false,
 }: SessionCardProps): ReactElement {
   const [expanded, setExpanded] = useState(false)
   const { metrics, progress, preview } = entry
@@ -153,16 +155,16 @@ function SessionCardBody({
       data-selected={selected ? 'true' : undefined}
       aria-label={entry.title}
       role="group"
-      onClick={(event) => { if (!interactionDisabled) onCardClick(event, entry.id, onOpen) }}
+      onClick={(event) => { onCardClick(event, entry.id, onOpen) }}
     >
       {onToggleSelect ? (
         <input
           type="checkbox"
           className="sb-card-select"
           checked={selected}
-          disabled={interactionDisabled}
+          disabled={selectionDisabled}
           aria-label={selected ? t('batch.deselect') : t('batch.select')}
-          style={interactionDisabled ? { ...SELECT_STYLE, opacity: 0.45, cursor: 'default' } : SELECT_STYLE}
+          style={selectionDisabled ? { ...SELECT_STYLE, opacity: 0.45, cursor: 'default' } : SELECT_STYLE}
           onClick={(event) => { event.stopPropagation() }}
           onKeyDown={(event) => { event.stopPropagation() }}
           onChange={() => { onToggleSelect(entry.id) }}
@@ -176,7 +178,6 @@ function SessionCardBody({
           title={entry.title}
           style={TITLE_STYLE}
           aria-label={t('a11y.card', { title: entry.title })}
-          disabled={interactionDisabled}
           onClick={(event) => { event.stopPropagation(); onOpen(entry.id) }}
         >
           {entry.title}
@@ -220,7 +221,7 @@ function SessionCardBody({
             </div>
           ) : null}
           {hasBody ? (
-            <button type="button" className="sb-card-details sb-btn" aria-expanded={expanded} disabled={interactionDisabled}
+            <button type="button" className="sb-card-details sb-btn" aria-expanded={expanded}
               onClick={event => { event.stopPropagation(); setExpanded(value => !value) }}>
               {t(expanded ? 'card.hideDetails' : 'card.showDetails')}
             </button>

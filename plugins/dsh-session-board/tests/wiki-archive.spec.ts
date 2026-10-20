@@ -10,6 +10,11 @@ import { pythonAvailable } from './wiki-test-environment.ts'
 
 const workflow = async (operation: string, value: string) => operation === 'scope' ? { entries: JSON.parse(value).map((session: string) => ({ session, source: `source/${session}`, parent: null, role: 'main', evidence: 'header', snapshot: false })), missing: [] } : operation === 'synthesize' ? { status: 'skipped', pages: [] } : { status: 'updated' }
 
+/** Every `--exact-session` value of one archiver invocation, in argument order. */
+function requestedIds(args: readonly string[]): string[] {
+  return args.flatMap((arg, index) => (arg === '--exact-session' ? [args[index + 1]!] : []))
+}
+
 function output(ids: string[], dry_run: boolean, source = 'source') {
   return JSON.stringify({ archived: ids.length, skipped: 0, empty: 0, failed: 0, selected: ids.length, dry_run,
     results: ids.map(id => ({ session: id, source: `${source}/${id}`, action: dry_run ? 'would-archive' : 'archived', ...(dry_run ? {} : { page: `raw/sessions/host/dsh/${id}.md` }) })) })
@@ -81,10 +86,14 @@ describe('Wiki archival safety', () => {
       return operation === 'index' ? { status: 'updated' } : { status: 'synthesized', pages: ['experience/example.md'] }
     })
     const execute = vi.fn(async (args: readonly string[]) => {
-      const id = args[args.indexOf('--exact-session') + 1]!
-      expect(args.filter(arg => arg === '--exact-session')).toHaveLength(1)
-      if (!args.includes('--dry-run')) { expect(args).toContain('--full'); order.push(`archive:${id}`) }
-      return { stdout: output([id], args.includes('--dry-run')) }
+      const ids = requestedIds(args)
+      // Dry runs may cover the whole scope at once; a write is always one exact session.
+      if (!args.includes('--dry-run')) {
+        expect(ids).toHaveLength(1)
+        expect(args).toContain('--full')
+        order.push(`archive:${ids[0]}`)
+      }
+      return { stdout: output(ids, args.includes('--dry-run')) }
     })
     const service = createWikiArchiver({ home: '/test', dshHome: '/test/dev', workflow: run, execute })
     const preview = await service.preview(['main'])
@@ -101,13 +110,22 @@ describe('Wiki archival safety', () => {
       if (value.endsWith('/bad.md')) throw new Error('provider failed')
       return { status: 'sensitive', pages: [], error: 'SENSITIVE_CONTENT' }
     })
-    const execute = async (args: readonly string[]) => ({ stdout: output([args[args.indexOf('--exact-session') + 1]!], args.includes('--dry-run')) })
+    const execute = async (args: readonly string[]) => ({ stdout: output(requestedIds(args), args.includes('--dry-run')) })
     const service = createWikiArchiver({ dshHome: '/test/dev', workflow: run, execute })
     const result = await service.commit((await service.preview(['bad', 'sensitive'])).token)
     expect(result.archived).toBe(2)
     expect(result.workflow?.synthesis.map(row => row.status)).toEqual(['failed', 'sensitive'])
     expect(result.workflow?.index).toBe('not-needed')
     expect(run.mock.calls.some(([operation]) => operation === 'index')).toBe(false)
+  })
+  it('previews a multi-session selection with one archiver invocation', async () => {
+    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(requestedIds(args), args.includes('--dry-run')) }))
+    const service = createWikiArchiver({ workflow, home: '/test', dshHome: '/test/dev', execute })
+    const plan = await service.preview(['a', 'b', 'c'])
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(requestedIds(execute.mock.calls[0]?.[0] ?? [])).toEqual(['a', 'b', 'c'])
+    expect(plan.summary.dry_run).toBe(true)
+    expect(plan.summary.results.map(row => row.session)).toEqual(['a', 'b', 'c'])
   })
   it('rejects source mismatch with zero archive writes', async () => {
     let calls = 0

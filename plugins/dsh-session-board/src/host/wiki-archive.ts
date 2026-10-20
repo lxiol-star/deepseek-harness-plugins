@@ -277,15 +277,15 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key)
       // Dropped/cancelled previews must not permanently exhaust the map.
       if (previews.size >= 20) previews.delete(previews.keys().next().value as string)
-      const summary: ArchiveSummary = { archived: 0, skipped: 0, empty: 0, failed: 0, selected: ids.length, dry_run: true, results: [], scope }
-      for (const id of ids) {
-        const part = await perform([id], true)
-        summary.archived += part.archived; summary.skipped += part.skipped; summary.empty += part.empty; summary.failed += part.failed
-        summary.results.push(...part.results)
-      }
+      // One archiver invocation for the whole selection: every process scans
+      // both session stores, so a per-session loop made a nine-session preview
+      // pay for nine scans before the user saw the plan.
+      const previewed = await perform(ids, true)
       if (closed) throw new WikiArchiveError('CANCELLED')
+      const rows = new Map(previewed.results.map(row => [row.session, row]))
+      const summary: ArchiveSummary = { ...previewed, selected: ids.length, scope }
       const token = randomUUID(), expiresAt = now() + PREVIEW_TTL_MS
-      previews.set(token, { ids, expiresAt, sources: summary.results.map(row => row.source), scope })
+      previews.set(token, { ids, expiresAt, sources: ids.map(id => rows.get(id)?.source ?? ''), scope })
       return { token, expiresAt, summary }
     }),
     commit: async (token) => exclusive(async () => {
@@ -294,9 +294,8 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       previews.delete(token)
       const currentScope = parseArchiveScope(await workflow('scope', JSON.stringify(plan.ids), controller.signal))
       if (JSON.stringify(currentScope.entries.map(({ snapshot: _snapshot, ...entry }) => entry)) !== JSON.stringify(plan.scope.entries.map(({ snapshot: _snapshot, ...entry }) => entry))) throw new WikiArchiveError('SELECTION_MISMATCH')
-      const currentRows = []
-      for (const id of plan.ids) currentRows.push(...(await perform([id], true)).results)
-      if (currentRows.some((row, index) => row.source !== plan.sources[index])) throw new WikiArchiveError('SELECTION_MISMATCH')
+      const currentRows = new Map((await perform(plan.ids, true)).results.map(row => [row.session, row]))
+      if (plan.ids.some((id, index) => (currentRows.get(id)?.source ?? '') !== plan.sources[index])) throw new WikiArchiveError('SELECTION_MISMATCH')
       if (closed) throw new WikiArchiveError('CANCELLED')
       const summary: ArchiveSummary = { archived: 0, skipped: 0, empty: 0, failed: 0, selected: plan.ids.length, dry_run: false, results: [], scope: currentScope }
       const synthesis: SynthesisResult[] = []

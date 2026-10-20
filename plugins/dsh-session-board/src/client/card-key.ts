@@ -18,8 +18,8 @@ export interface CardKeyProps {
   entry: BoardEntry
   selected?: boolean | undefined
   onToggleSelect?: ((id: string) => void) | undefined
-  /** True while a batch write owns the selection; disables the checkbox. */
-  interactionDisabled?: boolean | undefined
+  /** True while a batch write owns the selection; disables only the checkbox. */
+  selectionDisabled?: boolean | undefined
 }
 
 /**
@@ -41,7 +41,7 @@ function seconds(value: number | null): string {
 export function cardKey(
   entry: BoardEntry,
   selected = false,
-  interactionDisabled = false,
+  selectionDisabled = false,
 ): string {
   return [
     entry.id,
@@ -72,7 +72,7 @@ export function cardKey(
     entry.metrics.liveJobs,
     entry.metrics.runningSubagents,
     selected ? '1' : '0',
-    interactionDisabled ? '1' : '0',
+    selectionDisabled ? '1' : '0',
   ].join('\u0001')
 }
 
@@ -86,6 +86,6 @@ export function cardKey(
  */
 export function sameCard(previous: CardKeyProps, next: CardKeyProps): boolean {
   return previous.onToggleSelect === next.onToggleSelect
-    && cardKey(previous.entry, previous.selected === true, previous.interactionDisabled === true)
-      === cardKey(next.entry, next.selected === true, next.interactionDisabled === true)
+    && cardKey(previous.entry, previous.selected === true, previous.selectionDisabled === true)
+      === cardKey(next.entry, next.selected === true, next.selectionDisabled === true)
 }

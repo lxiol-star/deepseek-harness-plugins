@@ -48,7 +48,7 @@ export interface BoardOverlayProps {
   onToggleSelect?: (id: string) => void
   emptyKey?: string
   toolbar?: ReactElement
-  interactionDisabled?: boolean
+  selectionDisabled?: boolean
   collapsedGroups: Readonly<Record<string, boolean>>
   onToggleGroup: (group: string) => void
 }
@@ -71,7 +71,7 @@ function boardPlatformMarker(): string | undefined {
 export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   const {
     open, groups, grouping, t, density, online,
-    onClose, onToggleDensity, onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, interactionDisabled,
+    onClose, onToggleDensity, onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled,
     collapsedGroups, onToggleGroup,
   } = props
 
@@ -147,7 +147,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   return createPortal(
     <div
       className="sb-overlay sb-root"
-      data-session-board-version="0.3.5"
+      data-session-board-version="0.3.6"
       data-density={density}
       data-quiet={hidden ? 'true' : undefined}
       role="dialog"
@@ -200,7 +200,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
           onAck={onAck}
           selected={selected}
           onToggleSelect={onToggleSelect}
-          interactionDisabled={interactionDisabled}
+          selectionDisabled={selectionDisabled}
         />
       </div>
     </div>,

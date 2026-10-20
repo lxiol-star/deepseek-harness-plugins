@@ -237,7 +237,7 @@ function DockRoot({ face }: { face: BoardFace }): ReactElement {
       onAck={face.ack}
       selected={selection.selected}
       onToggleSelect={selection.toggle}
-      interactionDisabled={selection.busy}
+      selectionDisabled={selection.busy}
       toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => face.view.set(current => ({ ...current, grouping }))} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
       collapsedGroups={view.collapsedGroups}
       onToggleGroup={toggleGroup}
@@ -270,7 +270,7 @@ function OpenOverlayContent({ face }: { face: BoardFace }): ReactElement {
       onAck={face.ack}
       selected={selection.selected}
       onToggleSelect={selection.toggle}
-      interactionDisabled={selection.busy}
+      selectionDisabled={selection.busy}
       toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => face.view.set(current => ({ ...current, grouping }))} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
       collapsedGroups={view.collapsedGroups}
       onToggleGroup={toggleGroup}

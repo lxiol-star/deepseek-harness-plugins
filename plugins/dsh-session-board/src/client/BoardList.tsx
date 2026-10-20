@@ -23,7 +23,7 @@ export interface BoardListProps {
   onToggleGroup?: ((group: string) => void) | undefined
   onOpen: (id: string) => void
   onAck: (id: string) => void
-  interactionDisabled?: boolean | undefined
+  selectionDisabled?: boolean | undefined
   selected?: ReadonlySet<string> | undefined
   onToggleSelect?: ((id: string) => void) | undefined
   /** i18n key for the whole-list empty state. */
@@ -72,7 +72,7 @@ export function BoardList({
   onAck,
   selected,
   onToggleSelect,
-  interactionDisabled,
+  selectionDisabled,
   emptyKey,
   grouping = 'status',
 }: BoardListProps): ReactElement {
@@ -88,7 +88,7 @@ export function BoardList({
           <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span><span className="sb-group-count">{node.count}</span>
         </button>
         {open ? <div className="sb-workspace-body">
-          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} interactionDisabled={interactionDisabled} emptyKey={emptyKey} /> : null}
+          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} /> : null}
           {node.children.map(renderNode)}
         </div> : null}
       </section>
@@ -112,7 +112,7 @@ export function BoardList({
               <ul className="sb-list" aria-label={t(`group.${group.id}`)}>
                 {group.entries.map((entry) => (
                   <li key={entry.id}>
-                    <SessionCard entry={entry} t={t} onOpen={onOpen} onAck={onAck} selected={selected?.has(entry.id) ?? false} {...(onToggleSelect ? { onToggleSelect } : {})} interactionDisabled={interactionDisabled ?? false} />
+                    <SessionCard entry={entry} t={t} onOpen={onOpen} onAck={onAck} selected={selected?.has(entry.id) ?? false} {...(onToggleSelect ? { onToggleSelect } : {})} selectionDisabled={selectionDisabled ?? false} />
                   </li>
                 ))}
               </ul>

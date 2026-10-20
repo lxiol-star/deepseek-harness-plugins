@@ -20,7 +20,7 @@ export interface BoardListProps {
     onToggleGroup?: ((group: string) => void) | undefined;
     onOpen: (id: string) => void;
     onAck: (id: string) => void;
-    interactionDisabled?: boolean | undefined;
+    selectionDisabled?: boolean | undefined;
     selected?: ReadonlySet<string> | undefined;
     onToggleSelect?: ((id: string) => void) | undefined;
     /** i18n key for the whole-list empty state. */
@@ -29,7 +29,7 @@ export interface BoardListProps {
     backToTop?: boolean;
 }
 /** The list itself, without its scroll container. */
-export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, interactionDisabled, emptyKey, grouping, }: BoardListProps): ReactElement;
+export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, grouping, }: BoardListProps): ReactElement;
 /** Props of {@link BoardScroll}. */
 export interface BoardScrollProps extends BoardListProps {
     /** Class applied to the scroll container. */

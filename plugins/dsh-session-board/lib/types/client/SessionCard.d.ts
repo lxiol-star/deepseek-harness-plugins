@@ -12,7 +12,9 @@
  * is a genuine control — the title is a real `<button>`, selection is a real
  * `<input type="checkbox">` — and no parent key handler intercepts their keys.
  * Clicking the card's dead space still opens the session, but only when the
- * click hit no control and selected no text.
+ * click hit no control and selected no text. Opening a session is never
+ * disabled by a running batch: the user must be able to switch away while a
+ * preview or archive is in progress.
  */
 import { type ReactElement } from 'react';
 import type { BoardEntry } from '../shared/types.ts';
@@ -25,11 +27,11 @@ export interface SessionCardProps {
     onAck: (id: string) => void;
     selected?: boolean;
     onToggleSelect?: (id: string) => void;
-    /** True while a batch write owns the selection: the checkbox is disabled. */
-    interactionDisabled?: boolean;
+    /** True while a batch write owns the selection: only the checkbox is disabled. */
+    selectionDisabled?: boolean;
 }
 /** The card body. */
-declare function SessionCardBody({ entry, t, onOpen, onAck, selected, onToggleSelect, interactionDisabled, }: SessionCardProps): ReactElement;
+declare function SessionCardBody({ entry, t, onOpen, onAck, selected, onToggleSelect, selectionDisabled, }: SessionCardProps): ReactElement;
 /**
  * Content-addressed memo boundary.
  *

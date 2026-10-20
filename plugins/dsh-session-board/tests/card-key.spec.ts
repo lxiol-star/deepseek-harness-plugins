@@ -172,7 +172,7 @@ describe('sameCard — the memo decision', () => {
   })
 
   it('rejects a change to the disabled selection state', () => {
-    expect(sameCard(props({ interactionDisabled: false }), props({ interactionDisabled: true }))).toBe(false)
+    expect(sameCard(props({ selectionDisabled: false }), props({ selectionDisabled: true }))).toBe(false)
   })
 
   it('rejects a changed or newly added toggle callback', () => {

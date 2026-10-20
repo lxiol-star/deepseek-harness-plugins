@@ -965,18 +965,12 @@ function createWikiArchiver(options = {}) {
       if (requested.some((id) => !ids.includes(id))) throw new WikiArchiveError("SELECTION_MISMATCH");
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key);
       if (previews.size >= 20) previews.delete(previews.keys().next().value);
-      const summary = { archived: 0, skipped: 0, empty: 0, failed: 0, selected: ids.length, dry_run: true, results: [], scope };
-      for (const id of ids) {
-        const part = await perform([id], true);
-        summary.archived += part.archived;
-        summary.skipped += part.skipped;
-        summary.empty += part.empty;
-        summary.failed += part.failed;
-        summary.results.push(...part.results);
-      }
+      const previewed = await perform(ids, true);
       if (closed) throw new WikiArchiveError("CANCELLED");
+      const rows = new Map(previewed.results.map((row) => [row.session, row]));
+      const summary = { ...previewed, selected: ids.length, scope };
       const token = randomUUID(), expiresAt = now() + PREVIEW_TTL_MS;
-      previews.set(token, { ids, expiresAt, sources: summary.results.map((row) => row.source), scope });
+      previews.set(token, { ids, expiresAt, sources: ids.map((id) => rows.get(id)?.source ?? ""), scope });
       return { token, expiresAt, summary };
     }),
     commit: async (token) => exclusive(async () => {
@@ -985,9 +979,8 @@ function createWikiArchiver(options = {}) {
       previews.delete(token);
       const currentScope = parseArchiveScope(await workflow("scope", JSON.stringify(plan.ids), controller.signal));
       if (JSON.stringify(currentScope.entries.map(({ snapshot: _snapshot, ...entry }) => entry)) !== JSON.stringify(plan.scope.entries.map(({ snapshot: _snapshot, ...entry }) => entry))) throw new WikiArchiveError("SELECTION_MISMATCH");
-      const currentRows = [];
-      for (const id of plan.ids) currentRows.push(...(await perform([id], true)).results);
-      if (currentRows.some((row, index2) => row.source !== plan.sources[index2])) throw new WikiArchiveError("SELECTION_MISMATCH");
+      const currentRows = new Map((await perform(plan.ids, true)).results.map((row) => [row.session, row]));
+      if (plan.ids.some((id, index2) => (currentRows.get(id)?.source ?? "") !== plan.sources[index2])) throw new WikiArchiveError("SELECTION_MISMATCH");
       if (closed) throw new WikiArchiveError("CANCELLED");
       const summary = { archived: 0, skipped: 0, empty: 0, failed: 0, selected: plan.ids.length, dry_run: false, results: [], scope: currentScope };
       const synthesis = [];

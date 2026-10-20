@@ -41,7 +41,7 @@ export interface BoardOverlayProps {
     onToggleSelect?: (id: string) => void;
     emptyKey?: string;
     toolbar?: ReactElement;
-    interactionDisabled?: boolean;
+    selectionDisabled?: boolean;
     collapsedGroups: Readonly<Record<string, boolean>>;
     onToggleGroup: (group: string) => void;
 }

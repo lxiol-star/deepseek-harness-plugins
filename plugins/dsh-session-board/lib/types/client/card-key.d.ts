@@ -17,8 +17,8 @@ export interface CardKeyProps {
     entry: BoardEntry;
     selected?: boolean | undefined;
     onToggleSelect?: ((id: string) => void) | undefined;
-    /** True while a batch write owns the selection; disables the checkbox. */
-    interactionDisabled?: boolean | undefined;
+    /** True while a batch write owns the selection; disables only the checkbox. */
+    selectionDisabled?: boolean | undefined;
 }
 /**
  * Everything that can change what one card renders, flattened to one string.
@@ -28,7 +28,7 @@ export interface CardKeyProps {
  * deliberately absent. `isSubagent` and `attentionKind` feed a pill and the
  * acknowledge button, so they are deliberately present.
  */
-export declare function cardKey(entry: BoardEntry, selected?: boolean, interactionDisabled?: boolean): string;
+export declare function cardKey(entry: BoardEntry, selected?: boolean, selectionDisabled?: boolean): string;
 /**
  * Whether two card prop sets render identically.
  *

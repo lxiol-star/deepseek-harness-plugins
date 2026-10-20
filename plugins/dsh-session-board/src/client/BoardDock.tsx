@@ -48,7 +48,7 @@ export interface BoardDockProps {
   onToggleSelect?: (id: string) => void
   emptyKey?: string
   toolbar?: ReactElement
-  interactionDisabled?: boolean
+  selectionDisabled?: boolean
   collapsedGroups: Readonly<Record<string, boolean>>
   onToggleGroup: (group: string) => void
 }
@@ -81,7 +81,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   const {
     groups, grouping, t, collapsed, width, density, online,
     onToggleCollapse, onWidth, onToggleDensity, onOpenBoard,
-    onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, interactionDisabled, collapsedGroups, onToggleGroup,
+    onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled, collapsedGroups, onToggleGroup,
   } = props
 
   const [dragging, setDragging] = useState(false)
@@ -142,7 +142,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.3.5"
+        data-session-board-version="0.3.6"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -173,7 +173,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.3.5"
+        data-session-board-version="0.3.6"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}
@@ -223,7 +223,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
           onAck={onAck}
           selected={selected}
           onToggleSelect={onToggleSelect}
-          interactionDisabled={interactionDisabled}
+          selectionDisabled={selectionDisabled}
         />
       </div>
       <div

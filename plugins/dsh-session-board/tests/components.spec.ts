@@ -116,6 +116,17 @@ describe('actual React components', () => {
     await view.render({ ...props, collapsed: {} })
     expect(view.container.querySelectorAll('.sb-card')).toHaveLength(1)
   })
+  it('keeps session cards openable while a batch owns the selection', async () => {
+    const open = vi.fn()
+    const props = { groups: [{ id: 'attention', entries: [entry] }], t: components.t, onOpen: open, onAck: vi.fn(), onToggleSelect: vi.fn(), emptyKey: 'empty.noSessions', selected: new Set<string>(), selectionDisabled: true }
+    const view = mount(components.BoardList, props); await view.render(props)
+    const checkbox = view.container.querySelector<HTMLInputElement>('.sb-card-select')!
+    expect(checkbox.disabled).toBe(true)
+    const title = view.container.querySelector<HTMLButtonElement>('.sb-card-title')!
+    expect(title.disabled).toBe(false)
+    await React.act(async () => { title.click() })
+    expect(open).toHaveBeenCalledWith('session-one')
+  })
   it('filter controls expose status/workspace choices and reset all conditions', async () => {
     const change = vi.fn()
     const props = { groups: [{ id: 'attention', entries: [entry] }], t: components.t, filters: { query: 'work', status: 'blocked', workspace: 'Workspace' }, shown: 1, onChange: change }

@@ -314,7 +314,7 @@ function formatCount(value) {
 function seconds(value) {
   return value === null ? "" : String(Math.floor(value / 1e3));
 }
-function cardKey(entry, selected = !1, interactionDisabled = !1) {
+function cardKey(entry, selected = !1, selectionDisabled = !1) {
   return [
     entry.id,
     entry.state,
@@ -344,11 +344,11 @@ function cardKey(entry, selected = !1, interactionDisabled = !1) {
     entry.metrics.liveJobs,
     entry.metrics.runningSubagents,
     selected ? "1" : "0",
-    interactionDisabled ? "1" : "0"
+    selectionDisabled ? "1" : "0"
   ].join("");
 }
 function sameCard(previous, next) {
-  return previous.onToggleSelect === next.onToggleSelect && cardKey(previous.entry, previous.selected === !0, previous.interactionDisabled === !0) === cardKey(next.entry, next.selected === !0, next.interactionDisabled === !0);
+  return previous.onToggleSelect === next.onToggleSelect && cardKey(previous.entry, previous.selected === !0, previous.selectionDisabled === !0) === cardKey(next.entry, next.selected === !0, next.selectionDisabled === !0);
 }
 
 // src/client/SessionCard.tsx
@@ -386,7 +386,7 @@ function SessionCardBody({
   onAck,
   selected = !1,
   onToggleSelect,
-  interactionDisabled = !1
+  selectionDisabled = !1
 }) {
   let [expanded, setExpanded] = (0, import_react3.useState)(!1), { metrics, progress, preview } = entry, pills = [];
   entry.clientArchived === !0 && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill sb-pill--archived", children: t("card.clientArchived") }, "archived")), entry.archivedAt !== void 0 && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill sb-pill--archived", children: t("card.archived") }, "archived-wiki")), entry.pendingKey !== null ? pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill", children: t(entry.pendingKey) }, "pending")) : entry.noteKey !== null && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill sb-pill--state", children: t(entry.noteKey) }, "note")), entry.isSubagent && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill", children: t("card.subagentBadge") }, "sub")), metrics.liveJobs > 0 && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill", children: t("card.jobs", { count: formatCount(metrics.liveJobs) }) }, "jobs")), metrics.runningSubagents > 0 && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill", children: t("card.subagents", { count: formatCount(metrics.runningSubagents) }) }, "subs")), entry.isCurrent && pills.push(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-pill", children: t("card.current") }, "cur"));
@@ -411,7 +411,7 @@ function SessionCardBody({
       "aria-label": entry.title,
       role: "group",
       onClick: (event) => {
-        interactionDisabled || onCardClick(event, entry.id, onOpen);
+        onCardClick(event, entry.id, onOpen);
       },
       children: [
         onToggleSelect ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
@@ -420,9 +420,9 @@ function SessionCardBody({
             type: "checkbox",
             className: "sb-card-select",
             checked: selected,
-            disabled: interactionDisabled,
+            disabled: selectionDisabled,
             "aria-label": t(selected ? "batch.deselect" : "batch.select"),
-            style: interactionDisabled ? { ...SELECT_STYLE, opacity: 0.45, cursor: "default" } : SELECT_STYLE,
+            style: selectionDisabled ? { ...SELECT_STYLE, opacity: 0.45, cursor: "default" } : SELECT_STYLE,
             onClick: (event) => {
               event.stopPropagation();
             },
@@ -444,7 +444,6 @@ function SessionCardBody({
               title: entry.title,
               style: TITLE_STYLE,
               "aria-label": t("a11y.card", { title: entry.title }),
-              disabled: interactionDisabled,
               onClick: (event) => {
                 event.stopPropagation(), onOpen(entry.id);
               },
@@ -483,7 +482,6 @@ function SessionCardBody({
               type: "button",
               className: "sb-card-details sb-btn",
               "aria-expanded": expanded,
-              disabled: interactionDisabled,
               onClick: (event) => {
                 event.stopPropagation(), setExpanded((value) => !value);
               },
@@ -542,7 +540,7 @@ function BoardList({
   onAck,
   selected,
   onToggleSelect,
-  interactionDisabled,
+  selectionDisabled,
   emptyKey,
   grouping = "status"
 }) {
@@ -557,7 +555,7 @@ function BoardList({
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
         ] }),
         open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-body", children: [
-          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, interactionDisabled, emptyKey }) : null,
+          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey }) : null,
           node.children.map(renderNode)
         ] }) : null
       ] }, node.key);
@@ -577,7 +575,7 @@ function BoardList({
           onToggle: () => onToggleGroup?.(group.id)
         }
       ),
-      open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-group-body", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ul", { className: "sb-list", "aria-label": t(`group.${group.id}`), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SessionCard, { entry, t, onOpen, onAck, selected: selected?.has(entry.id) ?? !1, ...onToggleSelect ? { onToggleSelect } : {}, interactionDisabled: interactionDisabled ?? !1 }) }, entry.id)) }) }) : null
+      open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-group-body", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ul", { className: "sb-list", "aria-label": t(`group.${group.id}`), children: group.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SessionCard, { entry, t, onOpen, onAck, selected: selected?.has(entry.id) ?? !1, ...onToggleSelect ? { onToggleSelect } : {}, selectionDisabled: selectionDisabled ?? !1 }) }, entry.id)) }) }) : null
     ] }, group.id);
   }) });
 }
@@ -635,7 +633,7 @@ function BoardDock(props) {
     onToggleSelect,
     toolbar,
     emptyKey,
-    interactionDisabled,
+    selectionDisabled,
     collapsedGroups,
     onToggleGroup
   } = props, [dragging, setDragging] = (0, import_react5.useState)(!1), [liveWidth, setLiveWidth] = (0, import_react5.useState)(width), dragState = (0, import_react5.useRef)(null), hidden = useDocumentHidden(), total = groups.reduce((sum, group) => sum + group.entries.length, 0), onPointerDown = (0, import_react5.useCallback)((event) => {
@@ -666,7 +664,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.5",
+      "data-session-board-version": "0.3.6",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -690,7 +688,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.5",
+      "data-session-board-version": "0.3.6",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -736,7 +734,7 @@ function BoardDock(props) {
               onAck,
               selected,
               onToggleSelect,
-              interactionDisabled
+              selectionDisabled
             }
           )
         ] }),
@@ -1138,7 +1136,7 @@ function BoardOverlay(props) {
     onToggleSelect,
     toolbar,
     emptyKey,
-    interactionDisabled,
+    selectionDisabled,
     collapsedGroups,
     onToggleGroup
   } = props, panelRef = (0, import_react6.useRef)(null), closeRef = (0, import_react6.useRef)(onClose);
@@ -1186,7 +1184,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.5",
+        "data-session-board-version": "0.3.6",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1239,7 +1237,7 @@ function BoardOverlay(props) {
               onAck,
               selected,
               onToggleSelect,
-              interactionDisabled
+              selectionDisabled
             }
           ) })
         ]
@@ -3690,7 +3688,7 @@ function DockRoot({ face }) {
       onAck: face.ack,
       selected: selection.selected,
       onToggleSelect: selection.toggle,
-      interactionDisabled: selection.busy,
+      selectionDisabled: selection.busy,
       toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
@@ -3720,7 +3718,7 @@ function OpenOverlayContent({ face }) {
       onAck: face.ack,
       selected: selection.selected,
       onToggleSelect: selection.toggle,
-      interactionDisabled: selection.busy,
+      selectionDisabled: selection.busy,
       toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
