@@ -9,7 +9,7 @@
 
 ## 安装
 
-三选一，安装后插件页里会出现「工作区自动收录」，状态为 **运行中**（首次安装可即时生效；升级已安装的 Host 插件需重启 DSH）。
+三选一。**安装或升级后请完全退出 DSH 再重新打开**（Host 半在重启时加载，只刷新页面不够）；重启后插件页里会出现「工作区自动收录」，状态为 **运行中**。
 
 ### 方式 A：GitHub 子目录（推荐，自包含、锁版本）
 
@@ -32,6 +32,12 @@ dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh
 
 ```sh
 dsh plugin --profile desktop add /绝对路径/dsh-workspace-autoregister-0.1.0.tgz
+```
+
+SHA256（对应 `SHA256SUMS-0.1.0` 发布资产）：
+
+```text
+9da7f042f164cd05bf6e1afa654aa35af609a80fd5ce8fa224a6b5c8d6161b71  dsh-workspace-autoregister-0.1.0.tgz
 ```
 
 ### 方式 C：本地目录（开发用，link 安装）

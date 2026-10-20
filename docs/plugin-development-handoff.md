@@ -4,7 +4,7 @@
 >
 > 适用范围：`dsh-session-board`（本仓库主力插件），以及 `dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`。
 >
-> 最后更新：2026-10-20（对应 `dsh-session-board` 0.3.6）。
+> 最后更新：2026-10-20（`dsh-session-board` 0.3.6、`dsh-workspace-autoregister` 0.1.0）。
 
 ---
 
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `dsh-session-board` | Host + Client（React） | 主力插件，功能多、测试最多；本文件大部分内容围绕它 |
 | `dsh-hide-empty-workspaces` | 仅 Client | 按 Workspace 快照隐藏空工作区，纯展示 |
-| `dsh-workspace-autoregister` | 仅 Host | 监听会话事件，把新目录登记成工作区 |
+| `dsh-workspace-autoregister` | 仅 Host | 监听成功工具调用的参数，把新出现的工作区目录登记进工作区列表，并给新工作区建首个空白会话 |
 | `dsh-think-bounce-pet` | 上游构建产物 | 收录社区插件（MIT），仓库里没有上游 `src/`，只在需要时打补丁/加回归测试 |
 
 插件目录规范：`plugins/<npm 包名>/`，各自声明 `version`、入口、依赖、README、CHANGELOG。发布物是各插件独立的 `.tgz`，**版本号和 tag 按插件独立**（`dsh-session-board-v0.3.6` 这种格式）。
@@ -39,12 +39,13 @@
 - Python 3（Wiki 集成测试与真实提炼用）。
 - `zstd`（Wiki 原始归档压缩，`ZSTD_BIN=/opt/homebrew/bin/zstd` 或 PATH 内可用）。
 
-### 2.2 用户机器上的两个 DSH 环境
+### 2.2 本机的多个 DSH 环境
 
 | 环境 | DSH_HOME | 用途 |
 | --- | --- | --- |
 | 正式版 App | `~/.dsh` | 用户日常使用；插件实际安装位置 `~/.dsh/profiles/desktop/node_modules/<包名>` |
-| 开发/测试版 | `~/.dsh-dev2`（或自建临时 home） | 验证新功能，避免污染正式数据 |
+| 开发/测试版 Dev2 | `~/.dsh-dev2`（或自建临时 home） | 验证新功能，避免污染正式数据 |
+| 开发/测试版 Dev3 | `~/.dsh-dev3` | latest-code worktree 构建（`.worktrees/dev3-latest`），由 `.worktrees/install-dev3.sh` 安装；带 CDP：渲染进程 `127.0.0.1:9262`、Host 进程 `127.0.0.1:9270`，见 §5.3 |
 
 **安装/升级后必须完全退出 DSH 再重开**：Host 与 Client 两半是分别加载的，只刷新页面不会加载新的 Host 代码。
 
@@ -329,6 +330,28 @@ DSH_HOME=$TMP_HOME node dsh/node_modules/@deepseek-ai/dsh/lib/bin.js web --port 
 ```
 
 然后可用 `ego-browser`（或任意浏览器）打开打印出的 URL，用 `page.evaluate` 注入 console 收集器、真实鼠标点击卡片，检查 `localStorage['dsh.sessions.current']` 是否切换。要测正式版的真实行为，可从 `DeepSeek Harness.app/Contents/Resources/app.asar` 解包出同一版本的 DSH 运行时再跑（见 §8.3）。
+
+### 5.3 在运行中的 dev 实例上验证 Host 插件（不消耗模型额度）
+
+Dev3 这类 dev 构建带 CDP：渲染进程 `--remote-debugging-port=9262`、Host 进程 `--inspect=127.0.0.1:9270`。
+可以像操作真实用户界面一样验证插件，而且**纯 Host 插件不需要模型调用**：
+
+1. **看渲染结果**：`curl http://127.0.0.1:9262/json/list` 拿页面的 `webSocketDebuggerUrl`，用 CDP `Runtime.evaluate` 读 DOM/插件卡片状态、`Page.captureScreenshot` 截图。验证后把 GUI 恢复到原页面。
+2. **拿活的 Cordis Loader（Host 进程）**：连 `127.0.0.1:9270`，在 `Runtime.evaluate` 里执行：
+   ```js
+   const { createRequire } = process.getBuiltinModule('module')
+   const require2 = createRequire('/tmp/anchor.cjs')
+   const { Loader } = require2('<目标构建>/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js')
+   globalThis.__Loader = Loader
+   ```
+   再用 CDP 取 `__Loader.prototype` → `Runtime.queryObjects` 得到活的 loader 实例（`require(esm)` 与宿主共用 ESM 缓存，类身份一致）。
+   `loader.root.ctx` 是根上下文，`loader.store` 里能拿到各 entry 的 `ctx`；也可以用 `Entry` 类 queryObjects 后按 `options.name` 找到某个插件行。
+3. **断言与触发**：
+   - 断言：`ctx.get('<service>')`、服务快照、注册表状态（只读，不要长期持有引用）。
+   - 触发：`ctx.emit('<event>', payload)` 直接驱动插件监听器，适合验证「事件 → 副作用」这条链路，不必让 agent 真的跑一轮模型。
+4. **清理**：用同一 Host API 删掉测试注册、归档临时会话、删测试目录；不要留下测试数据。dev 实例的本地存储与正式版隔离，但同样需要清理。
+
+限制：只有 dev 构建有 CDP，正式版 App 没有；这验证的是 Host 行为，用户可见的渲染仍要截图或肉眼核对。
 
 ---
 
