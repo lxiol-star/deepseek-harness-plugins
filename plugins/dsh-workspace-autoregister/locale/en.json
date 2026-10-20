@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workspace Auto-register",
+    "description": "Adds a workspace directory created during a conversation to the workspace list automatically."
+  }
+}

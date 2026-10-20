@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Workspace auto-register">
+  <path d="M36 58c0-9 7-16 16-16h58l20 22h74c9 0 16 7 16 16v112c0 9-7 16-16 16H52c-9 0-16-7-16-16V58z" fill="#4F6BED"/>
+  <path d="M36 92h184v100c0 9-7 16-16 16H52c-9 0-16-7-16-16V92z" fill="#6B85F5"/>
+  <circle cx="188" cy="188" r="46" fill="#22C55E" stroke="#FFFFFF" stroke-width="10"/>
+  <path d="M188 162v52M162 188h52" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+</svg>

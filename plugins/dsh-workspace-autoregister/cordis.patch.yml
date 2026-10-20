@@ -1,0 +1,9 @@
+# Adds a workspace created during a conversation to the Workspace list.
+#
+# The Host half listens to settled tool calls, recognizes a workspace-shaped
+# directory on disk, and registers it through the authoritative Workspace
+# registry. The registry's feed updates every open sidebar live, so no GUI
+# click is needed.
+- insert:
+    - id: workspace-autoregister
+      name: 'dsh-workspace-autoregister'

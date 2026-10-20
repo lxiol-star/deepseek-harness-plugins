@@ -1,0 +1,51 @@
+{
+  "name": "dsh-workspace-autoregister",
+  "version": "0.1.0",
+  "description": "Automatically add a workspace created during a conversation to the DeepSeek Harness workspace list.",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lxiol-star/deepseek-harness-plugins.git",
+    "directory": "plugins/dsh-workspace-autoregister"
+  },
+  "homepage": "https://github.com/lxiol-star/deepseek-harness-plugins/tree/main/plugins/dsh-workspace-autoregister",
+  "bugs": {
+    "url": "https://github.com/lxiol-star/deepseek-harness-plugins/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "workspace",
+    "automation"
+  ],
+  "scripts": {
+    "test": "node --test test/autoregister.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "manifestVersion": 1
+  }
+}
