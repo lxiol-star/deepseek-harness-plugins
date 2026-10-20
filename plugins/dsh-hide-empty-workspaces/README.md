@@ -6,7 +6,7 @@ Hide DeepSeek Harness Workspaces that have **no sessions** from the native sideb
 
 ## 功能
 
-- 侧栏里**没有未归档会话**的工作区自动隐藏，其余工作区照常显示；只有归档会话的工作区同样隐藏。
+- 侧栏里**没有未归档、非空白会话**的工作区自动隐藏。只有归档会话、或只剩一个新建未聊过的空白会话的工作区都会隐藏。
 - 只读判断：按 Workspace Controller 快照的 `sessionIds` 是否为空，不依赖 DOM 里渲染了几行——折叠的工作区不会因为“看不见会话行”被误判为空。
 - 不删除工作区注册、不移动或归档会话、不改 profile；卸载后立即恢复原生列表。
 - 跟随 React 重渲染：折叠分组、重命名、切会话后仍保持正确。
@@ -17,18 +17,18 @@ Hide DeepSeek Harness Workspaces that have **no sessions** from the native sideb
 在 DSH 插件管理器中填入下面的 GitHub 地址（需支持 `path:` 子目录的版本）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.2.0&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.2.1&path:/plugins/dsh-hide-empty-workspaces
 ```
 
 或者使用 CLI：
 
 ```sh
-dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.2.0&path:/plugins/dsh-hide-empty-workspaces"
+dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.2.1&path:/plugins/dsh-hide-empty-workspaces"
 ```
 
 Web profile 把 `desktop` 换成 `web`。安装后**完全退出并重新打开 DSH**（只刷新页面不够，客户端 bundle 在启动时加载）。
 
-也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.2.0.tgz`，在设置 → 插件 → 添加插件里选择本地包。
+也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.2.1.tgz`，在设置 → 插件 → 添加插件里选择本地包。
 
 ## 设置页
 
@@ -38,7 +38,7 @@ Web profile 把 `desktop` 换成 `web`。安装后**完全退出并重新打开 
 - **版本对比**：客户端已加载、服务端已加载、磁盘已安装三个版本。
   - 客户端旧于磁盘 → 提示“刷新页面即可加载新客户端”。
   - 服务端旧于磁盘 → 提示“需要完全退出应用后重开”。
-- **开关**：启用过滤；归档会话是否也算作有会话。
+- **开关**：启用过滤；归档会话是否也算作有会话；空白会话是否也算作有会话。
 - **操作**：「重新应用」立刻重算并重贴标记；「刷新页面」重新加载浏览器端。
 - **诊断**：展开可看快照状态、隐藏 ID 列表与最近错误。
 
@@ -78,10 +78,10 @@ dsh plugin --profile desktop remove dsh-hide-empty-workspaces
 
 - 若把侧栏切换到“仅归档”视图，被隐藏的工作区不会出现；需要看它们时用上面的开关临时关闭过滤。
 
-- 判定标准默认是“**没有未归档会话**”。想让归档会话也算作有会话，设 `dsh.hideEmptyWorkspaces.includeArchived=1`。
+- 判定标准默认是“**没有未归档、非空白会话**”。想让归档会话算作有会话，设 `dsh.hideEmptyWorkspaces.includeArchived=1`；想让空白会话算作有会话，设 `dsh.hideEmptyWorkspaces.includeBlank=1`。
 - 不处理“未分组”桶，也不影响搜索结果与平铺视图。
 - 依赖两个公开客户端契约：`workspaces` 服务（`list.getSnapshot()` / `list.subscribe()`、`phase`、`items[].sessionIds`）和侧栏行的 `data-row-key="workspace:<id>"`。若未来宿主重命名其中之一，插件会**失效为“全部显示”**，不会误隐藏其他行。
-- 已验证：`node --check` + jsdom 冒烟（空/非空、归档判定、快照更新、重渲染、dispose、pending、开关、诊断、页签注册与注入动作）+ host 路由冒烟（GET/405、版本对比）。**尚未在运行中的 GUI 里挂载验证。**
+- 已验证：`node --check` + jsdom 冒烟（空/非空、归档判定、空白会话判定、未知摘要保守显示、快照更新、重渲染、dispose、pending、开关、诊断、页签注册与注入动作）+ host 路由冒烟（GET/405、版本对比）。**尚未在运行中的 GUI 里挂载验证。**
 
 ## 验证
 

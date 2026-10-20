@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- A Workspace whose only Sessions are blank (created and never used) now counts as empty and is hidden.
+- Add the `dsh.hideEmptyWorkspaces.includeBlank=1` opt-out and a matching Settings tab toggle.
+- Unknown Session summaries stay visible, so a loading Session list never hides working Workspaces.
+
 ## 0.2.0
 
 - Add a Settings -> Plugins tab: status, hidden count, both toggles, re-apply, reload page, diagnostics.

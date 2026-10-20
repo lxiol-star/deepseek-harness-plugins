@@ -19,8 +19,8 @@ window.__ModuleLoader__.load({
     const module = { exports: {} }
     const exports = module.exports
 
-    /** Client services: slot registry, locale dictionaries, Workspace snapshot. */
-    const inject = ['slots', 'locale', 'workspaces']
+    /** Client services: slot registry, locale dictionaries, Workspace and Session snapshots. */
+    const inject = ['slots', 'locale', 'workspaces', 'sessions']
 
     /** Attribute carried by a hidden group section. */
     const ATTR = 'data-dsh-hide-empty'
@@ -30,12 +30,14 @@ window.__ModuleLoader__.load({
     const STORAGE_KEY = 'dsh.hideEmptyWorkspaces'
     /** Setting `1` also counts archived sessions as visible. */
     const INCLUDE_ARCHIVED_KEY = 'dsh.hideEmptyWorkspaces.includeArchived'
+    /** Setting `1` also counts blank sessions (created, never chatted) as visible. */
+    const INCLUDE_BLANK_KEY = 'dsh.hideEmptyWorkspaces.includeBlank'
     /** Host route that reports loaded and installed versions. */
     const STATUS_PATH = '/hide-empty-workspaces/status'
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.2.0'
+    const VERSION = '0.2.1'
 
     /** Chinese copy. */
     const zh = {
@@ -56,6 +58,7 @@ window.__ModuleLoader__.load({
       flags: '开关',
       enabled: '启用过滤',
       includeArchived: '归档会话也算作有会话',
+      includeBlank: '空白会话也算作有会话',
       actions: '操作',
       reapply: '重新应用',
       reload: '刷新页面',
@@ -83,6 +86,7 @@ window.__ModuleLoader__.load({
       flags: 'Options',
       enabled: 'Enable the filter',
       includeArchived: 'Count archived sessions as visible',
+      includeBlank: 'Count blank sessions as visible',
       actions: 'Actions',
       reapply: 'Re-apply',
       reload: 'Reload page',
@@ -130,9 +134,10 @@ window.__ModuleLoader__.load({
      */
     function writeFlag(name, value) {
       try {
-        if (name === 'includeArchived') {
-          if (value) localStorage.setItem(INCLUDE_ARCHIVED_KEY, '1')
-          else localStorage.removeItem(INCLUDE_ARCHIVED_KEY)
+        if (name === 'includeArchived' || name === 'includeBlank') {
+          const key = name === 'includeArchived' ? INCLUDE_ARCHIVED_KEY : INCLUDE_BLANK_KEY
+          if (value) localStorage.setItem(key, '1')
+          else localStorage.removeItem(key)
           return
         }
         if (value) localStorage.removeItem(STORAGE_KEY)
@@ -232,7 +237,14 @@ window.__ModuleLoader__.load({
               checked: flags.includeArchived,
               onChange: (event) => { props.setFlag('includeArchived', event.target.checked) },
             }),
-            t('includeArchived'))),
+            t('includeArchived')),
+          h('label', { style: styles.check },
+            h('input', {
+              type: 'checkbox',
+              checked: flags.includeBlank,
+              onChange: (event) => { props.setFlag('includeBlank', event.target.checked) },
+            }),
+            t('includeBlank'))),
 
         h('div', { style: styles.card },
           h('h3', { style: styles.sectionTitle }, t('actions')),
@@ -254,8 +266,10 @@ window.__ModuleLoader__.load({
       const t = ctx.locale.bind(NS)
 
       let workspaces
+      let sessions
       try {
         workspaces = ctx.get('workspaces')
+        sessions = ctx.get('sessions')
       } catch (error) {
         window.__dshHideEmptyWorkspaces = { version: VERSION, state: 'error', error: String(error) }
         throw error
@@ -269,6 +283,7 @@ window.__ModuleLoader__.load({
         state: 'loading',
         hidden: [],
         includeArchived: false,
+        includeBlank: false,
         error: null,
       }
       window.__dshHideEmptyWorkspaces = diagnostics
@@ -295,18 +310,33 @@ window.__ModuleLoader__.load({
             return
           }
           const includeArchived = readFlag(INCLUDE_ARCHIVED_KEY, false)
+          const includeBlank = readFlag(INCLUDE_BLANK_KEY, false)
           const archived = new Set((snapshot.archivedSessionIds || []).map(String))
+          // A blank Session is one the user created and never used. Unknown
+          // summaries stay visible: hiding on missing data would hide working
+          // Workspaces while the Session list is still loading.
+          const blank = new Set()
+          const sessionList = sessions.list.getSnapshot()
+          if (sessionList !== undefined && sessionList !== null && sessionList.byId !== undefined) {
+            for (const [id, summary] of Object.entries(sessionList.byId)) {
+              if (summary !== undefined && summary !== null && summary.blank === true) blank.add(String(id))
+            }
+          }
           const empty = new Set()
           for (const item of snapshot.items) {
             const ids = item !== undefined && item !== null && item.sessionIds !== undefined
               ? item.sessionIds
               : []
-            const visible = includeArchived
-              ? ids.length
-              : ids.filter((id) => !archived.has(String(id))).length
+            let visible = 0
+            for (const id of ids) {
+              if (!includeArchived && archived.has(String(id))) continue
+              if (!includeBlank && blank.has(String(id))) continue
+              visible += 1
+            }
             if (visible === 0) empty.add(String(item.workspaceId))
           }
           diagnostics.includeArchived = includeArchived
+          diagnostics.includeBlank = includeBlank
           diagnostics.hidden = [...empty]
           for (const workspaceRow of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) {
             const key = (workspaceRow.getAttribute('data-row-key') || '').slice(ROW_PREFIX.length)
@@ -346,6 +376,7 @@ window.__ModuleLoader__.load({
         getFlags: () => ({
           enabled: readFlag(STORAGE_KEY, true),
           includeArchived: readFlag(INCLUDE_ARCHIVED_KEY, false),
+          includeBlank: readFlag(INCLUDE_BLANK_KEY, false),
         }),
         setFlag: (name, value) => {
           writeFlag(name, value === true)
@@ -362,18 +393,21 @@ window.__ModuleLoader__.load({
 
       ctx.effect(() => {
         const unsubscribe = workspaces.list.subscribe(schedule)
+        const unsubscribeSessions = sessions.list.subscribe(schedule)
         const observer = new MutationObserver(schedule)
         observer.observe(document.body === null ? document.documentElement : document.body, {
           childList: true,
           subtree: true,
         })
         const onStorage = (event) => {
-          if (event.key === STORAGE_KEY || event.key === INCLUDE_ARCHIVED_KEY) schedule()
+          if (event.key === STORAGE_KEY || event.key === INCLUDE_ARCHIVED_KEY
+            || event.key === INCLUDE_BLANK_KEY) schedule()
         }
         window.addEventListener('storage', onStorage)
         schedule()
         return () => {
           unsubscribe()
+          unsubscribeSessions()
           observer.disconnect()
           window.removeEventListener('storage', onStorage)
           if (frame !== 0) cancelAnimationFrame(frame)

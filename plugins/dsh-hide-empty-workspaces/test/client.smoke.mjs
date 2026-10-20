@@ -22,7 +22,7 @@ function check(name, condition) {
   console.error(`FAIL ${name}`)
 }
 
-function boot({ phase = 'ready', items, stored = null, includeArchived = null, archivedSessionIds = [] }) {
+function boot({ phase = 'ready', items, stored = null, includeArchived = null, includeBlank = null, archivedSessionIds = [], sessionsById = {} }) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <div id="sidebar">
       <section class="group" data-group="a">
@@ -41,6 +41,7 @@ function boot({ phase = 'ready', items, stored = null, includeArchived = null, a
   window.cancelAnimationFrame = (handle) => window.clearTimeout(handle)
   if (stored !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces', stored)
   if (includeArchived !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.includeArchived', includeArchived)
+  if (includeBlank !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.includeBlank', includeBlank)
 
   let snapshot = { phase, items, archivedSessionIds }
   const listeners = new Set()
@@ -53,12 +54,19 @@ function boot({ phase = 'ready', items, stored = null, includeArchived = null, a
       },
     },
   }
+  const sessionService = {
+    list: {
+      getSnapshot: () => ({ ids: Object.keys(sessionsById), byId: sessionsById, phase: 'ready' }),
+      subscribe: () => () => {},
+    },
+  }
   const dispose = []
   const registrations = []
   const ctx = {
     get: (name) => {
-      if (name !== 'workspaces') throw new Error(`unexpected service ${name}`)
-      return service
+      if (name === 'workspaces') return service
+      if (name === 'sessions') return sessionService
+      throw new Error(`unexpected service ${name}`)
     },
     effect: (factory) => {
       const cleanup = factory()
@@ -174,7 +182,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('archived-only Workspace is hidden', world.hidden('ws-b'))
   check('Workspaces with visible sessions stay', !world.hidden('ws-a') && !world.hidden('ws-c'))
   const diag = world.window.__dshHideEmptyWorkspaces
-  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.2.0' && diag.state === 'ready')
+  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.2.1' && diag.state === 'ready')
   check('diagnostics report the hidden id', Array.isArray(diag.hidden) && diag.hidden.includes('ws-b'))
   world.dispose()
   world.window.close()
@@ -238,6 +246,36 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   injected.setFlag('enabled', false)
   await wait()
   check('enabled toggle shows every Workspace', !world.hidden('ws-b'))
+  world.dispose()
+  world.window.close()
+}
+
+// 10. A Workspace holding only a blank Session counts as empty.
+{
+  const world = boot({
+    items: [
+      { workspaceId: 'ws-a', sessionIds: ['s1'] },
+      { workspaceId: 'ws-b', sessionIds: ['blank-1'] },
+      { workspaceId: 'ws-c', sessionIds: ['unknown-1'] },
+    ],
+    sessionsById: {
+      s1: { id: 's1', blank: false },
+      'blank-1': { id: 'blank-1', blank: true },
+    },
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('blank-only Workspace is hidden', world.hidden('ws-b'))
+  check('Workspace with a real Session stays visible', !world.hidden('ws-a'))
+  check('unknown Session summary stays visible', !world.hidden('ws-c'))
+  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
+  const injected = registration.options.inject()
+  check('includeBlank defaults to false', injected.getFlags().includeBlank === false)
+  injected.setFlag('includeBlank', true)
+  await wait()
+  check('includeBlank reveals the blank-only Workspace', !world.hidden('ws-b'))
+  check('includeBlank persists to localStorage',
+    world.window.localStorage.getItem('dsh.hideEmptyWorkspaces.includeBlank') === '1')
   world.dispose()
   world.window.close()
 }
