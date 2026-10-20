@@ -1,5 +1,13 @@
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+// Minimal React stub: the smoke test exercises registration and injected
+// actions, never renders the Settings tab.
+const React = {
+  createElement: () => null,
+  useState: () => [0, () => {}],
+  useEffect: () => {},
+  useCallback: (fn) => fn,
+}
 import { JSDOM } from 'jsdom'
 
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
@@ -46,6 +54,7 @@ function boot({ phase = 'ready', items, stored = null, includeArchived = null, a
     },
   }
   const dispose = []
+  const registrations = []
   const ctx = {
     get: (name) => {
       if (name !== 'workspaces') throw new Error(`unexpected service ${name}`)
@@ -56,19 +65,38 @@ function boot({ phase = 'ready', items, stored = null, includeArchived = null, a
       if (typeof cleanup === 'function') dispose.push(cleanup)
       return cleanup
     },
+    slots: {
+      inject: (_name, callback) => callback(),
+      register: (options, component) => {
+        registrations.push({ options, component })
+        return () => {}
+      },
+    },
+    locale: {
+      register: () => () => {},
+      bind: (namespace) => (key) => `${namespace}.${key}`,
+    },
   }
 
   let exported = null
   window.__ModuleLoader__ = {
     load: ({ factory }) => {
-      exported = factory()
+      exported = factory((name) => {
+        if (name === 'react') return React
+        throw new Error(`unexpected module ${name}`)
+      })
     },
   }
+  window.fetch = async () => ({
+    ok: true,
+    json: async () => ({ loadedVersion: '0.2.0', installedVersion: '0.2.1' }),
+  })
   vm.runInContext(source, dom.getInternalVMContext())
   return {
     window,
     dom,
     ctx,
+    registrations,
     dispose: () => { for (const cleanup of dispose) cleanup() },
     get exported() { return exported },
     update(next) {
@@ -146,7 +174,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('archived-only Workspace is hidden', world.hidden('ws-b'))
   check('Workspaces with visible sessions stay', !world.hidden('ws-a') && !world.hidden('ws-c'))
   const diag = world.window.__dshHideEmptyWorkspaces
-  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.1.1' && diag.state === 'ready')
+  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.2.0' && diag.state === 'ready')
   check('diagnostics report the hidden id', Array.isArray(diag.hidden) && diag.hidden.includes('ws-b'))
   world.dispose()
   world.window.close()
@@ -173,6 +201,43 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.exported.apply(world.ctx)
   await wait()
   check('opt-out keeps every Workspace visible', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
+  world.dispose()
+  world.window.close()
+}
+
+// 9. The Settings tab registers and its injected actions drive the filter.
+{
+  const world = boot({ items: [
+    { workspaceId: 'ws-a', sessionIds: ['s1'] },
+    { workspaceId: 'ws-b', sessionIds: ['s2'] },
+    { workspaceId: 'ws-c', sessionIds: ['s3'] },
+  ], archivedSessionIds: ['s2'] })
+  world.exported.apply(world.ctx)
+  await wait()
+  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
+  check('settings tab registers into settings.plugins.tab', registration !== undefined)
+  check('settings tab id and order', registration.options.id === 'hide-empty-workspaces'
+    && registration.options.order === 60)
+  check('settings tab label resolves through the locale namespace',
+    registration.options.label() === 'hideEmptyWorkspaces.tab')
+  const injected = registration.options.inject()
+  check('injected status reports the hidden Workspace', injected.status().hidden.includes('ws-b'))
+  check('injected flags expose the defaults', injected.getFlags().enabled === true
+    && injected.getFlags().includeArchived === false)
+  injected.setFlag('includeArchived', true)
+  await wait()
+  check('includeArchived toggle un-hides the archived-only Workspace', !world.hidden('ws-b'))
+  check('includeArchived toggle persists to localStorage',
+    world.window.localStorage.getItem('dsh.hideEmptyWorkspaces.includeArchived') === '1')
+  injected.setFlag('includeArchived', false)
+  await wait()
+  check('disabling includeArchived hides it again', world.hidden('ws-b'))
+  const versions = await injected.versions()
+  check('versions fetch returns loaded and installed versions',
+    versions.loadedVersion === '0.2.0' && versions.installedVersion === '0.2.1')
+  injected.setFlag('enabled', false)
+  await wait()
+  check('enabled toggle shows every Workspace', !world.hidden('ws-b'))
   world.dispose()
   world.window.close()
 }
