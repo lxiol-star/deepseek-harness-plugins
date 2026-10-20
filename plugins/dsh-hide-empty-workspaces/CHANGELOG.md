@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- A Workspace whose only remaining Sessions are subagent children now counts as empty and is hidden. Subagent Sessions never render as Workspace rows (their rows live in the parent header's catalog), but they were counted as visible, so a Workspace left with only teammate/child Sessions kept showing with zero rows.
+- The visible-Session rule now mirrors the native Workspace browser: archived (unless opted in), blank (unless opted in), and subagent Sessions do not count.
+
 ## 0.2.1
 
 - A Workspace whose only Sessions are blank (created and never used) now counts as empty and is hidden.

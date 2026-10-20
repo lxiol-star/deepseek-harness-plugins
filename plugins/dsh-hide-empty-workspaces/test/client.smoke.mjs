@@ -182,7 +182,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('archived-only Workspace is hidden', world.hidden('ws-b'))
   check('Workspaces with visible sessions stay', !world.hidden('ws-a') && !world.hidden('ws-c'))
   const diag = world.window.__dshHideEmptyWorkspaces
-  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.2.1' && diag.state === 'ready')
+  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.2.2' && diag.state === 'ready')
   check('diagnostics report the hidden id', Array.isArray(diag.hidden) && diag.hidden.includes('ws-b'))
   world.dispose()
   world.window.close()
@@ -276,6 +276,38 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('includeBlank reveals the blank-only Workspace', !world.hidden('ws-b'))
   check('includeBlank persists to localStorage',
     world.window.localStorage.getItem('dsh.hideEmptyWorkspaces.includeBlank') === '1')
+  world.dispose()
+  world.window.close()
+}
+
+// 11. A Workspace holding only subagent child Sessions counts as empty.
+{
+  const world = boot({
+    items: [
+      { workspaceId: 'ws-a', sessionIds: ['child-1'] },
+      { workspaceId: 'ws-b', sessionIds: ['real-1', 'child-1'] },
+      { workspaceId: 'ws-c', sessionIds: ['child-1', 'archived-1'] },
+    ],
+    archivedSessionIds: ['archived-1'],
+    sessionsById: {
+      'child-1': { id: 'child-1', blank: false, origin: 'subagent' },
+      'real-1': { id: 'real-1', blank: false },
+      'archived-1': { id: 'archived-1', blank: false },
+    },
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('subagent-only Workspace is hidden', world.hidden('ws-a'))
+  check('Workspace with a real Session stays visible', !world.hidden('ws-b'))
+  check('subagent Session does not rescue an archived-only Workspace', world.hidden('ws-c'))
+  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
+  const injected = registration.options.inject()
+  injected.setFlag('includeArchived', true)
+  await wait()
+  check('includeArchived keeps a subagent-only Workspace hidden', world.hidden('ws-a'))
+  injected.setFlag('includeBlank', true)
+  await wait()
+  check('includeBlank keeps a subagent-only Workspace hidden', world.hidden('ws-a'))
   world.dispose()
   world.window.close()
 }

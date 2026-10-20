@@ -1,11 +1,14 @@
 /**
  * Browser half of dsh-hide-empty-workspaces.
  *
- * A Workspace is hidden when it has no visible sessions: sessions count when
- * they are not in the Workspace Controller's archive set. Emptiness comes from
- * the snapshot (`items[].sessionIds` minus `archivedSessionIds`), never from
- * rendered rows: a collapsed group renders no session rows, so counting the DOM
- * would hide working directories.
+ * A Workspace is hidden when it has no visible sessions: a Session counts when
+ * the native Workspace browser would render a row for it. That means: not in
+ * the Workspace Controller's archive set (unless opted in), not a blank
+ * (created, never used) Session, and not a subagent child — child rows live in
+ * the parent header's catalog, never in the Workspace tree. Emptiness comes
+ * from the snapshot (`items[].sessionIds` plus the Session list), never from
+ * rendered rows: a collapsed group renders no session rows, so counting the
+ * DOM would hide working directories.
  *
  * The same bundle contributes a Settings -> Plugins tab that reports status,
  * compares the loaded and installed versions, exposes both toggles, and offers
@@ -37,7 +40,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.2.1'
+    const VERSION = '0.2.2'
 
     /** Chinese copy. */
     const zh = {
@@ -312,14 +315,19 @@ window.__ModuleLoader__.load({
           const includeArchived = readFlag(INCLUDE_ARCHIVED_KEY, false)
           const includeBlank = readFlag(INCLUDE_BLANK_KEY, false)
           const archived = new Set((snapshot.archivedSessionIds || []).map(String))
-          // A blank Session is one the user created and never used. Unknown
-          // summaries stay visible: hiding on missing data would hide working
-          // Workspaces while the Session list is still loading.
+          // Two kinds of Sessions never get a row in the Workspace browser: a
+          // blank Session the user created and never used, and a subagent child,
+          // whose row lives in the parent header's catalog. Unknown summaries
+          // stay visible: hiding on missing data would hide working Workspaces
+          // while the Session list is still loading.
           const blank = new Set()
+          const subagent = new Set()
           const sessionList = sessions.list.getSnapshot()
           if (sessionList !== undefined && sessionList !== null && sessionList.byId !== undefined) {
             for (const [id, summary] of Object.entries(sessionList.byId)) {
-              if (summary !== undefined && summary !== null && summary.blank === true) blank.add(String(id))
+              if (summary === undefined || summary === null) continue
+              if (summary.blank === true) blank.add(String(id))
+              if (summary.origin === 'subagent') subagent.add(String(id))
             }
           }
           const empty = new Set()
@@ -329,6 +337,7 @@ window.__ModuleLoader__.load({
               : []
             let visible = 0
             for (const id of ids) {
+              if (subagent.has(String(id))) continue
               if (!includeArchived && archived.has(String(id))) continue
               if (!includeBlank && blank.has(String(id))) continue
               visible += 1
