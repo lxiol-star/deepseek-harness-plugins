@@ -54,6 +54,8 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.2.2.tgz
 
 ## 开发
 
+交接与完整开发说明见仓库根目录 [插件开发交接文档](../../docs/plugin-development-handoff.md)。
+
 DSH 源码仓库提供构建工具和已构建的类型声明：
 
 ```sh

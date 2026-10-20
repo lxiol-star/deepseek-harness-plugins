@@ -25,7 +25,7 @@
 
 ```text
 # 会话看板
-github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.2.1&path:/plugins/dsh-session-board
+github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.3.6&path:/plugins/dsh-session-board
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区
@@ -37,6 +37,8 @@ github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.0&pat
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。
 
 ## 开发与验证
+
+接手插件开发前，先读 [插件开发交接文档](docs/plugin-development-handoff.md)：插件双半架构、服务注入规则、目录地图、构建/发布流程、排障手册与已知风险都在里面。
 
 当前插件构建使用单独的 DSH 源码仓库提供类型和构建工具。安装 Node.js 22.19+ 或 24+，在 DSH 仓库完成依赖安装和构建后：
 
