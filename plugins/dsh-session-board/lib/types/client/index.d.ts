@@ -26,7 +26,8 @@ import { BatchController } from './batch.ts';
 import { BoardModel } from './model.ts';
 import { type ReadonlyStore, type Store } from './store.ts';
 import { type Translate } from './hooks.ts';
-import type { JobsService, SessionListState, SessionStatusSnapshot, SubagentAddress, WorkspacesService } from './dsh.ts';
+import { ManagerController } from './manager/controller.ts';
+import type { JobsService, RetainSession, SessionListState, SessionStatusSnapshot, SubagentAddress, WorkspacesService } from './dsh.ts';
 /** Plugin name, shared by both halves. */
 export declare const name = "dsh-session-board";
 /**
@@ -69,6 +70,8 @@ export interface BoardFace {
     sessions: {
         list: ReadonlyStore<SessionListState>;
         subagentAddress?: (sessionId: string) => SubagentAddress | undefined;
+        retain?: RetainSession | undefined;
+        refresh?: (() => Promise<void>) | undefined;
     } | null;
     uiSession: {
         sessionStatus: ReadonlyStore<SessionStatusSnapshot>;
@@ -79,6 +82,7 @@ export interface BoardFace {
     ack: (id: string) => void;
     batch: BatchController;
     model: BoardModel;
+    manager: ManagerController;
 }
 /**
  * Activate the browser half.

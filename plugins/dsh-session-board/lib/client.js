@@ -27,7 +27,7 @@ __export(index_exports, {
   name: () => name
 });
 module.exports = __toCommonJS(index_exports);
-var import_react9 = require("react"), import_client = require("react-dom/client");
+var import_react10 = require("react"), import_client = require("react-dom/client");
 
 // src/client/archive-marks.ts
 function isArchivedInClient(entry) {
@@ -1998,6 +1998,294 @@ ${ACCENTS}
   cursor: pointer;
 }
 .sb-settings-retry:hover { background: var(--dsw-alias-bg-layer-2, transparent); }
+
+/* -------------------------------------------------------------- manager --- */
+
+/* Fixed right-hand drawer. The shell overlay layer ignores pointer events for
+   empty space, so the drawer restores them for itself and its descendants. */
+.sb-manager {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: clamp(420px, 46vw, 860px);
+  max-width: 100vw;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  box-shadow: -18px 0 40px color-mix(in srgb, var(--dsw-alias-bg-base) 40%, transparent);
+  contain: layout style;
+}
+
+.sb-manager-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+/* The drawer starts at the window edge, so the macOS chrome strip is padded
+   instead of being covered by the header controls. */
+html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh-frame-chrome-top, 0px)); }
+.sb-manager-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sb-manager-phase {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-secondary);
+}
+.sb-manager-phase[data-phase='running'] { background: var(--dsw-alias-state-business-primary); }
+.sb-manager-phase[data-phase='waiting'] { background: var(--dsw-alias-state-warn-primary); }
+
+.sb-manager-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-manager-btn--icon { padding: 4px; }
+.sb-manager-btn--primary {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, var(--dsw-alias-border-l1));
+}
+.sb-manager-btn:disabled { opacity: .45; cursor: not-allowed; }
+.sb-manager button:focus-visible,
+.sb-manager input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+
+.sb-manager-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.sb-manager-left {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 340px;
+  width: 340px;
+  min-height: 0;
+  border-right: 1px solid var(--dsw-alias-border-l1);
+}
+.sb-manager-section {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.sb-manager-workspaces { flex: 0 1 auto; max-height: 34%; }
+.sb-manager-sessions { flex: 1 1 auto; }
+.sb-manager-tasks { flex: 0 1 auto; max-height: 30%; }
+.sb-manager-section-title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-manager-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.sb-manager-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 2px;
+  border-radius: 7px;
+}
+.sb-manager-item[data-focused='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+}
+.sb-manager-check { flex: none; margin: 0; accent-color: var(--dsw-alias-state-business-primary); }
+.sb-manager-workspace {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sb-manager-workspace-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.sb-manager-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+}
+.sb-manager-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-secondary); }
+.sb-manager-dot[data-state='running'] { background: var(--dsw-alias-state-business-primary); }
+.sb-manager-dot[data-state='blocked'] { background: var(--dsw-alias-state-warn-primary); }
+.sb-manager-dot[data-state='error'] { background: var(--dsw-alias-state-error-primary); }
+.sb-manager-dot[data-state='unread'] { background: var(--dsw-alias-state-warn-primary); }
+.sb-manager-dot[data-state='done'] { background: var(--dsw-alias-state-success-primary); }
+.sb-manager-session-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sb-manager-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-manager-empty { margin: 4px 0; color: var(--dsw-alias-label-secondary); font-size: 11px; }
+
+.sb-manager-task {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sb-manager-task:disabled { cursor: default; }
+.sb-manager-task-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sb-manager-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-manager-chip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-manager-chip[data-status='running'] {
+  color: var(--dsw-alias-state-business-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, var(--dsw-alias-border-l1));
+}
+.sb-manager-chip[data-status='blocked'] { color: var(--dsw-alias-state-warn-primary); }
+.sb-manager-chip[data-status='done'] { color: var(--dsw-alias-state-success-primary); }
+.sb-manager-chip[data-status='failed'],
+.sb-manager-chip[data-status='orphaned'] { color: var(--dsw-alias-state-error-primary); }
+
+.sb-manager-selection {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+.sb-manager-selection-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sb-manager-count { margin-right: auto; font-variant-numeric: tabular-nums; }
+.sb-manager-hint { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 10px; }
+.sb-manager-error { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 11px; }
+.sb-manager-ok { margin: 0; color: var(--dsw-alias-state-success-primary); font-size: 11px; }
+
+.sb-manager-chat { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.sb-manager-chat-body { flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.sb-manager-chat-body > * { flex: 1 1 auto; min-height: 0; }
+.sb-manager-notice {
+  margin: auto;
+  padding: 20px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-manager-notice p { margin: 0; }
+
+/* Sidebar-foot entry point: one full-width row beside Settings while the
+   sidebar is wide, a centred icon in the rail. Occupants own their geometry
+   here, matching the shell's other footer actions. */
+.sb-manager-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 0 -2px;
+  padding: 0 10px 0 8px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.sb-manager-entry[data-rail='true'] {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+}
+.sb-manager-entry[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+.sb-manager-entry:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-manager-entry-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Hover states are gated: touch frames never get a sticky hover. */
+@media (hover: hover) {
+  .sb-manager-btn:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
+  .sb-manager-btn--primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent);
+  }
+  .sb-manager-workspace:hover,
+  .sb-manager-task:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
+  .sb-manager-entry:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+}
+
+/* A narrow frame stacks the two panes; the drawer takes the whole width. */
+@media (max-width: 860px) {
+  .sb-manager { width: 100%; }
+  .sb-manager-body { flex-direction: column; }
+  .sb-manager-left {
+    width: 100%;
+    flex: 0 0 auto;
+    max-height: 48%;
+    border-right: 0;
+    border-bottom: 1px solid var(--dsw-alias-border-l1);
+  }
+  .sb-manager-workspaces { max-height: 40%; }
+  .sb-manager-chat { min-height: 240px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-manager,
+  .sb-manager-btn,
+  .sb-manager-workspace,
+  .sb-manager-task { transition: none; animation: none; }
+}
+
 `;
 
 // src/shared/types.ts
@@ -2488,6 +2776,48 @@ var NS = "session-board", en = {
   "a11y.list": "Session list",
   "a11y.card": "Open session {title}",
   "a11y.groupCount": "{group}, {count} sessions",
+  "manager.title": "Manager panel",
+  "manager.entry": "Manager panel",
+  "manager.open": "Open manager panel",
+  "manager.close": "Close manager panel",
+  "manager.refresh": "Refresh manager state",
+  "manager.openInMain": "Open in main chat",
+  "manager.workspaces": "Workspaces",
+  "manager.sessions": "Sessions",
+  "manager.tasks": "Tasks",
+  "manager.loading": "Loading the manager\u2026",
+  "manager.chatUnavailable": "The embedded manager chat is unavailable. Open the manager in the main window instead.",
+  "manager.chatRetry": "Retry",
+  "manager.selectionCount": "{count} selected",
+  "manager.selectionEmpty": "Select a workspace or a session first.",
+  "manager.selectionClear": "Clear selection",
+  "manager.selectionSend": "Send selection to manager",
+  "manager.selectionSent": "Selection sent to the manager.",
+  "manager.selectionHint": "Sending queues one message for the manager. Ticked items are listed in that message; ticking alone sends nothing.",
+  "manager.errorState": "Could not load the manager state.",
+  "manager.errorPrompt": "Could not send the message to the manager.",
+  "manager.errorSelection": "The selection was kept locally but could not be synced to the host.",
+  "manager.errorTask": "Could not save the task.",
+  "manager.sending": "Sending\u2026",
+  "manager.focusHint": "Pick a workspace to list its sessions",
+  "manager.workspaceEmpty": "No workspaces on the board yet",
+  "manager.workspaceMeta": "{count} sessions \xB7 {running} running",
+  "manager.sessionEmpty": "No sessions in this workspace",
+  "manager.taskEmpty": "No tasks yet",
+  "manager.openTask": "Open the session of {title}",
+  "manager.ariaDrawer": "Manager panel",
+  "manager.selectWorkspace": "Select workspace {title}",
+  "manager.selectSession": "Select session {title}",
+  "manager.phase.idle": "Manager idle",
+  "manager.phase.running": "Manager running",
+  "manager.phase.waiting": "Manager waiting for you",
+  "task.status.pending": "Pending",
+  "task.status.assigned": "Assigned",
+  "task.status.running": "Running",
+  "task.status.blocked": "Blocked",
+  "task.status.done": "Done",
+  "task.status.failed": "Failed",
+  "task.status.orphaned": "Orphaned",
   "settings.nav": "Session board",
   "settings.synthesisGroup": "Archive synthesis",
   "settings.synthesisHint": "Model used to synthesize archived sessions into Wiki knowledge pages. The list comes from the models this client can currently use.",
@@ -2642,6 +2972,48 @@ var NS = "session-board", en = {
   "a11y.list": "\u4F1A\u8BDD\u5217\u8868",
   "a11y.card": "\u6253\u5F00\u4F1A\u8BDD {title}",
   "a11y.groupCount": "{group}\uFF0C{count} \u4E2A\u4F1A\u8BDD",
+  "manager.title": "\u7BA1\u7406\u9762\u677F",
+  "manager.entry": "\u7BA1\u7406\u9762\u677F",
+  "manager.open": "\u6253\u5F00\u7BA1\u7406\u9762\u677F",
+  "manager.close": "\u5173\u95ED\u7BA1\u7406\u9762\u677F",
+  "manager.refresh": "\u5237\u65B0\u7BA1\u7406\u72B6\u6001",
+  "manager.openInMain": "\u5728\u4E3B\u754C\u9762\u6253\u5F00",
+  "manager.workspaces": "\u5DE5\u4F5C\u533A",
+  "manager.sessions": "\u4F1A\u8BDD",
+  "manager.tasks": "\u4EFB\u52A1",
+  "manager.loading": "\u6B63\u5728\u52A0\u8F7D\u7BA1\u7406\u9762\u677F\u2026",
+  "manager.chatUnavailable": "\u65E0\u6CD5\u5185\u5D4C\u7BA1\u7406\u4F1A\u8BDD\uFF0C\u8BF7\u5728\u4E3B\u754C\u9762\u6253\u5F00\u7BA1\u7406\u5458\u4F1A\u8BDD\u3002",
+  "manager.chatRetry": "\u91CD\u8BD5",
+  "manager.selectionCount": "\u5DF2\u9009 {count} \u9879",
+  "manager.selectionEmpty": "\u8BF7\u5148\u52FE\u9009\u5DE5\u4F5C\u533A\u6216\u4F1A\u8BDD\u3002",
+  "manager.selectionClear": "\u6E05\u7A7A\u9009\u62E9",
+  "manager.selectionSend": "\u53D1\u9001\u9009\u533A\u7ED9\u7BA1\u7406\u5458",
+  "manager.selectionSent": "\u9009\u533A\u5DF2\u53D1\u9001\u7ED9\u7BA1\u7406\u5458\u3002",
+  "manager.selectionHint": "\u53D1\u9001\u4F1A\u4E3A\u7BA1\u7406\u5458\u6392\u961F\u4E00\u6761\u6D88\u606F\uFF0C\u5176\u4E2D\u5217\u51FA\u5DF2\u52FE\u9009\u5BF9\u8C61\uFF1B\u4EC5\u52FE\u9009\u4E0D\u4F1A\u53D1\u9001\u3002",
+  "manager.errorState": "\u65E0\u6CD5\u8BFB\u53D6\u7BA1\u7406\u9762\u677F\u72B6\u6001\u3002",
+  "manager.errorPrompt": "\u65E0\u6CD5\u5411\u7BA1\u7406\u5458\u53D1\u9001\u6D88\u606F\u3002",
+  "manager.errorSelection": "\u9009\u533A\u5DF2\u4FDD\u7559\u5728\u672C\u5730\uFF0C\u4F46\u672A\u80FD\u540C\u6B65\u5230\u5BBF\u4E3B\u3002",
+  "manager.errorTask": "\u4EFB\u52A1\u4FDD\u5B58\u5931\u8D25\u3002",
+  "manager.sending": "\u53D1\u9001\u4E2D\u2026",
+  "manager.focusHint": "\u9009\u62E9\u4E00\u4E2A\u5DE5\u4F5C\u533A\u4EE5\u67E5\u770B\u5176\u4F1A\u8BDD",
+  "manager.workspaceEmpty": "\u770B\u677F\u4E0A\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A",
+  "manager.workspaceMeta": "{count} \u4E2A\u4F1A\u8BDD \xB7 {running} \u4E2A\u8FD0\u884C\u4E2D",
+  "manager.sessionEmpty": "\u8BE5\u5DE5\u4F5C\u533A\u8FD8\u6CA1\u6709\u4F1A\u8BDD",
+  "manager.taskEmpty": "\u8FD8\u6CA1\u6709\u4EFB\u52A1",
+  "manager.openTask": "\u6253\u5F00\u4EFB\u52A1 {title} \u7684\u4F1A\u8BDD",
+  "manager.ariaDrawer": "\u7BA1\u7406\u9762\u677F",
+  "manager.selectWorkspace": "\u9009\u62E9\u5DE5\u4F5C\u533A {title}",
+  "manager.selectSession": "\u9009\u62E9\u4F1A\u8BDD {title}",
+  "manager.phase.idle": "\u7BA1\u7406\u5458\u7A7A\u95F2",
+  "manager.phase.running": "\u7BA1\u7406\u5458\u8FD0\u884C\u4E2D",
+  "manager.phase.waiting": "\u7BA1\u7406\u5458\u7B49\u5F85\u4F60\u5904\u7406",
+  "task.status.pending": "\u5F85\u5904\u7406",
+  "task.status.assigned": "\u5DF2\u5206\u914D",
+  "task.status.running": "\u8FDB\u884C\u4E2D",
+  "task.status.blocked": "\u53D7\u963B",
+  "task.status.done": "\u5DF2\u5B8C\u6210",
+  "task.status.failed": "\u5931\u8D25",
+  "task.status.orphaned": "\u5DF2\u5B64\u7ACB",
   "settings.nav": "\u4F1A\u8BDD\u770B\u677F",
   "settings.synthesisGroup": "\u5F52\u6863\u63D0\u70BC",
   "settings.synthesisHint": "\u628A\u5F52\u6863\u4F1A\u8BDD\u63D0\u70BC\u6210 Wiki \u77E5\u8BC6\u9875\u65F6\u4F7F\u7528\u7684\u6A21\u578B\u3002\u5217\u8868\u6765\u81EA\u5F53\u524D\u5BA2\u6237\u7AEF\u53EF\u7528\u7684\u6A21\u578B\u3002",
@@ -3618,8 +3990,785 @@ function SessionBoardSettingsPage({ t, settings }) {
   ] });
 }
 
+// src/shared/manager.ts
+var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_PATH = "/api/session-board/manager/selection", MANAGER_TASK_PATH = "/api/session-board/manager/task", MANAGER_TASK_STATUSES = [
+  "pending",
+  "assigned",
+  "running",
+  "blocked",
+  "done",
+  "failed",
+  "orphaned"
+], EMPTY_SELECTION = Object.freeze({ workspaceIds: [], sessionIds: [] });
+function isManagerTaskStatus(value) {
+  return typeof value == "string" && MANAGER_TASK_STATUSES.includes(value);
+}
+var MANAGER_ID_MAX = 200;
+var MANAGER_SELECTION_MAX = 500;
+function isManagerId(value) {
+  return typeof value == "string" && value.length > 0 && value.length <= MANAGER_ID_MAX && !value.includes("\0");
+}
+function normalizeSelection(value) {
+  let source = typeof value == "object" && value !== null ? value : {}, collect = (input) => {
+    if (!Array.isArray(input)) return [];
+    let seen = /* @__PURE__ */ new Set(), out = [];
+    for (let entry of input)
+      if (!(!isManagerId(entry) || seen.has(entry)) && (seen.add(entry), out.push(entry), out.length >= MANAGER_SELECTION_MAX))
+        break;
+    return out;
+  };
+  return { workspaceIds: collect(source.workspaceIds), sessionIds: collect(source.sessionIds) };
+}
+function buildSelectionMessage(selection, labels, instruction = "") {
+  let workspaces = selection.workspaceIds.map((id) => `- \u5DE5\u4F5C\u533A ${labels.workspaceTitles[id] ?? id} (${id})`), sessions = selection.sessionIds.map((id) => {
+    let title = labels.sessionTitles[id] ?? id, state = labels.sessionStates?.[id];
+    return `- \u4F1A\u8BDD ${title} (${id})${state === void 0 ? "" : ` \xB7 ${state}`}`;
+  }), body = [...workspaces, ...sessions];
+  if (body.length === 0 && instruction.trim() === "") return "";
+  let lines = ["[\u9009\u533A] \u4EE5\u4E0B\u662F\u7528\u6237\u5728\u9762\u677F\u4E2D\u52FE\u9009\u7684\u5BF9\u8C61\uFF1A", ...body], text = instruction.trim();
+  return text !== "" && lines.push("", text), lines.join(`
+`);
+}
+function managerPhase(running, waiting) {
+  return waiting ? "waiting" : running === !0 ? "running" : "idle";
+}
+var TASK_STATUS_KEYS = {
+  pending: "task.status.pending",
+  assigned: "task.status.assigned",
+  running: "task.status.running",
+  blocked: "task.status.blocked",
+  done: "task.status.done",
+  failed: "task.status.failed",
+  orphaned: "task.status.orphaned"
+};
+
+// src/client/manager/controller.ts
+var MANAGER_STORE_KEY = "dsh.session-board.manager.v1", MANAGER_SELECTION_DEBOUNCE_MS = 450, MANAGER_POLL_MS = 4e3, MANAGER_REFERENCE_SOURCE = "sessionBoardManager";
+function initialState() {
+  return {
+    open: !1,
+    phase: "loading",
+    error: null,
+    errorDetail: null,
+    stateError: null,
+    managerSessionId: null,
+    managerWorkspaceId: null,
+    selection: { workspaceIds: [...EMPTY_SELECTION.workspaceIds], sessionIds: [...EMPTY_SELECTION.sessionIds] },
+    tasks: [],
+    wakeEnabled: !1,
+    muxRevision: 0,
+    sending: !1,
+    syncing: !1,
+    sent: !1,
+    focusedWorkspaceId: null,
+    reference: null,
+    chat: "idle",
+    chatError: null
+  };
+}
+function asRecord3(value) {
+  return typeof value == "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function stringOrNull2(value) {
+  return typeof value == "string" && value !== "" ? value : null;
+}
+function numberOrNull2(value) {
+  return typeof value == "number" && Number.isFinite(value) ? value : null;
+}
+function failureCode(payload) {
+  return stringOrNull2(payload.error) ?? "REQUEST_FAILED";
+}
+function parseTask(value) {
+  let record2 = asRecord3(value);
+  if (record2 === null) return null;
+  let id = stringOrNull2(record2.id), title = stringOrNull2(record2.title), status = record2.status;
+  if (id === null || title === null || !isManagerTaskStatus(status)) return null;
+  let workspaceId = stringOrNull2(record2.workspaceId), sessionId = stringOrNull2(record2.sessionId), note = stringOrNull2(record2.note), createdAt = numberOrNull2(record2.createdAt), updatedAt = numberOrNull2(record2.updatedAt);
+  return {
+    id,
+    title,
+    status,
+    ...workspaceId === null ? {} : { workspaceId },
+    ...sessionId === null ? {} : { sessionId },
+    ...note === null ? {} : { note },
+    createdAt: createdAt ?? 0,
+    updatedAt: updatedAt ?? 0
+  };
+}
+function parseState(value) {
+  let record2 = asRecord3(value);
+  if (record2 === null) return null;
+  let tasks = [], rawTasks = record2.tasks;
+  if (Array.isArray(rawTasks))
+    for (let raw of rawTasks) {
+      let task = parseTask(raw);
+      task !== null && tasks.push(task);
+    }
+  let managerSessionId = stringOrNull2(record2.managerSessionId), managerWorkspaceId = stringOrNull2(record2.managerWorkspaceId), stateError = stringOrNull2(record2.error), revision = numberOrNull2(record2.muxRevision);
+  return {
+    ...managerSessionId === null ? {} : { managerSessionId },
+    ...managerWorkspaceId === null ? {} : { managerWorkspaceId },
+    ...stateError === null ? {} : { error: stateError },
+    selection: normalizeSelection(record2.selection),
+    tasks,
+    wakeEnabled: record2.wakeEnabled === !0,
+    muxRevision: revision ?? 0
+  };
+}
+function parseSelectionResponse(value) {
+  let record2 = asRecord3(value.selection);
+  return record2 === null ? null : {
+    selection: normalizeSelection(record2),
+    revision: numberOrNull2(value.revision) ?? 0
+  };
+}
+function releaseQuietly(reference) {
+  if (reference !== null)
+    try {
+      reference.release();
+    } catch {
+    }
+}
+async function requestJson(path, init) {
+  let response;
+  try {
+    response = await globalThis.fetch(path, init);
+  } catch {
+    throw new Error("REQUEST_FAILED");
+  }
+  let payload = await response.json().catch(() => null), record2 = asRecord3(payload);
+  if (!response.ok) throw new Error(record2 === null ? `HTTP_${response.status}` : failureCode(record2));
+  if (record2 === null) throw new Error("INVALID_RESPONSE");
+  return record2;
+}
+function postJson(path, body) {
+  return requestJson(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+function selectionLabels(options) {
+  let workspaceTitles = {}, workspaceSnapshot = options.workspaces?.list.getSnapshot();
+  if (workspaceSnapshot != null)
+    for (let item of workspaceSnapshot.items)
+      workspaceTitles[item.workspaceId] = item.title ?? item.path;
+  let sessionTitles = {}, sessionStates = {}, sessionSnapshot = options.sessions?.list.getSnapshot();
+  if (sessionSnapshot != null)
+    for (let id of sessionSnapshot.ids) {
+      let row = sessionSnapshot.byId[id];
+      row !== void 0 && (sessionTitles[id] = row.displayTitle !== "" ? row.displayTitle : row.title ?? id, row.running === !0 && (sessionStates[id] = "running"));
+    }
+  return { workspaceTitles, sessionTitles, sessionStates };
+}
+var ManagerController = class {
+  state;
+  listeners = /* @__PURE__ */ new Set();
+  persistence;
+  options;
+  reference = null;
+  referencePromise = null;
+  /** Id the in-flight acquisition belongs to; a different id must wait it out. */
+  referencePromiseId = null;
+  refreshPromise = null;
+  selectionTimer = null;
+  pollTimer = null;
+  /** Serializes selection mirror writes so a stale write cannot land last. */
+  syncQueue = Promise.resolve();
+  selectionDirty = !1;
+  disposed = !1;
+  constructor(options) {
+    this.options = options, this.persistence = createStore({ open: !1 }, {
+      persist: MANAGER_STORE_KEY,
+      revive: (stored, _initial) => ({ open: (typeof stored == "object" && stored !== null ? stored : {}).open === !0 })
+    });
+    let open = this.persistence.getSnapshot().open;
+    this.state = { ...initialState(), open }, open && queueMicrotask(() => {
+      this.disposed || !this.state.open || this.refresh();
+    });
+  }
+  /** Bound snapshot reader for `useSyncExternalStore`. */
+  getSnapshot = () => this.state;
+  /** Bound subscriber for `useSyncExternalStore`. Never fires after disposal. */
+  subscribe = (listener) => this.disposed ? () => {
+  } : (this.listeners.add(listener), () => {
+    this.listeners.delete(listener);
+  });
+  /** Show the drawer and read the current host state. */
+  open() {
+    this.disposed || (this.state.open || (this.persistence.set({ open: !0 }), this.publish({ open: !0, sent: !1 })), this.startPolling(), this.refresh());
+  }
+  /** Hide the drawer and release the retained manager Session. */
+  close() {
+    this.disposed || (this.persistence.set({ open: !1 }), this.stopPolling(), this.releaseReference(), this.publish({ open: !1, chat: "idle", chatError: null }));
+  }
+  /** Flip drawer visibility. */
+  toggle() {
+    this.state.open ? this.close() : this.open();
+  }
+  /** Workspace whose sessions the left pane lists; null shows none. */
+  setFocused(workspaceId) {
+    this.disposed || this.state.focusedWorkspaceId === workspaceId || this.publish({ focusedWorkspaceId: workspaceId });
+  }
+  /** Tick or untick one workspace in the local selection. */
+  toggleWorkspaceId(workspaceId) {
+    if (this.disposed || workspaceId === "") return;
+    let current = this.state.selection.workspaceIds, workspaceIds = current.includes(workspaceId) ? current.filter((id) => id !== workspaceId) : [...current, workspaceId];
+    this.applyLocalSelection({ ...this.state.selection, workspaceIds });
+  }
+  /** Tick or untick one session in the local selection. */
+  toggleSessionId(sessionId) {
+    if (this.disposed || sessionId === "") return;
+    let current = this.state.selection.sessionIds, sessionIds = current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId];
+    this.applyLocalSelection({ ...this.state.selection, sessionIds });
+  }
+  /** Empty the local selection and mirror the empty set. */
+  clearSelection() {
+    this.disposed || this.state.selection.workspaceIds.length === 0 && this.state.selection.sessionIds.length === 0 || this.applyLocalSelection({ workspaceIds: [], sessionIds: [] });
+  }
+  /**
+   * Read the host state mirror. Concurrent calls share one request.
+   * @returns completion of the read attempt; failures land in the snapshot.
+   */
+  refresh() {
+    if (this.disposed) return Promise.resolve();
+    if (this.refreshPromise !== null) return this.refreshPromise;
+    this.state.phase !== "ready" && this.publish({ phase: "loading", error: null, errorDetail: null });
+    let promise = (async () => {
+      try {
+        let payload = await requestJson(MANAGER_STATE_PATH);
+        if (payload.ok !== !0) throw new Error(failureCode(payload));
+        let view = parseState(payload.state);
+        if (view === null) throw new Error("INVALID_STATE");
+        if (this.disposed) return;
+        this.applyState(view), this.publish({
+          phase: "ready",
+          ...this.state.error === "manager.errorState" ? { error: null, errorDetail: null } : {}
+        }), this.state.managerSessionId !== null && this.ensureReference();
+      } catch (error) {
+        if (this.disposed) return;
+        this.publish({
+          phase: this.state.phase === "ready" ? "ready" : "error",
+          error: "manager.errorState",
+          errorDetail: error instanceof Error ? error.message : "REQUEST_FAILED",
+          stateError: null
+        });
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+    return this.refreshPromise = promise, promise;
+  }
+  /** Begin the open-drawer poll; idempotent and never runs after disposal. */
+  startPolling() {
+    this.disposed || this.pollTimer !== null || (this.pollTimer = globalThis.setInterval(() => {
+      if (this.disposed || !this.state.open) {
+        this.stopPolling();
+        return;
+      }
+      this.refresh();
+    }, MANAGER_POLL_MS));
+  }
+  /** Stop the open-drawer poll. */
+  stopPolling() {
+    this.pollTimer !== null && (globalThis.clearInterval(this.pollTimer), this.pollTimer = null);
+  }
+  /** Retry the failed read and the retained chat after one error. */
+  retry() {
+    this.disposed || (this.refresh(), this.state.managerSessionId !== null && this.ensureReference());
+  }
+  /**
+   * Send the current selection to the manager as one queued user message.
+   * @param instruction - optional user instruction appended after the selection block.
+   * @returns success, or the localized error key to display.
+   */
+  async sendSelection(instruction = "") {
+    if (this.disposed || this.state.sending) return { ok: !1, error: "manager.errorPrompt" };
+    let text = buildSelectionMessage(this.state.selection, selectionLabels(this.options), instruction);
+    if (text === "") return { ok: !1, error: "manager.selectionEmpty" };
+    this.publish({ sending: !0, sent: !1, error: null, errorDetail: null });
+    try {
+      await this.flushSelection();
+      let reference = await this.ensureReference();
+      if (reference === null)
+        return this.publish({ sending: !1, error: "manager.errorPrompt", errorDetail: this.state.chatError }), { ok: !1, error: "manager.errorPrompt" };
+      let result = await reference.binding.session.prompt([{ type: "text", text }], "queue");
+      return result.ok !== !0 ? (this.publish({ sending: !1, error: "manager.errorPrompt", errorDetail: result.error.code ?? result.error.message ?? "PROMPT_FAILED" }), { ok: !1, error: "manager.errorPrompt" }) : (this.publish({ sending: !1, sent: !0 }), { ok: !0 });
+    } catch (error) {
+      return this.disposed || this.publish({ sending: !1, error: "manager.errorPrompt", errorDetail: error instanceof Error ? error.message : "PROMPT_FAILED" }), { ok: !1, error: "manager.errorPrompt" };
+    }
+  }
+  /**
+   * Create one task through the host task route.
+   * @param draft - title plus optional workspace/session/status/note.
+   * @returns whether the host accepted the write.
+   */
+  async createTask(draft) {
+    if (this.disposed) return !1;
+    let task = { title: draft.title };
+    return draft.workspaceId !== void 0 && (task.workspaceId = draft.workspaceId), draft.sessionId !== void 0 && (task.sessionId = draft.sessionId), draft.status !== void 0 && (task.status = draft.status), draft.note !== void 0 && (task.note = draft.note), this.writeTask({ action: "create", task });
+  }
+  /**
+   * Update one task through the host task route.
+   * @param taskId - task identity from the state mirror.
+   * @param patch - fields to replace.
+   * @returns whether the host accepted the write.
+   */
+  async updateTask(taskId, patch) {
+    if (this.disposed) return !1;
+    let task = { id: taskId };
+    return patch.title !== void 0 && (task.title = patch.title), patch.workspaceId !== void 0 && (task.workspaceId = patch.workspaceId), patch.sessionId !== void 0 && (task.sessionId = patch.sessionId), patch.status !== void 0 && (task.status = patch.status), patch.note !== void 0 && (task.note = patch.note), this.writeTask({ action: "update", task });
+  }
+  /** Release the retained Session, timers and subscribers. Terminal. */
+  dispose() {
+    this.disposed || (this.disposed = !0, this.stopPolling(), this.selectionTimer !== null && (globalThis.clearTimeout(this.selectionTimer), this.selectionTimer = null), this.releaseReference(), this.referencePromise = null, this.referencePromiseId = null, this.refreshPromise = null, this.listeners.clear());
+  }
+  /** Swap in a new snapshot and wake every listener. */
+  publish(next) {
+    if (!this.disposed) {
+      this.state = { ...this.state, ...next };
+      for (let listener of [...this.listeners])
+        try {
+          listener();
+        } catch {
+        }
+    }
+  }
+  /** Store a locally changed selection and schedule its durable mirror. */
+  applyLocalSelection(selection) {
+    let current = this.state.selection;
+    current.workspaceIds === selection.workspaceIds && current.sessionIds === selection.sessionIds || (this.selectionDirty = !0, this.publish({ selection, sent: !1, error: this.state.error === "manager.errorSelection" ? null : this.state.error }), this.scheduleSelectionSync());
+  }
+  /** Debounced selection mirror write. */
+  scheduleSelectionSync() {
+    this.disposed || (this.selectionTimer !== null && globalThis.clearTimeout(this.selectionTimer), this.selectionTimer = globalThis.setTimeout(() => {
+      if (this.selectionTimer = null, !this.disposed) {
+        if (this.state.syncing) {
+          this.scheduleSelectionSync();
+          return;
+        }
+        this.syncSelection();
+      }
+    }, MANAGER_SELECTION_DEBOUNCE_MS));
+  }
+  /** Send the pending local selection now, if any. */
+  async flushSelection() {
+    this.selectionTimer !== null && (globalThis.clearTimeout(this.selectionTimer), this.selectionTimer = null), !(!this.selectionDirty || this.disposed) && await this.syncSelection();
+  }
+  /** Mirror the current local selection now, serialized after any in-flight write. */
+  syncSelection() {
+    if (this.disposed || !this.selectionDirty) return Promise.resolve();
+    let run = () => this.performSelectionSync();
+    return this.syncQueue = this.syncQueue.then(run, run), this.syncQueue;
+  }
+  /**
+   * One selection mirror write. Runs on the serialized queue, so the payload
+   * is the selection current at write time; a failed write keeps the local
+   * selection and the scheduled reconciliation retries it.
+   */
+  async performSelectionSync() {
+    if (this.disposed || !this.selectionDirty) return;
+    let captured = this.state.selection;
+    this.publish({ syncing: !0 });
+    try {
+      let payload = await postJson(MANAGER_SELECTION_PATH, {
+        workspaceIds: captured.workspaceIds,
+        sessionIds: captured.sessionIds
+      });
+      if (payload.ok !== !0) throw new Error(failureCode(payload));
+      if (parseSelectionResponse(payload) === null) throw new Error("INVALID_RESPONSE");
+      if (this.disposed) return;
+      this.state.selection === captured && (this.selectionDirty = !1), this.publish({
+        syncing: !1,
+        ...this.state.error === "manager.errorSelection" ? { error: null, errorDetail: null } : {}
+      });
+    } catch (error) {
+      if (this.disposed) return;
+      this.publish({
+        syncing: !1,
+        error: "manager.errorSelection",
+        errorDetail: error instanceof Error ? error.message : "REQUEST_FAILED"
+      });
+    }
+  }
+  /** Apply one host state read to the local snapshot. */
+  applyState(view) {
+    let nextSessionId = view.managerSessionId ?? null;
+    nextSessionId !== this.state.managerSessionId && this.releaseReference();
+    let selection = this.selectionDirty ? this.state.selection : { workspaceIds: [...view.selection.workspaceIds], sessionIds: [...view.selection.sessionIds] };
+    this.publish({
+      managerSessionId: nextSessionId,
+      managerWorkspaceId: view.managerWorkspaceId ?? null,
+      stateError: view.error ?? null,
+      selection,
+      tasks: [...view.tasks],
+      wakeEnabled: view.wakeEnabled,
+      muxRevision: view.muxRevision,
+      ...nextSessionId !== this.state.managerSessionId ? { reference: null, chat: "idle", chatError: null } : {}
+    });
+  }
+  /**
+   * Retain the manager Session once and await its opening. Concurrent calls
+   * share one acquisition; failures land in the snapshot for the chat pane.
+   * @returns the reference (caller must not release it), or null.
+   */
+  ensureReference() {
+    if (this.disposed) return Promise.resolve(null);
+    let managerSessionId = this.state.managerSessionId;
+    if (managerSessionId === null)
+      return this.publish({ chat: "error", chatError: "MANAGER_SESSION_UNAVAILABLE" }), Promise.resolve(null);
+    let existing = this.reference;
+    if (existing !== null) {
+      if (existing.sessionId === managerSessionId) return Promise.resolve(existing);
+      this.releaseReference();
+    }
+    if (this.referencePromise !== null)
+      return this.referencePromiseId === managerSessionId ? this.referencePromise : this.referencePromise.then(() => this.ensureReference());
+    let sessions = this.options.sessions, retain = sessions?.retain;
+    if (sessions == null || typeof retain != "function")
+      return this.publish({ chat: "error", chatError: "SESSION_SERVICE_UNAVAILABLE" }), Promise.resolve(null);
+    this.publish({ chat: "loading", chatError: null });
+    let promise = (async () => {
+      let acquired = null;
+      try {
+        return sessions.list.getSnapshot().byId[managerSessionId] === void 0 && typeof sessions.refresh == "function" && (await sessions.refresh(), this.disposed || this.state.managerSessionId !== managerSessionId) ? null : (acquired = retain.call(sessions, managerSessionId, { source: MANAGER_REFERENCE_SOURCE }), await acquired.ready, this.disposed || this.state.managerSessionId !== managerSessionId ? (releaseQuietly(acquired), null) : (this.reference = acquired, this.publish({ reference: acquired, chat: "ready", chatError: null }), acquired));
+      } catch (error) {
+        return releaseQuietly(acquired), this.disposed || this.publish({ chat: "error", chatError: error instanceof Error ? error.message : "REQUEST_FAILED" }), null;
+      } finally {
+        this.referencePromise = null, this.referencePromiseId = null;
+      }
+    })();
+    return this.referencePromise = promise, this.referencePromiseId = managerSessionId, promise;
+  }
+  /** Release the retained manager Session and mark the chat unready. */
+  releaseReference() {
+    let reference = this.reference;
+    reference !== null && (this.reference = null, releaseQuietly(reference), this.publish({ reference: null, chat: "idle", chatError: null }));
+  }
+  /** POST one create/update task request and merge the resulting row. */
+  async writeTask(body) {
+    try {
+      let payload = await postJson(MANAGER_TASK_PATH, body);
+      if (payload.ok !== !0) throw new Error(failureCode(payload));
+      let task = parseTask(payload.task);
+      if (task === null) throw new Error("INVALID_TASK");
+      if (this.disposed) return !1;
+      let tasks = this.state.tasks.some((row) => row.id === task.id) ? this.state.tasks.map((row) => row.id === task.id ? task : row) : [...this.state.tasks, task];
+      return this.publish({
+        tasks,
+        ...this.state.error === "manager.errorTask" ? { error: null, errorDetail: null } : {}
+      }), !0;
+    } catch (error) {
+      return this.disposed || this.publish({
+        error: "manager.errorTask",
+        errorDetail: error instanceof Error ? error.message : "REQUEST_FAILED"
+      }), !1;
+    }
+  }
+};
+
+// src/client/manager/ManagerDrawer.tsx
+var import_react9 = require("react");
+var import_jsx_runtime8 = require("react/jsx-runtime"), PHASE_LABEL = {
+  idle: "manager.phase.idle",
+  running: "manager.phase.running",
+  waiting: "manager.phase.waiting"
+}, EMPTY_WORKSPACE_SNAPSHOT = { items: [] }, EMPTY_WORKSPACES = {
+  getSnapshot: () => EMPTY_WORKSPACE_SNAPSHOT,
+  subscribe: () => () => {
+  }
+}, EMPTY_STATUS_SNAPSHOT = /* @__PURE__ */ new Map(), EMPTY_STATUSES = {
+  getSnapshot: () => EMPTY_STATUS_SNAPSHOT,
+  subscribe: () => () => {
+  }
+};
+function baseName(path) {
+  return path.replaceAll("\\", "/").split("/").filter(Boolean).pop() ?? path;
+}
+function workspaceRows(groups, workspaces) {
+  let rows = /* @__PURE__ */ new Map();
+  for (let group of groups)
+    for (let entry of group.entries) {
+      let id = entry.workspaceId !== void 0 && entry.workspaceId !== "" ? entry.workspaceId : entry.workspacePath ?? "";
+      if (id === "") continue;
+      let row = rows.get(id);
+      row === void 0 && (row = {
+        id,
+        title: entry.workspaceTitle !== "" ? entry.workspaceTitle : baseName(entry.workspacePath ?? ""),
+        path: entry.workspacePath ?? "",
+        entries: []
+      }, rows.set(id, row)), row.entries.push(entry);
+    }
+  if (rows.size === 0 && workspaces !== null)
+    for (let item of workspaces.items)
+      rows.set(item.workspaceId, {
+        id: item.workspaceId,
+        title: item.title ?? baseName(item.path),
+        path: item.path,
+        entries: []
+      });
+  return [...rows.values()].sort((left, right) => left.title.localeCompare(right.title));
+}
+function runningCount(row) {
+  let count = 0;
+  for (let entry of row.entries) entry.state === "running" && (count += 1);
+  return count;
+}
+function activityText(at) {
+  if (!Number.isFinite(at) || at <= 0) return "";
+  let date = new Date(at);
+  return date.toDateString() === (/* @__PURE__ */ new Date()).toDateString() ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
+  let running = runningCount(row);
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "sb-manager-item", "data-focused": focused, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      "input",
+      {
+        type: "checkbox",
+        className: "sb-manager-check",
+        checked: selected,
+        onChange: () => onToggle(row.id),
+        "aria-label": t("manager.selectWorkspace", { title: row.title })
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+      "button",
+      {
+        type: "button",
+        className: "sb-manager-workspace",
+        "aria-pressed": focused,
+        title: row.path,
+        onClick: () => onFocus(row.id),
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-workspace-title", children: row.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: row.entries.length, running }) })
+        ]
+      }
+    )
+  ] });
+}
+function SessionRowView({ entry, selected, t, onToggle }) {
+  let statusKey = entry.pendingKey ?? entry.noteKey, parts = [];
+  statusKey !== null && parts.push(t(statusKey));
+  let activity = activityText(entry.lastActivityAt);
+  return activity !== "" && parts.push(activity), /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "sb-manager-item", "data-state": entry.state, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      "input",
+      {
+        type: "checkbox",
+        className: "sb-manager-check",
+        checked: selected,
+        onChange: () => onToggle(entry.id),
+        "aria-label": t("manager.selectSession", { title: entry.title })
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-dot", "data-state": entry.state, "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "sb-manager-session-main", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-session-title", title: entry.title, children: entry.title }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: parts.join(" \xB7 ") })
+    ] })
+  ] });
+}
+function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react9.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), selectedWorkspaces = (0, import_react9.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react9.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react9.useMemo)(
+    () => rows.find((row) => row.id === snapshot.focusedWorkspaceId) ?? null,
+    [rows, snapshot.focusedWorkspaceId]
+  ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react9.useCallback)((id) => {
+    manager.toggleWorkspaceId(id);
+  }, [manager]), focusWorkspace = (0, import_react9.useCallback)((id) => {
+    manager.setFocused(id);
+  }, [manager]), toggleSession = (0, import_react9.useCallback)((id) => {
+    manager.toggleSessionId(id);
+  }, [manager]), clearSelection = (0, import_react9.useCallback)(() => {
+    manager.clearSelection();
+  }, [manager]), sendSelection = (0, import_react9.useCallback)(() => {
+    manager.sendSelection();
+  }, [manager]), refresh = (0, import_react9.useCallback)(() => {
+    manager.retry();
+  }, [manager]), close = (0, import_react9.useCallback)(() => {
+    manager.close();
+  }, [manager]), openInMain = (0, import_react9.useCallback)(() => {
+    snapshot.managerSessionId !== null && face.openSession(snapshot.managerSessionId);
+  }, [face, snapshot.managerSessionId]), openTask = (0, import_react9.useCallback)((sessionId) => {
+    face.openSession(sessionId);
+  }, [face]);
+  if (!snapshot.open) return null;
+  let chatReady = snapshot.reference !== null && typeof SessionProvider == "function" && typeof renderSlot == "function", chatFailed = snapshot.phase === "error" || snapshot.chat === "error" || snapshot.phase === "ready" && snapshot.managerSessionId === null;
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-root sb-manager", role: "complementary", "aria-label": t("manager.ariaDrawer"), "data-open": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("header", { className: "sb-manager-head", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        "span",
+        {
+          className: "sb-manager-phase",
+          "data-phase": phase,
+          role: "img",
+          "aria-label": t(PHASE_LABEL[phase]),
+          title: t(PHASE_LABEL[phase])
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-title", children: t("manager.title") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "sb-manager-btn",
+          "aria-label": t("manager.refresh"),
+          title: t("manager.refresh"),
+          onClick: refresh,
+          children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinecap: "round", strokeLinejoin: "round" }) })
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "sb-manager-btn",
+          disabled: snapshot.managerSessionId === null,
+          onClick: openInMain,
+          children: t("manager.openInMain")
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "sb-manager-btn sb-manager-btn--icon",
+          "aria-label": t("manager.close"),
+          title: t("manager.close"),
+          onClick: close,
+          children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M2.5 2.5l7 7m0-7l-7 7", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
+        }
+      )
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-body", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("aside", { className: "sb-manager-left", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.workspaces") }),
+          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: rows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+            WorkspaceRowView,
+            {
+              row,
+              focused: row.id === snapshot.focusedWorkspaceId,
+              selected: selectedWorkspaces.has(row.id),
+              t,
+              onToggle: toggleWorkspace,
+              onFocus: focusWorkspace
+            },
+            row.id
+          )) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
+          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focused.entries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.sessionEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: focused.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+            SessionRowView,
+            {
+              entry,
+              selected: selectedSessions.has(entry.id),
+              t,
+              onToggle: toggleSession
+            },
+            entry.id
+          )) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-tasks", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.tasks") }),
+          snapshot.tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.taskEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: snapshot.tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("li", { className: "sb-manager-item", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "sb-manager-task",
+              disabled: task.sessionId === void 0,
+              title: task.sessionId === void 0 ? void 0 : t("manager.openTask", { title: task.title }),
+              onClick: () => {
+                task.sessionId !== void 0 && openTask(task.sessionId);
+              },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-chip", "data-status": task.status, children: t(TASK_STATUS_KEYS[task.status]) }),
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "sb-manager-task-main", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-task-title", children: task.title }),
+                  task.note === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: task.note })
+                ] })
+              ]
+            }
+          ) }, task.id)) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("footer", { className: "sb-manager-selection", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-selection-row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-count", children: t("manager.selectionCount", { count: selectedCount }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "sb-manager-btn",
+                disabled: selectedCount === 0,
+                onClick: clearSelection,
+                children: t("manager.selectionClear")
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "sb-manager-btn sb-manager-btn--primary",
+                disabled: selectedCount === 0 || snapshot.sending || snapshot.managerSessionId === null,
+                onClick: sendSelection,
+                children: snapshot.sending ? t("manager.sending") : t("manager.selectionSend")
+              }
+            )
+          ] }),
+          snapshot.sent ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-ok", children: t("manager.selectionSent") }) : null,
+          snapshot.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-error", title: snapshot.errorDetail ?? snapshot.stateError ?? void 0, children: t(snapshot.error) }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-hint", children: t("manager.selectionHint") })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("section", { className: "sb-manager-chat", children: chatReady && snapshot.reference !== null && SessionProvider !== void 0 && renderSlot !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "sb-manager-chat-body", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(SessionProvider, { session: snapshot.reference, children: renderSlot("session-board.manager.chat", {}) }) }) : chatFailed ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-notice", role: "alert", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { title: snapshot.stateError ?? void 0, children: snapshot.phase === "error" ? t("manager.errorState") : t("manager.chatUnavailable") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: refresh, children: t("manager.chatRetry") })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.loading") }) })
+    ] })
+  ] });
+}
+function ManagerToggle({ manager, t, wide }) {
+  let open = useSnapshot(manager, (value) => value.open), label = t(open ? "manager.close" : "manager.open"), inSidebar = wide !== void 0;
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+    "button",
+    {
+      type: "button",
+      className: inSidebar ? "sb-manager-entry" : "sb-btn",
+      "data-rail": inSidebar && wide !== !0 ? "true" : void 0,
+      "aria-label": label,
+      title: label,
+      "aria-pressed": open,
+      "data-session-board-manager-toggle": "",
+      onClick: () => manager.toggle(),
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: inSidebar ? 16 : 14, height: inSidebar ? 16 : 14, viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M4.2 2.4h5.6v9.2H4.2zM6.6 4.2h1.2M6.6 6.6h1.2M6.6 9h1.2", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinejoin: "round" }) }),
+        inSidebar && wide === !0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-entry-label", children: t("manager.entry") }) : null
+      ]
+    }
+  );
+}
+
+// src/client/manager/ManagerChat.tsx
+var import_jsx_runtime9 = require("react/jsx-runtime");
+function ManagerFixedChatView({ renderSlot }) {
+  return typeof renderSlot != "function" ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_jsx_runtime9.Fragment, { children: renderSlot("conversation.session", { view: "chat" }) });
+}
+function ManagerChatPanel(props) {
+  let { sessionId, useSession, useConversation, useSessions, renderFactorySlot, t } = props, session = useSession((value) => value), conversation = useConversation((value) => value), summary = useSessions((state) => state.byId[sessionId]), hero = !(conversation.activeTargets.size > 0 || session.blank !== !0 && session.awaitingFirstTurn !== !0 || session.running === !0 || summary?.blank === !1);
+  return typeof renderFactorySlot != "function" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_jsx_runtime9.Fragment, { children: renderFactorySlot(
+    "conversation.content",
+    { variant: "embedded", phase: hero ? "hero" : "active", hero },
+    {
+      slots: { views: ManagerFixedChatView },
+      fallback: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") })
+    }
+  ) });
+}
+
 // src/client/index.tsx
-var import_jsx_runtime8 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
+var import_jsx_runtime10 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -3637,15 +4786,15 @@ function emptyStore(value) {
 }
 var EMPTY_LIST = { ids: [], byId: {} }, EMPTY_STATUS = /* @__PURE__ */ new Map(), EMPTY_LIST_SOURCE = emptyStore(EMPTY_LIST), EMPTY_STATUS_SOURCE = emptyStore(EMPTY_STATUS);
 function useViewActions(face) {
-  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react9.useCallback)(() => {
+  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react10.useCallback)(() => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, collapsed: !current.dock.collapsed } }));
-  }, [face]), setWidth = (0, import_react9.useCallback)((width) => {
+  }, [face]), setWidth = (0, import_react10.useCallback)((width) => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, width: clampDockWidth(width) } }));
-  }, [face]), toggleDensity = (0, import_react9.useCallback)(() => {
+  }, [face]), toggleDensity = (0, import_react10.useCallback)(() => {
     face.view.set((current) => ({ ...current, density: current.density === "compact" ? "full" : "compact" }));
-  }, [face]), setBoardOpen = (0, import_react9.useCallback)((open) => {
+  }, [face]), setBoardOpen = (0, import_react10.useCallback)((open) => {
     face.view.set((current) => ({ ...current, board: { open } }));
-  }, [face]), toggleGroup = (0, import_react9.useCallback)((group) => {
+  }, [face]), toggleGroup = (0, import_react10.useCallback)((group) => {
     face.view.set((current) => ({
       ...current,
       collapsedGroups: { ...current.collapsedGroups, [group]: current.collapsedGroups[group] !== !0 }
@@ -3655,21 +4804,21 @@ function useViewActions(face) {
 }
 function useTranslation(face) {
   let revision = useSnapshot(face.locale, (value) => value.revision);
-  return (0, import_react9.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
+  return (0, import_react10.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
 }
 function useSelection(face) {
   let state = useSnapshot(face.batch, (value) => value);
-  return { selected: (0, import_react9.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
+  return { selected: (0, import_react10.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
 }
 function useFilters(face, groups) {
-  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react9.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react9.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react9.useCallback)((next) => {
+  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react10.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react10.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react10.useCallback)((next) => {
     face.view.set((current) => ({ ...current, filters: next }));
   }, [face]);
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
     BoardDock,
     {
       grouping: view.grouping,
@@ -3689,9 +4838,9 @@ function DockRoot({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -3699,10 +4848,10 @@ function DockRoot({ face }) {
   );
 }
 function OpenOverlayContent({ face }) {
-  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react9.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react9.useCallback)((id) => {
+  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react10.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react10.useCallback)((id) => {
     face.openSession(id), setBoardOpen(!1);
   }, [face, setBoardOpen]);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
     BoardOverlay,
     {
       open: !0,
@@ -3719,9 +4868,9 @@ function OpenOverlayContent({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -3730,11 +4879,11 @@ function OpenOverlayContent({ face }) {
 }
 function BoardOverlaySlot({ face }) {
   let { view } = useViewActions(face);
-  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(OpenOverlayContent, { face }) : null;
+  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(OpenOverlayContent, { face }) : null;
 }
 function HeaderToggle({ face }) {
   let { view, setBoardOpen } = useViewActions(face), label = view.board.open ? face.t("action.closeBoard") : face.t("action.openBoard");
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
     "button",
     {
       type: "button",
@@ -3744,7 +4893,7 @@ function HeaderToggle({ face }) {
       "aria-pressed": view.board.open,
       "data-session-board-toggle": "",
       onClick: () => setBoardOpen(!view.board.open),
-      children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
+      children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
     }
   );
 }
@@ -3852,7 +5001,9 @@ function apply(ctx) {
           return view.set((current) => ({ ...current, archiveMarks: { ...current.archiveMarks, ...completed } })), result;
         }
       });
-      cleanup.add(() => batch.dispose()), feed.start();
+      cleanup.add(() => batch.dispose());
+      let manager = new ManagerController({ sessions, workspaces });
+      cleanup.add(() => manager.dispose()), feed.start();
       let resumePush = () => {
         doc.visibilityState === "visible" && feed.resume();
       };
@@ -3866,6 +5017,7 @@ function apply(ctx) {
         uiSession,
         jobs,
         workspaces,
+        manager,
         openSession: (id) => {
           let nav = navigationOf();
           if (nav === void 0 || typeof nav.openSession != "function") {
@@ -3943,11 +5095,39 @@ function apply(ctx) {
         inject: () => ({ face })
       }, HeaderToggle));
       cleanup.add(disposeToggle);
+      let disposeManager = scopedSlots.inject("shell.overlay", () => scopedSlots.register({
+        name: "shell.overlay",
+        id: "session-board.manager",
+        order: 60,
+        locale: NS,
+        children: { "session-board.manager.chat": { kind: "single", scope: "session" } },
+        inject: () => ({ face, manager, t })
+      }, ManagerDrawer));
+      cleanup.add(disposeManager);
+      let disposeManagerChat = scopedSlots.inject("session-board.manager.chat", () => scopedSlots.register({
+        name: "session-board.manager.chat",
+        locale: NS
+      }, ManagerChatPanel));
+      cleanup.add(disposeManagerChat);
+      let disposeManagerToggle = scopedSlots.inject("conversation.session.header.actions", () => scopedSlots.register({
+        name: "conversation.session.header.actions",
+        id: "session-board.manager.toggle",
+        order: 40,
+        inject: () => ({ manager, t })
+      }, ManagerToggle));
+      cleanup.add(disposeManagerToggle);
+      let disposeManagerEntry = scopedSlots.inject("sidebar.footer.action", () => scopedSlots.register({
+        name: "sidebar.footer.action",
+        id: "session-board.manager.entry",
+        order: 20,
+        inject: () => ({ manager, t })
+      }, ManagerToggle));
+      cleanup.add(disposeManagerEntry);
       let host = doc.createElement("div");
       host.setAttribute("data-dsh-session-board-host", "");
       let disposeDock = mountDock(host, (element) => {
         let root = (0, import_client.createRoot)(element);
-        return root.render(/* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DockRoot, { face })), () => {
+        return root.render(/* @__PURE__ */ (0, import_jsx_runtime10.jsx)(DockRoot, { face })), () => {
           root.unmount();
         };
       }, warn);

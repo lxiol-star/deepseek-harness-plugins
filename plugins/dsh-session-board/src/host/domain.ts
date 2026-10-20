@@ -61,7 +61,7 @@ export interface DomainSpec {
 }
 
 /** Declare one table. */
-function domainTable<V>(schema: RecordSchema<V>): DomainTableSpec<V> {
+export function domainTable<V>(schema: RecordSchema<V>): DomainTableSpec<V> {
   return { valueSchema: schema }
 }
 
@@ -72,7 +72,7 @@ function domainTable<V>(schema: RecordSchema<V>): DomainTableSpec<V> {
  * @param spec - the declaration.
  * @returns the same declaration.
  */
-function defineDomain<S extends DomainSpec>(spec: S): S {
+export function defineDomain<S extends DomainSpec>(spec: S): S {
   if (!UNIT_NAME_RE.test(spec.name)) {
     throw new Error(`domain name '${spec.name}' must match ${UNIT_NAME_RE}`)
   }

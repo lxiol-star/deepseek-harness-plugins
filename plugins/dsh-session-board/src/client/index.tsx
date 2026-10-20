@@ -40,8 +40,12 @@ import { en, NS, zh } from './locales.ts'
 import { useSnapshot, type Translate } from './hooks.ts'
 import { createSynthesisSettings, type SynthesisSettingsFace } from './synthesis-settings.ts'
 import { SessionBoardSettingsPage } from './SettingsPage.tsx'
+import { ManagerController } from './manager/controller.ts'
+import { ManagerDrawer, ManagerToggle } from './manager/ManagerDrawer.tsx'
+import { ManagerChatPanel } from './manager/ManagerChat.tsx'
 import type {
   JobsService,
+  RetainSession,
   SessionListState,
   SessionStatusSnapshot,
   SubagentAddress,
@@ -90,6 +94,8 @@ interface SlotRegistry {
     /** Registrant-localized nav label; `settings.section` reads it. */
     label?: () => string
     locale?: string
+    /** Child-slot declaration table; declares (and authorizes) rendered children. */
+    children?: Record<string, { kind: string; scope: string }>
     inject?: () => Record<string, unknown>
   }, component: unknown): () => void
 }
@@ -135,6 +141,8 @@ export interface BoardFace {
   sessions: {
     list: ReadonlyStore<SessionListState>
     subagentAddress?: (sessionId: string) => SubagentAddress | undefined
+    retain?: RetainSession | undefined
+    refresh?: (() => Promise<void>) | undefined
   } | null
   uiSession: { sessionStatus: ReadonlyStore<SessionStatusSnapshot> } | null
   jobs: JobsService | null
@@ -143,6 +151,7 @@ export interface BoardFace {
   ack: (id: string) => void
   batch: BatchController
   model: BoardModel
+  manager: ManagerController
 }
 
 /** A store that never changes, used when an optional service is missing. */
@@ -486,6 +495,9 @@ export function apply(ctx: Context): void {
     })
     cleanup.add(() => batch.dispose())
 
+    const manager = new ManagerController({ sessions, workspaces })
+    cleanup.add(() => manager.dispose())
+
     feed.start()
     const resumePush = (): void => {
       if (doc.visibilityState === 'visible') feed.resume()
@@ -504,6 +516,7 @@ export function apply(ctx: Context): void {
       uiSession,
       jobs,
       workspaces,
+      manager,
       openSession: (id) => {
         const nav = navigationOf()
         if (nav === undefined || typeof nav.openSession !== 'function') {
@@ -594,6 +607,41 @@ export function apply(ctx: Context): void {
     }, HeaderToggle))
 
     cleanup.add(disposeToggle)
+    // The manager drawer rides the same overlay seat as the board (a later
+    // list position, so it layers under the fullscreen board when both are
+    // open) and declares the child slot its embedded official chat renders in.
+    const disposeManager = scopedSlots.inject('shell.overlay', () => scopedSlots.register({
+      name: 'shell.overlay',
+      id: 'session-board.manager',
+      order: 60,
+      locale: NS,
+      children: { 'session-board.manager.chat': { kind: 'single', scope: 'session' } },
+      inject: () => ({ face, manager, t }),
+    }, ManagerDrawer))
+    cleanup.add(disposeManager)
+    const disposeManagerChat = scopedSlots.inject('session-board.manager.chat', () => scopedSlots.register({
+      name: 'session-board.manager.chat',
+      locale: NS,
+    }, ManagerChatPanel))
+    cleanup.add(disposeManagerChat)
+    const disposeManagerToggle = scopedSlots.inject('conversation.session.header.actions', () => scopedSlots.register({
+      name: 'conversation.session.header.actions',
+      id: 'session-board.manager.toggle',
+      order: 40,
+      inject: () => ({ manager, t }),
+    }, ManagerToggle))
+    cleanup.add(disposeManagerToggle)
+    // The conversation header seat only exists once a session is displayed, so
+    // the drawer also needs a root-level entry point that stays visible on the
+    // blank/new-session hero: the sidebar foot action row (root list seat).
+    // A renamed seat simply never runs this callback.
+    const disposeManagerEntry = scopedSlots.inject('sidebar.footer.action', () => scopedSlots.register({
+      name: 'sidebar.footer.action',
+      id: 'session-board.manager.entry',
+      order: 20,
+      inject: () => ({ manager, t }),
+    }, ManagerToggle))
+    cleanup.add(disposeManagerEntry)
     // The dock is an additive frame grid item; official conversation nodes
     // remain untouched. The adapter restores the native template on disposal.
     const host = doc.createElement('div')

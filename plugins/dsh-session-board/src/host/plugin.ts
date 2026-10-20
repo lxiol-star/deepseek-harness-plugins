@@ -22,6 +22,7 @@ import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelPref, type Synthes
 import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec } from './domain.ts'
 import type { BoardPrefsTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
 import { BoardLedger, describeError, subscribeBoardLedger } from './ledger.ts'
+import { startManager } from './manager/wiring.ts'
 import { isKnownSynthesisModel, listSynthesisCatalog, runSynthesisModel, type HostLlmService } from './model-service.ts'
 import { createWikiArchiver } from './wiki-archive.ts'
 import { createBoardRoutes } from './routes.ts'
@@ -211,6 +212,25 @@ export function apply(ctx: Context): () => void {
 
   // `ctx.on` is already effect-scoped; wrapping it again would double-dispose.
   subscribeBoardLedger(ctx, ledgerReady)
+
+  // The manager panel needs the Session/Agent/Workspace services the board half
+  // does not: wait for them in a nested injection so a profile without them
+  // simply gets no manager panel instead of losing the whole plugin.
+  ctx.inject(
+    ['storageDomain', 'connection', 'sessionController', 'workspaceRegistry', 'agents'],
+    (managerCtx: Context) => {
+      try {
+        startManager({
+          ctx: managerCtx,
+          storageDomain: storageDomainOf(managerCtx),
+          connection: connectionOf(managerCtx),
+          warn,
+        })
+      } catch (error) {
+        warn(`dsh-session-board: manager unavailable: ${String(error)}`)
+      }
+    },
+  )
 
   return () => { wikiArchive.close(); routes.close() }
 }

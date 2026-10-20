@@ -53,6 +53,16 @@ export interface DomainSpec {
     readonly invalidRecords: 'backup-and-skip';
     readonly tables: Record<string, DomainTableSpec<unknown>>;
 }
+/** Declare one table. */
+export declare function domainTable<V>(schema: RecordSchema<V>): DomainTableSpec<V>;
+/**
+ * Validate a domain declaration at module load, mirroring the checks the host's
+ * own `defineDomain` performs, so a misconfiguration fails loudly here rather
+ * than as an `invalid-record` or `version-mismatch` later at `open()`.
+ * @param spec - the declaration.
+ * @returns the same declaration.
+ */
+export declare function defineDomain<S extends DomainSpec>(spec: S): S;
 /** Domain holding per-session turn-end facts and the acknowledged cursor. */
 export declare const ACK_DOMAIN_NAME = "dsh_session_board";
 /** Domain holding per-session busy accounting. */

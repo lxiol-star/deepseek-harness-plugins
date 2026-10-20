@@ -507,3 +507,40 @@ scopedSlots.inject('shell.overlay', () => scopedSlots.register({
 | 8 | 目标 DSH 版本存在所需契约 | 对 `conversation.content`、`embedded` variant、`sessions.retain`、`session.prompt` 做运行时能力探测 | 缺失时面板降级而不是白屏 |
 
 M0 通过后再开 M1，避免把「面板 UI」建在一个没验证的 Agent 通道/聊天契约上。
+
+## 16. 实现状态（0.4.0，2026-10-20）
+
+已按本设计落地首个可用版本：`dsh-session-board` 0.4.0（Host + Client），并在 **Harness Dev3**（隔离 `~/.dsh-dev3`，dev 构建 `0.2.1-rc.2-687f282`）完成实测。
+
+**已实现**
+
+- **Host**
+  - `src/host/manager/mux.ts`：EventMux（`session/event` + `agent/status` 折叠为 level 状态 + 有界 edge 队列，优先级/去重/上限/dropped 计数/digest）。
+  - `src/host/manager/domain.ts`：独立存储域 `dsh_session_board_manager` v1（manager 身份/选区/wake 偏好 + 任务表，normalize-not-throw）。
+  - `src/host/manager/service.ts`：懒创建管理会话（先持久化 id 再创建，保证 `agent/created` 能识别首个 Agent）、冷恢复后重新安装工具/提示词、选区镜像、任务板、`assign_task`、自动唤醒（默认关闭、空闲 + 每分钟一次）。
+  - `src/host/manager/tools.ts`：9 个管理工具（以 `ToolDefinition` 结构声明，运行时不导入 `@deepseek-ai/*`）。
+  - `src/host/manager/routes.ts`：3 条已认证 JSON 路由（`/api/session-board/manager/{state,selection,task}`，沿用 `connection.fetch` 信任栅栏）。
+  - `src/host/manager/wiring.ts`：嵌套 `ctx.inject` 装配；缺少 session/workspace/agent 服务时只隐藏管理中心。
+- **Client**
+  - `src/client/manager/{controller,ManagerDrawer,ManagerChat}.tsx`：右侧 `shell.overlay` 抽屉 + `sidebar.footer.action`/会话头部双入口；工作区看板 → 会话勾选 → 选区发送；官方 `conversation.content`（embedded）聊天，输入框/流式/工具卡/ask 全部复用；打开期间 4s 轮询宿主状态（勾选不会被覆盖）。
+  - 选区发送走官方 `sessions.retain → binding.session.prompt(...,'queue')`，不新增 prompt 路由。
+- **Tests**：`manager-mux/domain/shared/tools` 4 个 spec（88 个用例），插件全量 28 文件 / 414 用例通过；`vitest.config.ts` 让嵌套检出也能复现 `npm run check`。
+
+**与设计稿的偏差（有意）**
+
+- 面板**没有**新增 mux SSE：会话/工作区数据继续用现有 client model，任务/选区用 4s 轮询；mux 目前只服务管理工具与自动唤醒 digest。M4 可再切换为 revision 增量流。
+- `needs-input` 优先级是**保留位**：0.4.0 未订阅 live waterfall 的审批/提问事件（避免截断链路），后续从 durable `approval/asked|decided` 派生。
+- 自动唤醒没有独立开关路由；由管理工具 `set_auto_wake` / 持久化字段控制，面板只展示 `wakeEnabled` 未渲染开关。
+- 管理目录默认 `~/Documents/deepseek-harness/dsh-console`，可用环境变量 `DSH_SESSION_BOARD_MANAGER_DIR` 覆盖（0.4.0 暂未走 `Config` schema）。
+
+**Dev3 实测记录**
+
+1. 安装（Dev3 插件管理器，本地目录 link）→ 重启 Dev3 → 插件页显示「运行中」，侧栏底部出现「管理面板」。
+2. 打开抽屉：自动创建 `dsh-console` 工作区 + 「DSH 管理台」会话；工作区看板列出 default-workspace（2 会话）与 dsh-console（1 会话）。
+3. 管理对话：`workspace_overview` 返回两个工作区的会话/任务计数（工具调用卡片可见）；`assign_task` 在 default-workspace 创建会话并登记任务，任务卡显示「已分配」；ask 提问选项在嵌入式聊天里正常渲染。
+4. 勾选工作区/会话 →「发送选区给管理员」→ 管理会话收到 `[选区]` 消息并调用 `session_status` / `list_tasks` 后询问下一步。
+5. 持久化核对：`~/.dsh-dev3/storages/workspace.json`（dsh-console 注册、default-workspace 2 会话）与 `dsh_session_board_manager.json`（manager_state + manager_tasks）符合预期。
+
+**后续**
+
+- M4：mux SSE 增量、自动唤醒预算/暂停 UI、`approval/asked` 派生 needs-input、空工作区也列在面板、发布 0.4.0（版本/CHANGELOG/Release/SHA256SUMS 按交接文档 §6）。

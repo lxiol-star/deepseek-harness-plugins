@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-10-20
+
+- 新增「管理中心」常驻面板（右侧抽屉）：上半屏是工作区看板，点开工作区后列出会话并支持勾选；下半屏直接嵌入官方聊天，与一个常驻的管理 Agent 对话。
+- 管理 Agent 是一个普通 DSH 会话（默认标题「DSH 管理台」，懒创建在 `~/Documents/deepseek-harness/dsh-console` 工作区），可随时冷恢复；只有它会获得管理工具，普通会话看不到。
+- 管理工具：`workspace_overview`、`workspace_sessions`、`session_status`、`read_selection`、`assign_task`、`list_tasks`、`update_task`、`report_progress`、`set_auto_wake`。
+- 勾选「发送选区」会以一条普通用户消息把选区块交给管理 Agent（走官方 `session.prompt`），选区同时持久化到宿主，作为管理工具的输入。
+- 任务板：`assign_task` 在目标工作区创建会话、投递任务说明并登记任务；任务状态由会话事件派生（运行中/出错/等待），也可由管理 Agent 显式更新。
+- 宿主新增 epoll 风格的事件多路复用器：折叠 `session/event` 与 `agent/status` 为「全量状态 + 有界就绪队列」，自动唤醒默认关闭，开启后每分钟最多一次、管理员空闲时才投递一条 digest。
+- 新增三个已认证 JSON 路由：`GET /api/session-board/manager/state`、`POST /api/session-board/manager/selection`、`POST /api/session-board/manager/task`。
+- 兼容性：要求宿主提供 `sessionController`/`workspaceRegistry`/`agents` 服务；缺失时只隐藏管理中心，原看板不受影响。
+
 ## 0.3.6 — 2026-10-20
 
 - 批次预览或归档正在进行时，卡片仍可点击切换会话，只锁定批量勾选；「处理中」不再让整个看板失去响应。

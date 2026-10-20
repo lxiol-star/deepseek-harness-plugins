@@ -597,6 +597,1123 @@ function emptySection() {
   return /* @__PURE__ */ Object.create(null);
 }
 
+// src/shared/manager.ts
+var MANAGER_STATE_PATH = "/api/session-board/manager/state";
+var MANAGER_SELECTION_PATH = "/api/session-board/manager/selection";
+var MANAGER_TASK_PATH = "/api/session-board/manager/task";
+var MANAGER_TASK_STATUSES = [
+  "pending",
+  "assigned",
+  "running",
+  "blocked",
+  "done",
+  "failed",
+  "orphaned"
+];
+var EMPTY_SELECTION = Object.freeze({ workspaceIds: [], sessionIds: [] });
+function isManagerTaskStatus(value) {
+  return typeof value === "string" && MANAGER_TASK_STATUSES.includes(value);
+}
+var MANAGER_ID_MAX = 200;
+var MANAGER_TITLE_MAX = 160;
+var MANAGER_NOTE_MAX = 2e3;
+var MANAGER_SELECTION_MAX = 500;
+function isManagerId(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= MANAGER_ID_MAX && !value.includes("\0");
+}
+function normalizeSelection(value) {
+  const source = typeof value === "object" && value !== null ? value : {};
+  const collect = (input) => {
+    if (!Array.isArray(input)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const entry of input) {
+      if (!isManagerId(entry) || seen.has(entry)) continue;
+      seen.add(entry);
+      out.push(entry);
+      if (out.length >= MANAGER_SELECTION_MAX) break;
+    }
+    return out;
+  };
+  return { workspaceIds: collect(source.workspaceIds), sessionIds: collect(source.sessionIds) };
+}
+function truncateCodePoints(text, max) {
+  const points = Array.from(text);
+  return points.length <= max ? text : `${points.slice(0, Math.max(0, max - 1)).join("")}\u2026`;
+}
+function previewText(text, max = 120) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return truncateCodePoints(collapsed, max);
+}
+
+// src/host/manager/domain.ts
+var MANAGER_DOMAIN_NAME = "dsh_session_board_manager";
+var MANAGER_STATE_TABLE = "manager_state";
+var MANAGER_TASK_TABLE = "manager_tasks";
+var MANAGER_STATE_KEY = "state";
+function emptyManagerState() {
+  return { selection: { workspaceIds: [], sessionIds: [] }, wakeEnabled: false, revision: 0 };
+}
+var managerStateSchema = {
+  parse(value) {
+    const source = typeof value === "object" && value !== null ? value : {};
+    return {
+      ...typeof source.managerSessionId === "string" && source.managerSessionId !== "" ? { managerSessionId: source.managerSessionId } : {},
+      ...typeof source.managerWorkspaceId === "string" && source.managerWorkspaceId !== "" ? { managerWorkspaceId: source.managerWorkspaceId } : {},
+      selection: normalizeSelection(source.selection),
+      wakeEnabled: source.wakeEnabled === true,
+      revision: Number.isInteger(source.revision) && source.revision >= 0 ? source.revision : 0,
+      ...typeof source.lastProgress === "string" && source.lastProgress !== "" ? { lastProgress: source.lastProgress.slice(0, 2e3) } : {}
+    };
+  }
+};
+var managerTaskSchema = {
+  parse(value) {
+    const source = typeof value === "object" && value !== null ? value : {};
+    const id = typeof source.id === "string" ? source.id : "";
+    const title = typeof source.title === "string" && source.title !== "" ? source.title : "task";
+    const status = isManagerTaskStatus(source.status) ? source.status : "pending";
+    const now = Date.now();
+    return {
+      id,
+      title,
+      status,
+      ...typeof source.workspaceId === "string" ? { workspaceId: source.workspaceId } : {},
+      ...typeof source.sessionId === "string" ? { sessionId: source.sessionId } : {},
+      ...typeof source.note === "string" ? { note: source.note } : {},
+      createdAt: typeof source.createdAt === "number" ? source.createdAt : now,
+      updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : now
+    };
+  }
+};
+var managerDomainSpec = defineDomain({
+  name: MANAGER_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: "backup-and-skip",
+  tables: {
+    [MANAGER_STATE_TABLE]: domainTable(managerStateSchema),
+    [MANAGER_TASK_TABLE]: domainTable(managerTaskSchema)
+  }
+});
+
+// src/host/manager/mux.ts
+var MUX_LIMITS = {
+  /** Edges kept per source. */
+  perSource: 8,
+  /** Edges kept overall. */
+  global: 64,
+  /** Longest stored error/preview text. */
+  textMax: 160
+};
+var PRIORITY_RANK = {
+  "needs-input": 0,
+  error: 1,
+  completed: 2,
+  progress: 3
+};
+function clip(text, max = MUX_LIMITS.textMax) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  const points = Array.from(collapsed);
+  return points.length <= max ? collapsed : `${points.slice(0, Math.max(0, max - 1)).join("")}\u2026`;
+}
+function assistantPreview(event) {
+  if (event.type !== "assistant/message") return "";
+  const parts = [];
+  for (const block of event.data.message.content) {
+    if (block.type === "text") parts.push(block.text);
+  }
+  return clip(parts.join(" "));
+}
+function statusAfterTurn(reason) {
+  if (reason === "error" || reason === "max-tokens" || reason === "interrupted") return "error";
+  if (reason === "aborted" || reason === "blocked") return "waiting";
+  return "done";
+}
+var EventMux = class {
+  levels = /* @__PURE__ */ new Map();
+  edges = [];
+  revision = 0;
+  seq = 0;
+  dropped = 0;
+  /** Drops accumulated since the last drain; reported once, then reset. */
+  droppedSinceDrain = 0;
+  /**
+   * Fold one committed session event into its source level and edges.
+   * @param sessionId - source session id.
+   * @param event - the committed durable event.
+   * @param now - injectable clock for tests.
+   */
+  record(sessionId, event, now = Date.now()) {
+    const current = this.levels.get(sessionId);
+    const base = current ?? { status: "idle", lastAt: now };
+    const touch = (next) => {
+      this.levels.set(sessionId, next);
+      this.revision += 1;
+    };
+    switch (event.type) {
+      case "turn/start": {
+        touch({ ...base, status: "running", turn: event.data.turn, lastAt: now });
+        this.pushEdge({
+          key: `${sessionId}:turn-start:${event.data.turn}`,
+          sourceId: sessionId,
+          kind: "turn-start",
+          priority: "progress",
+          at: now,
+          summary: `turn ${event.data.turn} started`
+        });
+        return;
+      }
+      case "turn/end": {
+        const reason = event.data.reason.kind;
+        const status = statusAfterTurn(reason);
+        touch({
+          ...base,
+          status,
+          turn: event.data.turn,
+          lastAt: now,
+          lastKind: reason,
+          ...status === "error" ? { lastError: base.preview ?? "turn failed" } : {}
+        });
+        this.pushEdge({
+          key: `${sessionId}:turn-end:${event.data.turn}`,
+          sourceId: sessionId,
+          kind: "turn-end",
+          priority: status === "error" ? "error" : "completed",
+          at: now,
+          summary: `turn ${event.data.turn} ended (${reason})`
+        });
+        return;
+      }
+      case "assistant/message": {
+        const preview = assistantPreview(event);
+        touch({ ...base, lastAt: now, ...preview === "" ? {} : { preview } });
+        return;
+      }
+      case "tool/result": {
+        if (event.data.message.isError !== true) {
+          touch({ ...base, lastAt: now });
+          return;
+        }
+        const detail = clip(String(event.data.error?.reason ?? event.data.error?.code ?? "tool failed"));
+        touch({ ...base, lastAt: now, lastError: detail });
+        this.pushEdge({
+          key: `${sessionId}:tool-error:${event.data.turn}:${event.data.step}`,
+          sourceId: sessionId,
+          kind: "tool-error",
+          priority: "error",
+          at: now,
+          summary: `tool error: ${detail}`
+        });
+        return;
+      }
+      case "user/message": {
+        touch({ ...base, lastAt: now });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+  /**
+   * Fold one agent status flip. Agent status is live-only; a later session
+   * event still wins because it carries the durable truth.
+   * @param sessionId - source session id.
+   * @param status - agent status.
+   * @param now - injectable clock.
+   */
+  agentStatus(sessionId, status, now = Date.now()) {
+    const current = this.levels.get(sessionId);
+    if (current !== void 0 && current.status === "error") return;
+    const next = { ...current ?? { lastAt: now }, status, lastAt: now };
+    this.levels.set(sessionId, next);
+    this.revision += 1;
+  }
+  /** Drop one source (session disposed) together with its queued edges. */
+  remove(sessionId) {
+    const hadEdges = this.edges.some((edge) => edge.sourceId === sessionId);
+    if (hadEdges) this.removeBySeq(new Set(this.edges.filter((edge) => edge.sourceId === sessionId).map((edge) => edge.seq)));
+    if (!this.levels.delete(sessionId) && !hadEdges) return;
+    this.revision += 1;
+  }
+  /** Read the level-triggered truth plus the current edge list. */
+  snapshot() {
+    const sources = {};
+    for (const [id, level] of this.levels) sources[id] = level;
+    return {
+      revision: this.revision,
+      sources,
+      edges: this.edges.map(({ key, sourceId, kind, priority, at, summary }) => ({ key, sourceId, kind, priority, at, summary }))
+    };
+  }
+  /**
+   * Drain ready edges for one manager digest (EPOLLONESHOT): the caller gets
+   * the highest-priority items in reverse-age order and the list is cleared.
+   * @param maxItems - upper bound of returned edges.
+   * @returns up to `maxItems` edges, urgent first.
+   */
+  consumeEdges(maxItems = 20) {
+    return this.drain(maxItems).edges;
+  }
+  /**
+   * Drain the bounded edge list (EPOLLONESHOT) and report what the queue had
+   * to drop since the previous drain. The surplus beyond `maxItems` is a real
+   * loss too: it is counted in `stats().dropped` instead of vanishing.
+   */
+  drain(maxItems) {
+    const limit = Math.max(1, maxItems);
+    if (this.edges.length === 0) {
+      const dropped2 = this.droppedSinceDrain;
+      this.droppedSinceDrain = 0;
+      return { edges: [], dropped: dropped2 };
+    }
+    const sorted = [...this.edges].sort((left, right) => PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority] || right.at - left.at);
+    const picked = sorted.slice(0, limit);
+    const surplus = Math.max(0, this.edges.length - limit);
+    this.edges.length = 0;
+    this.dropped += surplus;
+    const dropped = this.droppedSinceDrain + surplus;
+    this.droppedSinceDrain = 0;
+    return {
+      edges: picked.map(({ key, sourceId, kind, priority, at, summary }) => ({ key, sourceId, kind, priority, at, summary })),
+      dropped
+    };
+  }
+  /** Manager digest text for the edges drained by one wakeup. */
+  digest(maxItems = 20) {
+    const { edges, dropped } = this.drain(maxItems);
+    if (edges.length === 0) return "";
+    const lines = edges.map((edge) => `- [${edge.priority}] ${edge.sourceId}: ${edge.summary}`);
+    return [
+      "[\u81EA\u52A8\u5524\u9192] \u5DE5\u4F5C\u533A/\u4F1A\u8BDD\u51FA\u73B0\u9700\u8981\u5904\u7406\u7684\u53D8\u5316\uFF1A",
+      ...lines,
+      ...dropped > 0 ? [`\uFF08\u6709 ${dropped} \u6761\u4F4E\u4F18\u5148\u7EA7\u4E8B\u4EF6\u56E0\u961F\u4F0D\u4E0A\u9650\u88AB\u4E22\u5F03\uFF09`] : []
+    ].join("\n");
+  }
+  /** Per-source edge budget: drop the oldest progress edges of that source. */
+  trimSource(sourceId) {
+    const own = this.edges.filter((edge) => edge.sourceId === sourceId);
+    if (own.length <= MUX_LIMITS.perSource) return;
+    const excess = own.length - MUX_LIMITS.perSource;
+    own.sort((left, right) => PRIORITY_RANK[right.priority] - PRIORITY_RANK[left.priority] || left.at - right.at);
+    const drop = new Set(own.slice(0, excess).map((edge) => edge.seq));
+    this.removeBySeq(drop);
+    this.dropped += drop.size;
+    this.droppedSinceDrain += drop.size;
+  }
+  /** Global edge budget: drop the oldest lowest-priority edges. */
+  trimGlobal() {
+    if (this.edges.length <= MUX_LIMITS.global) return;
+    const excess = this.edges.length - MUX_LIMITS.global;
+    const order = [...this.edges].sort((left, right) => PRIORITY_RANK[right.priority] - PRIORITY_RANK[left.priority] || left.at - right.at);
+    const drop = new Set(order.slice(0, excess).map((edge) => edge.seq));
+    this.removeBySeq(drop);
+    this.dropped += drop.size;
+    this.droppedSinceDrain += drop.size;
+  }
+  removeBySeq(drop) {
+    let write = 0;
+    for (let read = 0; read < this.edges.length; read += 1) {
+      const edge = this.edges[read];
+      if (edge === void 0 || drop.has(edge.seq)) continue;
+      this.edges[write] = edge;
+      write += 1;
+    }
+    this.edges.length = write;
+  }
+  /** Append one bounded edge, deduping an identical live key. */
+  pushEdge(input) {
+    if (this.edges.some((edge) => edge.key === input.key)) return;
+    this.seq += 1;
+    this.edges.push({ ...input, seq: this.seq });
+    this.trimSource(input.sourceId);
+    this.trimGlobal();
+  }
+  /** Observability: counts for tests, logs and the panel footer. */
+  stats() {
+    return { sources: this.levels.size, edges: this.edges.length, dropped: this.dropped, revision: this.revision };
+  }
+};
+
+// src/host/manager/service.ts
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// src/host/manager/tools.ts
+var LINE_OUTPUT = {
+  schema: { type: "array", items: { type: "string" } },
+  render: (_args, value) => {
+    if (!Array.isArray(value)) return [];
+    return value.map((line) => ({ type: "text", text: typeof line === "string" ? line : JSON.stringify(line) }));
+  }
+};
+function argObject(args, tool) {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    throw new Error(`${tool}: arguments must be an object`);
+  }
+  return args;
+}
+function argString(args, name2, tool) {
+  const value = args[name2];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${tool}: "${name2}" must be a non-empty string`);
+  }
+  return value.trim();
+}
+function optionalStatus(args, name2, tool) {
+  const value = args[name2];
+  if (value === void 0) return void 0;
+  if (!isManagerTaskStatus(value)) {
+    throw new Error(`${tool}: "${name2}" must be one of pending, assigned, running, blocked, done, failed, orphaned`);
+  }
+  return value;
+}
+function optionalString(args, name2, tool) {
+  const value = args[name2];
+  if (value === void 0) return void 0;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${tool}: "${name2}" must be a non-empty string when present`);
+  }
+  return value.trim();
+}
+function taskLine(task) {
+  const links = [
+    task.workspaceId === void 0 ? "" : `workspace=${task.workspaceId}`,
+    task.sessionId === void 0 ? "" : `session=${task.sessionId}`
+  ].filter((part) => part !== "").join(" ");
+  return `- ${task.id} [${task.status}] ${task.title}${links === "" ? "" : ` (${links})`}` + (task.note === void 0 ? "" : ` \u2014 ${previewText(task.note, 120)}`);
+}
+function managerToolDefinitions(context) {
+  return [
+    {
+      name: "workspace_overview",
+      description: "List every DSH workspace with its title, path, session count and task count.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        argObject(args, "workspace_overview");
+        return await context.overview();
+      }
+    },
+    {
+      name: "workspace_sessions",
+      description: "List the sessions of one workspace with status, title and last activity time.",
+      parameters: {
+        type: "object",
+        properties: { workspaceId: { type: "string", description: "Workspace id from workspace_overview." } },
+        required: ["workspaceId"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "workspace_sessions");
+        return await context.workspaceSessions(argString(input, "workspaceId", "workspace_sessions"));
+      }
+    },
+    {
+      name: "session_status",
+      description: "Read one session status: running state, last turn result, last error and last assistant preview.",
+      parameters: {
+        type: "object",
+        properties: { sessionId: { type: "string", description: "Session id." } },
+        required: ["sessionId"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "session_status");
+        return await context.sessionStatus(argString(input, "sessionId", "session_status"));
+      }
+    },
+    {
+      name: "read_selection",
+      description: "Read the workspaces and sessions the user currently has checked in the manager panel.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        argObject(args, "read_selection");
+        const selection = context.selection();
+        if (selection.workspaceIds.length === 0 && selection.sessionIds.length === 0) {
+          return ["- (panel selection is empty)"];
+        }
+        return [
+          ...selection.workspaceIds.map((id) => `- workspace ${id}`),
+          ...selection.sessionIds.map((id) => `- session ${id}`)
+        ];
+      }
+    },
+    {
+      name: "assign_task",
+      description: "Create a task in one workspace: starts a session there with the brief and records the task. Use it for any concrete work item the user asks for.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short task title for the panel." },
+          brief: { type: "string", description: "The prompt sent into the new session: goal, context, acceptance." },
+          workspaceId: { type: "string", description: "Workspace id the task belongs to; the new session is created there." }
+        },
+        required: ["title", "brief", "workspaceId"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "assign_task");
+        const result = await context.assignTask({
+          title: argString(input, "title", "assign_task"),
+          brief: argString(input, "brief", "assign_task"),
+          workspaceId: argString(input, "workspaceId", "assign_task")
+        });
+        return [
+          `- task ${result.task.id} [${result.task.status}] ${result.task.title}`,
+          ...result.sessionId === void 0 ? ["- session: (creation failed; task recorded only)"] : [`- session ${result.sessionId}`]
+        ];
+      }
+    },
+    {
+      name: "list_tasks",
+      description: "List the manager task board with status, links and the latest progress note.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        argObject(args, "list_tasks");
+        const tasks = context.tasks();
+        return tasks.length === 0 ? ["- (task board is empty)"] : tasks.map(taskLine);
+      }
+    },
+    {
+      name: "update_task",
+      description: "Update one task status and/or note. Valid statuses: pending, assigned, running, blocked, done, failed, orphaned.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Task id from list_tasks." },
+          status: {
+            type: "string",
+            enum: ["pending", "assigned", "running", "blocked", "done", "failed", "orphaned"],
+            description: "New status."
+          },
+          note: { type: "string", description: "Progress note shown in the panel (evidence, blocker, next step)." }
+        },
+        required: ["id"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "update_task");
+        const status = optionalStatus(input, "status", "update_task");
+        const note = optionalString(input, "note", "update_task");
+        const task = await context.updateTask({
+          id: argString(input, "id", "update_task"),
+          ...status === void 0 ? {} : { status },
+          ...note === void 0 ? {} : { note }
+        });
+        return [taskLine(task)];
+      }
+    },
+    {
+      name: "report_progress",
+      description: "Write a short progress note the panel shows next to the task (does not start a model turn).",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "One or two lines of progress/evidence." },
+          taskId: { type: "string", description: "Optional task id this note belongs to." }
+        },
+        required: ["text"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "report_progress");
+        await context.reportProgress({
+          text: argString(input, "text", "report_progress"),
+          ...optionalString(input, "taskId", "report_progress") === void 0 ? {} : { taskId: optionalString(input, "taskId", "report_progress") }
+        });
+        return ["- progress recorded"];
+      }
+    },
+    {
+      name: "set_auto_wake",
+      description: "Enable or disable event-driven wakeups. When enabled the panel may wake you with a digest when tracked sessions need input, fail, or finish; keep it off unless the user asks for supervision.",
+      parameters: {
+        type: "object",
+        properties: { enabled: { type: "boolean", description: "Whether automatic wakeups are allowed." } },
+        required: ["enabled"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT,
+      async execute(args, _exec) {
+        const input = argObject(args, "set_auto_wake");
+        if (typeof input.enabled !== "boolean") throw new Error('set_auto_wake: "enabled" must be a boolean');
+        const enabled = await context.setAutoWake(input.enabled);
+        return [`- auto wake ${enabled ? "enabled" : "disabled"}`];
+      }
+    }
+  ];
+}
+
+// src/host/manager/service.ts
+var MANAGER_SESSION_TITLE = "DSH \u7BA1\u7406\u53F0";
+var AUTO_WAKE_MIN_INTERVAL_MS = 6e4;
+var MANAGER_PROMPT_TIMEOUT_MS = 3e4;
+var MANAGER_SECTION_ORDER = 900;
+var MANAGER_CONTEXT_ORDER = 950;
+var MANAGER_POLICY = [
+  "You are the DSH workspace manager. You are the only agent that can see the",
+  "manager panel state, hand out tasks to workspaces, and report progress.",
+  "",
+  "Tools: workspace_overview, workspace_sessions, session_status, read_selection,",
+  "assign_task, list_tasks, update_task, report_progress, set_auto_wake.",
+  "Use assign_task only for concrete work the user asked for; create one task and",
+  "one session per work item, then track it with update_task. Never archive, delete",
+  "or stop sessions or jobs; ask the user to do it in the main UI.",
+  "The user may hand you a selection block; the durable selection is also visible",
+  "below. Keep task notes short and evidence-based."
+].join("\n");
+var ManagerService = class {
+  /** @param deps - nested host context plus the durable tables. */
+  constructor(deps) {
+    this.deps = deps;
+    this.state = deps.state.get(MANAGER_STATE_KEY) ?? emptyManagerState();
+    this.managerSessionId = this.state.managerSessionId === void 0 ? void 0 : this.state.managerSessionId;
+  }
+  deps;
+  state;
+  managerSessionId;
+  provisioning;
+  installed = /* @__PURE__ */ new Map();
+  lastWakeAt = 0;
+  lastError;
+  /** Current session id, when provisioned. */
+  get sessionId() {
+    return this.managerSessionId;
+  }
+  /** Project the durable state into the wire view. */
+  view() {
+    return {
+      ...this.managerSessionId === void 0 ? {} : { managerSessionId: this.managerSessionId },
+      ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId },
+      selection: normalizeSelection(this.state.selection),
+      tasks: this.taskViews(),
+      wakeEnabled: this.state.wakeEnabled,
+      muxRevision: this.deps.mux.snapshot().revision,
+      ...this.lastError === void 0 ? {} : { error: this.lastError }
+    };
+  }
+  /**
+   * Provision the manager workspace/session once. Idempotent and serialized;
+   * the session id is persisted before creation so an `agent/created` listener
+   * can recognize the very first manager Agent.
+   */
+  ensure() {
+    if (this.managerSessionId !== void 0) {
+      return Promise.resolve({
+        managerSessionId: this.managerSessionId,
+        ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }
+      });
+    }
+    this.provisioning ??= this.provision().finally(() => {
+      this.provisioning = void 0;
+    });
+    return this.provisioning;
+  }
+  /**
+   * Install tools/prompt context on the manager Agent, whether it was just
+   * created or resumed from disk. Non-manager agents are ignored.
+   * @param agent - every published Agent.
+   */
+  installAgent(agent) {
+    if (agent.id !== this.managerSessionId || this.installed.has(agent.id)) return;
+    const disposers = [];
+    try {
+      const context = this.toolContext();
+      for (const definition of managerToolDefinitions(context)) {
+        disposers.push(agent.ctx.tools.register(definition));
+      }
+      disposers.push(agent.ctx.systemPrompt.section({
+        name: "session-board:manager-policy",
+        order: MANAGER_SECTION_ORDER,
+        text: MANAGER_POLICY
+      }));
+      disposers.push(agent.ctx.systemPrompt.context({
+        name: "session-board:manager-context",
+        order: MANAGER_CONTEXT_ORDER,
+        required: true,
+        text: () => this.promptContextText()
+      }));
+    } catch (error) {
+      for (const dispose of disposers.reverse()) dispose();
+      this.deps.warn(`dsh-session-board: manager tools failed to install: ${describe(error)}`);
+      return;
+    }
+    this.installed.set(agent.id, () => {
+      for (const dispose of disposers.reverse()) dispose();
+    });
+  }
+  /** Drop one Agent's scoped registrations when it is disposed. */
+  disposeAgent(agentId) {
+    const dispose = this.installed.get(agentId);
+    if (dispose === void 0) return;
+    this.installed.delete(agentId);
+    dispose();
+  }
+  /** Release every scoped registration; called on plugin unload. */
+  dispose() {
+    for (const dispose of [...this.installed.values()]) dispose();
+    this.installed.clear();
+  }
+  /** Current durable selection. */
+  selection() {
+    return normalizeSelection(this.state.selection);
+  }
+  /**
+   * Persist one selection mirror write.
+   * @param raw - untrusted wire value.
+   * @returns the normalized selection and new revision.
+   */
+  async writeSelection(raw) {
+    const selection = normalizeSelection(raw);
+    const next = { ...this.state, selection, revision: this.state.revision + 1 };
+    await this.deps.state.put(MANAGER_STATE_KEY, next);
+    this.state = next;
+    return { selection, revision: next.revision };
+  }
+  /**
+   * Apply one task-board mutation.
+   * @param request - wire request (`create` or `update`).
+   * @returns the resulting task view.
+   */
+  async task(request) {
+    if (request.action === "create") {
+      const title = typeof request.task.title === "string" ? request.task.title.trim() : "";
+      if (title === "") throw new Error("task create requires a title");
+      const now = this.now();
+      const record2 = {
+        id: randomUUID(),
+        title: title.slice(0, MANAGER_TITLE_MAX),
+        status: request.task.status ?? "pending",
+        ...typeof request.task.workspaceId === "string" ? { workspaceId: request.task.workspaceId } : {},
+        ...typeof request.task.sessionId === "string" ? { sessionId: request.task.sessionId } : {},
+        ...typeof request.task.note === "string" ? { note: request.task.note.slice(0, MANAGER_NOTE_MAX) } : {},
+        createdAt: now,
+        updatedAt: now
+      };
+      await this.deps.tasks.put(record2.id, record2);
+      return { task: this.deriveTask(record2) };
+    }
+    const id = typeof request.task.id === "string" ? request.task.id : "";
+    const current = this.deps.tasks.get(id);
+    if (current === void 0) throw new Error(`unknown task "${id}"`);
+    const status = request.task.status;
+    const note = request.task.note;
+    const next = {
+      ...current,
+      ...status === void 0 ? {} : { status },
+      ...note === void 0 ? {} : { note: note.slice(0, MANAGER_NOTE_MAX) },
+      updatedAt: this.now()
+    };
+    await this.deps.tasks.put(id, next);
+    return { task: this.deriveTask(next) };
+  }
+  /**
+   * Turn newly drained mux edges into at most one manager digest. The wake
+   * policy is deliberately conservative: opted-in, manager idle, one wake per
+   * minute, and edges only (never one prompt per event).
+   * @param now - injectable clock.
+   */
+  noteEdges(now = this.now()) {
+    if (!this.state.wakeEnabled) return;
+    const sessionId = this.managerSessionId;
+    if (sessionId === void 0) return;
+    if (this.deps.ctx.agents.get(sessionId)?.status === "running") return;
+    if (now - this.lastWakeAt < AUTO_WAKE_MIN_INTERVAL_MS) return;
+    const digest = this.deps.mux.digest();
+    if (digest === "") return;
+    this.lastWakeAt = now;
+    this.prompt(sessionId, `[\u7CFB\u7EDF] ${digest}
+
+\u8BF7\u67E5\u770B\u5F53\u524D\u72B6\u6001\u5E76\u7528\u5DE5\u5177\u5904\u7406\u6216\u5411\u7528\u6237\u6C47\u62A5\u3002`).catch(
+      (error) => this.deps.warn(`dsh-session-board: auto wake failed: ${describe(error)}`)
+    );
+  }
+  /** The tool/prompt content projection installed on the manager Agent. */
+  toolContext() {
+    return {
+      selection: () => this.selection(),
+      tasks: () => this.taskViews(),
+      overview: async () => this.overview(),
+      workspaceSessions: async (workspaceId) => this.workspaceSessions(workspaceId),
+      sessionStatus: async (sessionId) => this.sessionStatus(sessionId),
+      assignTask: async (input) => await this.assignTask(input),
+      updateTask: async (input) => (await this.task({
+        action: "update",
+        task: {
+          id: input.id,
+          ...input.status === void 0 ? {} : { status: input.status },
+          ...input.note === void 0 ? {} : { note: input.note }
+        }
+      })).task,
+      reportProgress: async (input) => {
+        await this.reportProgress(input);
+      },
+      setAutoWake: async (enabled) => await this.setAutoWake(enabled)
+    };
+  }
+  /** Dynamic prompt context: selection, tasks and last progress line. */
+  promptContextText() {
+    const selection = this.selection();
+    const tasks = this.taskViews();
+    const lines = [
+      `[manager panel] selection: workspaces=[${selection.workspaceIds.join(", ")}] sessions=[${selection.sessionIds.join(", ")}]`
+    ];
+    if (this.state.lastProgress !== void 0) lines.push(`[last progress] ${this.state.lastProgress}`);
+    lines.push(...tasks.length === 0 ? ["[tasks] (empty)"] : ["[tasks]", ...tasks.map((task) => `- ${task.id} [${task.status}] ${task.title}` + (task.sessionId === void 0 ? "" : ` session=${task.sessionId}`))]);
+    return lines.join("\n");
+  }
+  async provision() {
+    try {
+      await mkdir(this.deps.managerDir, { recursive: true });
+      let workspace = await this.deps.ctx.workspaceRegistry.resolveByPath(this.deps.managerDir);
+      workspace ??= await this.deps.ctx.workspaceRegistry.create(this.deps.managerDir);
+      const sessionId = randomUUID();
+      const pending = {
+        ...this.state,
+        managerSessionId: sessionId,
+        managerWorkspaceId: workspace.id,
+        revision: this.state.revision + 1
+      };
+      await this.deps.state.put(MANAGER_STATE_KEY, pending);
+      this.state = pending;
+      this.managerSessionId = sessionId;
+      const created = await this.deps.ctx.sessionController.create({ sessionId, workspaceId: workspace.id });
+      const createdId = created.sessionId;
+      if (createdId !== sessionId) {
+        const corrected = {
+          ...this.state,
+          managerSessionId: createdId,
+          revision: this.state.revision + 1
+        };
+        await this.deps.state.put(MANAGER_STATE_KEY, corrected);
+        this.state = corrected;
+        this.managerSessionId = createdId;
+      }
+      try {
+        await this.deps.ctx.sessionController.rename({ sessionId: createdId, title: MANAGER_SESSION_TITLE });
+      } catch (error) {
+        this.deps.warn(`dsh-session-board: manager session rename failed: ${describe(error)}`);
+      }
+      this.lastError = void 0;
+      return {
+        managerSessionId: createdId,
+        ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }
+      };
+    } catch (error) {
+      this.lastError = describe(error);
+      this.deps.warn(`dsh-session-board: manager provisioning failed: ${describe(error)}`);
+      throw error;
+    }
+  }
+  taskViews() {
+    const views = [];
+    for (const [, record2] of this.deps.tasks.entries()) views.push(this.deriveTask(record2));
+    views.sort((left, right) => right.updatedAt - left.updatedAt);
+    return views;
+  }
+  /** Derive a task's running/blocked state from the session event mux. */
+  deriveTask(record2) {
+    const level = record2.sessionId === void 0 ? void 0 : this.deps.mux.snapshot().sources[record2.sessionId];
+    if (level === void 0 || record2.status === "done" || record2.status === "failed" || record2.status === "orphaned") {
+      return record2;
+    }
+    if (level.status === "running" && record2.status !== "running") {
+      return { ...record2, status: "running", updatedAt: Math.max(record2.updatedAt, level.lastAt) };
+    }
+    if ((level.status === "error" || level.status === "waiting") && record2.status !== "blocked") {
+      return { ...record2, status: "blocked", updatedAt: Math.max(record2.updatedAt, level.lastAt) };
+    }
+    return record2;
+  }
+  async overview() {
+    const tasks = this.taskViews();
+    return this.deps.ctx.workspaceRegistry.list().map((workspace) => `- ${workspace.id} "${workspace.title}" ${workspace.path} sessions=${workspace.sessionIds.length} tasks=${tasks.filter((task) => task.workspaceId === workspace.id).length}`);
+  }
+  async listSessions() {
+    try {
+      const response = await this.deps.ctx.sessionController.list({}, AbortSignal.timeout(5e3));
+      return response.items.map((item) => {
+        const title = item.projections?.values.title;
+        return {
+          sessionId: item.sessionId,
+          ...typeof title === "string" && title !== "" ? { title } : {},
+          running: item.running
+        };
+      });
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: manager session list failed: ${describe(error)}`);
+      return [];
+    }
+  }
+  async workspaceSessions(workspaceId) {
+    const workspace = this.deps.ctx.workspaceRegistry.get(workspaceId);
+    if (workspace === void 0) throw new Error(`unknown workspace "${workspaceId}"`);
+    const rows = await this.listSessions();
+    const byId = new Map(rows.map((row) => [row.sessionId, row]));
+    const sources = this.deps.mux.snapshot().sources;
+    return workspace.sessionIds.map((sessionId) => {
+      const row = byId.get(sessionId);
+      const state = sources[sessionId];
+      const title = row?.title ?? sessionId;
+      return `- ${sessionId} ${state?.status ?? (row?.running === true ? "running" : "idle")} "${previewText(title, 80)}"`;
+    });
+  }
+  async sessionStatus(sessionId) {
+    const level = this.deps.mux.snapshot().sources[sessionId];
+    const agent = this.deps.ctx.agents.get(sessionId);
+    const rows = await this.listSessions();
+    const row = rows.find((candidate) => candidate.sessionId === sessionId);
+    if (level === void 0 && agent === void 0 && row === void 0) {
+      throw new Error(`unknown session "${sessionId}"`);
+    }
+    return [
+      `- session ${sessionId}`,
+      `- status ${level?.status ?? agent?.status ?? "unknown"}`,
+      ...row?.title === void 0 ? [] : [`- title ${previewText(row.title, 120)}`],
+      ...level?.turn === void 0 ? [] : [`- last turn ${level.turn}`],
+      ...level?.lastKind === void 0 ? [] : [`- last turn end ${level.lastKind}`],
+      ...level?.lastError === void 0 ? [] : [`- last error ${level.lastError}`],
+      ...level?.preview === void 0 ? [] : [`- last assistant ${level.preview}`]
+    ];
+  }
+  async assignTask(input) {
+    const workspace = this.deps.ctx.workspaceRegistry.get(input.workspaceId);
+    if (workspace === void 0) throw new Error(`unknown workspace "${input.workspaceId}"`);
+    const now = this.now();
+    const record2 = {
+      id: randomUUID(),
+      title: input.title.slice(0, MANAGER_TITLE_MAX),
+      status: "assigned",
+      workspaceId: workspace.id,
+      createdAt: now,
+      updatedAt: now
+    };
+    await this.deps.tasks.put(record2.id, record2);
+    try {
+      const created = await this.deps.ctx.sessionController.create({ workspaceId: workspace.id });
+      const withSession = { ...record2, sessionId: created.sessionId, updatedAt: this.now() };
+      await this.deps.tasks.put(record2.id, withSession);
+      await this.prompt(created.sessionId, input.brief);
+      return { task: this.deriveTask(withSession), sessionId: created.sessionId };
+    } catch (error) {
+      const failed = {
+        ...record2,
+        status: "failed",
+        note: `task dispatch failed: ${describe(error)}`.slice(0, MANAGER_NOTE_MAX),
+        updatedAt: this.now()
+      };
+      await this.deps.tasks.put(record2.id, failed);
+      this.deps.warn(`dsh-session-board: assign_task dispatch failed: ${describe(error)}`);
+      return { task: this.deriveTask(failed) };
+    }
+  }
+  async reportProgress(input) {
+    const note = input.text.slice(0, MANAGER_NOTE_MAX);
+    if (input.taskId === void 0) {
+      const next2 = { ...this.state, lastProgress: note, revision: this.state.revision + 1 };
+      await this.deps.state.put(MANAGER_STATE_KEY, next2);
+      this.state = next2;
+      return;
+    }
+    const current = this.deps.tasks.get(input.taskId);
+    if (current === void 0) throw new Error(`unknown task "${input.taskId}"`);
+    const next = { ...current, note: note.slice(0, MANAGER_NOTE_MAX), updatedAt: this.now() };
+    await this.deps.tasks.put(input.taskId, next);
+  }
+  async setAutoWake(enabled) {
+    const next = { ...this.state, wakeEnabled: enabled, revision: this.state.revision + 1 };
+    await this.deps.state.put(MANAGER_STATE_KEY, next);
+    this.state = next;
+    return next.wakeEnabled;
+  }
+  async prompt(sessionId, text) {
+    const request = {
+      requestId: randomUUID(),
+      sessionId,
+      mode: "queue",
+      content: [{ type: "text", text }]
+    };
+    await this.deps.ctx.sessionController.prompt(request, AbortSignal.timeout(MANAGER_PROMPT_TIMEOUT_MS));
+  }
+  now() {
+    return this.deps.now?.() ?? Date.now();
+  }
+};
+function describe(error) {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+function defaultManagerDir() {
+  return process.env.DSH_SESSION_BOARD_MANAGER_DIR ?? join(homedir(), "Documents", "deepseek-harness", "dsh-console");
+}
+
+// src/host/manager/routes.ts
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+  });
+}
+async function readJsonBody(request) {
+  try {
+    const text = await request.text();
+    if (text.trim() === "") return void 0;
+    return JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+}
+function describe2(error) {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+function createManagerRoutes(handlers) {
+  const stateRoute = {
+    path: MANAGER_STATE_PATH,
+    methods: ["GET"],
+    requestBody: "buffered",
+    fetch: async () => {
+      try {
+        return jsonResponse(200, { ok: true, state: await handlers.state() });
+      } catch (error) {
+        handlers.warn(`dsh-session-board: manager state failed: ${describe2(error)}`);
+        return jsonResponse(500, { ok: false, error: "MANAGER_STATE_UNAVAILABLE" });
+      }
+    }
+  };
+  const selectionRoute = {
+    path: MANAGER_SELECTION_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      try {
+        const result = await handlers.selection(await readJsonBody(request));
+        return jsonResponse(200, { ok: true, ...result });
+      } catch (error) {
+        handlers.warn(`dsh-session-board: manager selection failed: ${describe2(error)}`);
+        return jsonResponse(400, { ok: false, error: "SELECTION_INVALID" });
+      }
+    }
+  };
+  const taskRoute = {
+    path: MANAGER_TASK_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      try {
+        const result = await handlers.task(await readJsonBody(request));
+        return jsonResponse(200, { ok: true, ...result });
+      } catch (error) {
+        handlers.warn(`dsh-session-board: manager task failed: ${describe2(error)}`);
+        return jsonResponse(400, { ok: false, error: "TASK_INVALID" });
+      }
+    }
+  };
+  return [stateRoute, selectionRoute, taskRoute];
+}
+
+// src/host/manager/wiring.ts
+function startManager(options) {
+  const { ctx, storageDomain, connection, warn } = options;
+  const mux = new EventMux();
+  void (async () => {
+    let service;
+    try {
+      const domain = await storageDomain.open(managerDomainSpec);
+      ctx.effect(() => () => domain.close(), "dsh-session-board: manager domain");
+      const stateTable = domain.table(MANAGER_STATE_TABLE);
+      const taskTable = domain.table(MANAGER_TASK_TABLE);
+      service = new ManagerService({
+        ctx,
+        state: stateTable,
+        tasks: taskTable,
+        mux,
+        managerDir: options.managerDir ?? defaultManagerDir(),
+        warn
+      });
+      ctx.effect(() => () => service.dispose(), "dsh-session-board: manager service");
+    } catch (error) {
+      warn(`dsh-session-board: manager store unavailable, manager panel disabled: ${describe3(error)}`);
+      return;
+    }
+    const routes = createManagerRoutes({
+      state: async () => {
+        try {
+          await service.ensure();
+        } catch {
+        }
+        return service.view();
+      },
+      selection: async (raw) => await service.writeSelection(raw),
+      task: async (raw) => await service.task(readTaskRequest(raw)),
+      warn
+    });
+    for (const route of routes) {
+      ctx.effect(() => connection.fetch.register(route), `dsh-session-board: ${route.path}`);
+    }
+    ctx.on("session/event", (session, event) => {
+      mux.record(session.id, event);
+      service.noteEdges();
+    });
+    ctx.on("agent/status", ({ agent, status }) => {
+      mux.agentStatus(agent.id, status);
+    });
+    ctx.on("agent/created", ({ agent }) => {
+      service.installAgent(agent);
+    });
+    ctx.on("agent/disposed", ({ agent }) => {
+      service.disposeAgent(agent.id);
+      mux.remove(agent.id);
+    });
+  })();
+}
+function readTaskRequest(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("task body must be an object");
+  const body = raw;
+  const action = body.action;
+  if (action !== "create" && action !== "update") throw new Error("task.action must be create or update");
+  const task = body.task;
+  if (typeof task !== "object" || task === null || Array.isArray(task)) throw new Error("task.task must be an object");
+  const fields = task;
+  const string = (name2) => {
+    const value = fields[name2];
+    if (value === void 0) return void 0;
+    if (typeof value !== "string" || value === "") throw new Error(`task.${name2} must be a non-empty string`);
+    return value;
+  };
+  const status = fields.status;
+  if (status !== void 0) {
+    const allowed = ["pending", "assigned", "running", "blocked", "done", "failed", "orphaned"];
+    if (typeof status !== "string" || !allowed.includes(status)) throw new Error("task.status is invalid");
+  }
+  const id = string("id");
+  const title = string("title");
+  const workspaceId = string("workspaceId");
+  const sessionId = string("sessionId");
+  const note = string("note");
+  return {
+    action,
+    task: {
+      ...id === void 0 ? {} : { id },
+      ...title === void 0 ? {} : { title },
+      ...status === void 0 ? {} : { status },
+      ...workspaceId === void 0 ? {} : { workspaceId },
+      ...sessionId === void 0 ? {} : { sessionId },
+      ...note === void 0 ? {} : { note }
+    }
+  };
+}
+function describe3(error) {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
 // src/host/model-service.ts
 var SYNTHESIS_MAX_TOKENS = 8192;
 async function isKnownSynthesisModel(llm, selection) {
@@ -691,9 +1808,9 @@ async function runSynthesisModel(llm, request) {
 
 // src/host/wiki-archive.ts
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { homedir as homedir2 } from "node:os";
+import { join as join2, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -776,7 +1893,7 @@ var WikiArchiveError = class extends Error {
 };
 function resolveSynthesisProvider(home) {
   try {
-    const raw = JSON.parse(readFileSync(join(home, ".dsh-session-board.json"), "utf8"));
+    const raw = JSON.parse(readFileSync(join2(home, ".dsh-session-board.json"), "utf8"));
     if (typeof raw === "object" && raw !== null && "synthesisProvider" in raw) {
       const value = raw.synthesisProvider;
       if (typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) return value;
@@ -787,7 +1904,7 @@ function resolveSynthesisProvider(home) {
 }
 var DEFAULT_SYNTHESIS_PROVIDER = "stepx-terra";
 function resolveDshHome(configured, fromEnv) {
-  const chosen = configured ?? (fromEnv === void 0 || fromEnv.trim() === "" ? void 0 : fromEnv) ?? join(homedir(), ".dsh");
+  const chosen = configured ?? (fromEnv === void 0 || fromEnv.trim() === "" ? void 0 : fromEnv) ?? join2(homedir2(), ".dsh");
   if (chosen.trim() === "") return null;
   try {
     return resolve(chosen);
@@ -848,12 +1965,12 @@ function parseWrittenRow(raw, session, page) {
   return parsed.synthesis[0];
 }
 function createWikiArchiver(options = {}) {
-  const home = resolve(options.home ?? homedir());
+  const home = resolve(options.home ?? homedir2());
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME);
   const unavailableHome = dshHome === null;
   const synthesisProvider = resolveSynthesisProvider(home);
   const now = options.now ?? Date.now;
-  const script = join(home, "wiki", "scripts", "wiki-archive.py");
+  const script = join2(home, "wiki", "scripts", "wiki-archive.py");
   const execute = options.execute ?? (async (args, signal) => {
     try {
       return await exec("/usr/bin/python3", [script, ...args], { timeout: 12e4, maxBuffer: 4 * 1024 * 1024, signal, env: { ...process.env, WIKI_ARCHIVE_LOCK_TIMEOUT: "10" } });
@@ -873,7 +1990,7 @@ function createWikiArchiver(options = {}) {
           fileURLToPath(new URL("./wiki-workflow.py", import.meta.url)),
           operation,
           "--wiki-root",
-          join(home, "wiki"),
+          join2(home, "wiki"),
           "--dsh-home",
           dshHome,
           "--value",
@@ -909,7 +2026,7 @@ function createWikiArchiver(options = {}) {
     if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
     const args = [
       "--wiki-root",
-      join(home, "wiki"),
+      join2(home, "wiki"),
       "--tool",
       "dsh",
       "--dsh-home",
@@ -969,7 +2086,7 @@ function createWikiArchiver(options = {}) {
       if (closed) throw new WikiArchiveError("CANCELLED");
       const rows = new Map(previewed.results.map((row) => [row.session, row]));
       const summary = { ...previewed, selected: ids.length, scope };
-      const token = randomUUID(), expiresAt = now() + PREVIEW_TTL_MS;
+      const token = randomUUID2(), expiresAt = now() + PREVIEW_TTL_MS;
       previews.set(token, { ids, expiresAt, sources: ids.map((id) => rows.get(id)?.source ?? ""), scope });
       return { token, expiresAt, summary };
     }),
@@ -1074,23 +2191,23 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     // Never awaits the domain: before it is ready this answers with an empty
     // feed, and the connecting stream delivers the first real snapshot.
-    fetch: async () => jsonResponse(200, readFeed())
+    fetch: async () => jsonResponse2(200, readFeed())
   };
   const ackRoute = {
     path: BOARD_ACK_PATH,
     methods: ["POST"],
     requestBody: "buffered",
     fetch: async (request) => {
-      const sessionId = readSessionId2(await readJsonBody(request));
+      const sessionId = readSessionId2(await readJsonBody2(request));
       if (sessionId === null) {
-        return jsonResponse(400, { ok: false, error: "sessionId must be a non-empty string" });
+        return jsonResponse2(400, { ok: false, error: "sessionId must be a non-empty string" });
       }
       const durable = await options.ack(sessionId);
       if (!durable) {
-        return jsonResponse(500, { ok: false, error: "acknowledgement could not be stored" });
+        return jsonResponse2(500, { ok: false, error: "acknowledgement could not be stored" });
       }
       broadcast();
-      return jsonResponse(200, { ok: true });
+      return jsonResponse2(200, { ok: true });
     }
   };
   const archiveOperations = /* @__PURE__ */ new Map();
@@ -1099,14 +2216,14 @@ data: ${JSON.stringify(feed)}
     methods: ["POST"],
     requestBody: "buffered",
     fetch: async (request) => {
-      const body = await readJsonBody(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      const body = await readJsonBody2(request);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       try {
-        if (value.action === "capabilities") return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } });
+        if (value.action === "capabilities") return jsonResponse2(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } });
         if (value.action === "preview") {
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds));
-          return jsonResponse(200, { ok: true, preview });
+          return jsonResponse2(200, { ok: true, preview });
         }
         if ((value.action === "start" || value.action === "status") && typeof value.token === "string" && value.token.length <= 100) {
           let operation = archiveOperations.get(value.token);
@@ -1126,18 +2243,18 @@ data: ${JSON.stringify(feed)}
             operation = archiveOperations.get(token);
           }
           if (operation === void 0) throw new WikiArchiveError("PREVIEW_EXPIRED");
-          return jsonResponse(200, { ok: true, operation });
+          return jsonResponse2(200, { ok: true, operation });
         }
         if (value.action === "commit" && typeof value.token === "string" && value.token.length <= 100) {
           const result = await options.wikiArchive.commit(value.token);
-          return jsonResponse(200, { ok: true, result });
+          return jsonResponse2(200, { ok: true, result });
         }
-        return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+        return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       } catch (error) {
         options.warn(`dsh-session-board: wiki archive failed: ${describeError2(error)}`);
         const code = error instanceof WikiArchiveError ? error.code : "ARCHIVE_UNAVAILABLE";
         const status = code === "INVALID_SELECTION" ? 400 : code === "BUSY" ? 429 : 409;
-        return jsonResponse(status, { ok: false, error: code });
+        return jsonResponse2(status, { ok: false, error: code });
       }
     }
   };
@@ -1147,26 +2264,26 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     fetch: async (request) => {
       const store = options.synthesisModel;
-      if (store === void 0) return jsonResponse(503, { ok: false, error: "STORE_UNAVAILABLE" });
-      const body = await readJsonBody(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      if (store === void 0) return jsonResponse2(503, { ok: false, error: "STORE_UNAVAILABLE" });
+      const body = await readJsonBody2(request);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       if (value.action === "read") {
         const pref2 = readStoredPref(store, options.warn);
-        return jsonResponse(200, { ok: true, selection: selectionOf(pref2) });
+        return jsonResponse2(200, { ok: true, selection: selectionOf(pref2) });
       }
       if (value.action === "catalog") {
         try {
           const groups = await store.catalog();
-          return jsonResponse(200, { ok: true, groups });
+          return jsonResponse2(200, { ok: true, groups });
         } catch (error) {
           options.warn(`dsh-session-board: model catalog read failed: ${describeError2(error)}`);
-          return jsonResponse(500, { ok: false, error: "CATALOG_UNAVAILABLE" });
+          return jsonResponse2(500, { ok: false, error: "CATALOG_UNAVAILABLE" });
         }
       }
-      if (value.action !== "write") return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      if (value.action !== "write") return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       const pref = readSynthesisPrefBody(value);
-      if (pref === null) return jsonResponse(400, { ok: false, error: "INVALID_SELECTION" });
+      if (pref === null) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       const selection = selectionOf(pref);
       if (selection !== null) {
         let verdict = "UNKNOWN_MODEL";
@@ -1175,14 +2292,14 @@ data: ${JSON.stringify(feed)}
         } catch {
           verdict = "UNKNOWN_MODEL";
         }
-        if (verdict !== "ok") return jsonResponse(400, { ok: false, error: verdict });
+        if (verdict !== "ok") return jsonResponse2(400, { ok: false, error: verdict });
       }
       try {
         await store.write(pref);
       } catch {
-        return jsonResponse(500, { ok: false, error: "STORE_UNAVAILABLE" });
+        return jsonResponse2(500, { ok: false, error: "STORE_UNAVAILABLE" });
       }
-      return jsonResponse(200, { ok: true, selection });
+      return jsonResponse2(200, { ok: true, selection });
     }
   };
   const streamRoute = {
@@ -1251,7 +2368,7 @@ function readSynthesisPrefBody(body) {
   const pref = parseSynthesisPref({ model, provider, reasoningEffort: effort ?? null });
   return pref.model === null || pref.provider === null ? null : pref;
 }
-function jsonResponse(status, payload) {
+function jsonResponse2(status, payload) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
@@ -1260,7 +2377,7 @@ function jsonResponse(status, payload) {
     }
   });
 }
-async function readJsonBody(request) {
+async function readJsonBody2(request) {
   try {
     return await request.json();
   } catch {
@@ -1372,6 +2489,21 @@ function apply(ctx) {
   }
   ctx.effect(() => webServer.register(routes.streamRoute), "dsh-session-board: SSE stream");
   subscribeBoardLedger(ctx, ledgerReady);
+  ctx.inject(
+    ["storageDomain", "connection", "sessionController", "workspaceRegistry", "agents"],
+    (managerCtx) => {
+      try {
+        startManager({
+          ctx: managerCtx,
+          storageDomain: storageDomainOf(managerCtx),
+          connection: connectionOf(managerCtx),
+          warn
+        });
+      } catch (error) {
+        warn(`dsh-session-board: manager unavailable: ${String(error)}`);
+      }
+    }
+  );
   return () => {
     wikiArchive.close();
     routes.close();

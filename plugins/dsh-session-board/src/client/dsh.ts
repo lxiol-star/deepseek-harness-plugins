@@ -97,12 +97,59 @@ export interface SubagentAddress {
   mode?: string
 }
 
+/** One text part of a prompt, exactly as the official session face accepts it. */
+export interface PromptTextPart {
+  type: 'text'
+  text: string
+}
+
+/** Whether the host accepted one prompt. Mirrors the Remote result branch. */
+export type PromptResult =
+  | { ok: true; value: { accepted: true } }
+  | { ok: false; error: { code?: string; message?: string } }
+
+/**
+ * The behavior half of one retained Session that the manager panel calls.
+ * Only `prompt` is used: the embedded chat renders the rest through slots.
+ */
+export interface RetainedSessionFace {
+  prompt(content: readonly PromptTextPart[], mode: 'queue' | 'steer', signal?: AbortSignal): Promise<PromptResult>
+}
+
+/** The binding behind a retained Session reference. */
+export interface RetainedSessionBinding {
+  readonly session: RetainedSessionFace
+}
+
+/** One owned use of an exact Client Session generation. */
+export interface SessionReference {
+  readonly sessionId: string
+  /** Shared binding; only valid after {@link SessionReference.ready} settles. */
+  readonly binding: RetainedSessionBinding
+  /** This reference's wait for the shared initial Session opening. */
+  readonly ready: Promise<RetainedSessionBinding>
+  release(): void
+}
+
+/** Consumer identity and optional cancellation of one retention. */
+export interface SessionRetainOptions {
+  readonly source: string
+  readonly signal?: AbortSignal | undefined
+}
+
+/** Retention and prompting, the two session-service members the panel needs. */
+export type RetainSession = (target: string, options: SessionRetainOptions) => SessionReference
+
 /** The sessions service face (only the members used here). */
 export interface SessionsService {
   list: Source<SessionListState>
   refreshProjections(sessionId: string): Promise<void>
   /** The durable address of a subagent Session, when the client knows one. */
   subagentAddress?(sessionId: string): SubagentAddress | undefined
+  /** Retain a session for the manager chat and explicit prompt sends. */
+  retain?: RetainSession
+  /** Refresh the Host-authoritative Session list before retaining an unseen id. */
+  refresh?: () => Promise<void>
 }
 
 /** The navigation service that actually switches the displayed session. */
