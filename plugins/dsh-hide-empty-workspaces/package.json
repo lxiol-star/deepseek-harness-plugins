@@ -1,7 +1,7 @@
 {
   "name": "dsh-hide-empty-workspaces",
-  "version": "0.3.0",
-  "description": "Sidebar views for DeepSeek Harness: switch the session list between in-progress, done and workspaces, hiding workspaces that have no visible sessions.",
+  "version": "0.3.1",
+  "description": "Sidebar views for DeepSeek Harness: switch between active, archived and workspace views; the archive view unarchives in one click and empty workspaces stay out of the session list.",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

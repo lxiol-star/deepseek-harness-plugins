@@ -44,8 +44,9 @@ function fixture(sections, rail) {
 }
 
 function boot({
-  phase = 'ready', items, stored = null, includeArchived = null, includeBlank = null,
-  mode = null, archivedSessionIds = [], sessionsById = {}, sections = DEFAULT_SECTIONS, rail = false,
+  phase = 'ready', items, stored = null, includeBlank = null,
+  mode = null, archivedSessionIds = [], sessionsById = {}, sections = DEFAULT_SECTIONS,
+  rail = false, workspaceService = true,
 }) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${fixture(sections, rail)}</body></html>`,
     { url: 'http://127.0.0.1/', runScripts: 'outside-only' })
@@ -53,7 +54,6 @@ function boot({
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0)
   window.cancelAnimationFrame = (handle) => window.clearTimeout(handle)
   if (stored !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces', stored)
-  if (includeArchived !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.includeArchived', includeArchived)
   if (includeBlank !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.includeBlank', includeBlank)
   if (mode !== null) window.localStorage.setItem('dsh.hideEmptyWorkspaces.mode', mode)
 
@@ -74,12 +74,18 @@ function boot({
       subscribe: () => () => {},
     },
   }
+  const unarchived = []
+  const workspaceUi = {
+    unarchiveSession: async (sessionId) => { unarchived.push(sessionId) },
+    openSession: () => {},
+  }
   const dispose = []
   const registrations = []
   const ctx = {
     get: (name) => {
       if (name === 'workspaces') return service
       if (name === 'sessions') return sessionService
+      if (name === 'uiWorkspace') return workspaceService ? workspaceUi : undefined
       throw new Error(`unexpected service ${name}`)
     },
     effect: (factory) => {
@@ -96,7 +102,9 @@ function boot({
     },
     locale: {
       register: () => () => {},
-      bind: (namespace) => (key) => `${namespace}.${key}`,
+      bind: (namespace) => (key, variables) => (variables === undefined
+        ? `${namespace}.${key}`
+        : `${namespace}.${key}:${JSON.stringify(variables)}`),
     },
   }
 
@@ -111,7 +119,7 @@ function boot({
   }
   window.fetch = async () => ({
     ok: true,
-    json: async () => ({ loadedVersion: '0.2.0', installedVersion: '0.2.1' }),
+    json: async () => ({ loadedVersion: '0.2.0', installedVersion: '0.3.1' }),
   })
   vm.runInContext(source, dom.getInternalVMContext())
   const world = {
@@ -119,6 +127,7 @@ function boot({
     dom,
     ctx,
     registrations,
+    unarchived,
     dispose: () => { for (const cleanup of dispose) cleanup() },
     get exported() { return exported },
     update(next) {
@@ -141,16 +150,27 @@ function boot({
       return window.document.querySelector('.dsh-hew-modes')
     },
     clickMode(mode) {
-      const button = world.control().querySelector(`button[data-mode="${mode}"]`)
-      button.click()
+      world.control().querySelector(`button[data-mode="${mode}"]`).click()
     },
     activeMode() {
       const selected = world.control().querySelector('button[aria-selected="true"]')
       return selected === null ? null : selected.dataset.mode
     },
+    listArea() {
+      return window.document.querySelector('[class*="listArea"]')
+    },
+    archivePanel() {
+      return window.document.querySelector('.dsh-hew-archive')
+    },
+    archiveRows() {
+      return [...window.document.querySelectorAll('.dsh-hew-archive-row')]
+    },
+    archiveText() {
+      const panel = world.archivePanel()
+      return panel === null ? '' : panel.textContent
+    },
     hint() {
-      const area = window.document.querySelector('[class*="listArea"]')
-      return area.getAttribute('data-dsh-hide-empty-hint')
+      return world.listArea().getAttribute('data-dsh-hide-empty-hint')
     },
     storedMode() {
       return window.localStorage.getItem('dsh.hideEmptyWorkspaces.mode')
@@ -161,24 +181,42 @@ function boot({
 }
 
 const items = [
-  { workspaceId: 'ws-a', sessionIds: ['s1'] },
-  { workspaceId: 'ws-b', sessionIds: [] },
-  { workspaceId: 'ws-c', sessionIds: ['s2'] },
+  { workspaceId: 'ws-a', sessionIds: ['s1'], title: 'Workspace A', path: '/tmp/ws-a' },
+  { workspaceId: 'ws-b', sessionIds: [], title: 'Workspace B', path: '/tmp/ws-b' },
+  { workspaceId: 'ws-c', sessionIds: ['s2'], title: 'Workspace C', path: '/tmp/ws-c' },
 ]
 const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
 
-// 1. Empty Workspaces are hidden, non-empty ones stay visible (done view).
+// 1. The active view hides empty Workspaces and archived rows.
 {
-  const world = boot({ items, mode: 'done' })
+  const world = boot({
+    items,
+    archivedSessionIds: ['s2'],
+    sessionsById: {
+      s1: { id: 's1', blank: false, title: 'first', updatedAt: Date.now() },
+      s2: { id: 's2', blank: false, title: 'archived one', updatedAt: Date.now() - 3600000 },
+    },
+    sections: [
+      { ws: 'ws-a', sessions: ['s1'] },
+      { ws: 'ws-b', sessions: [] },
+      { ws: 'ws-c', sessions: ['s2'] },
+    ],
+  })
   check('client bundle exports apply and inject', typeof world.exported.apply === 'function'
     && Array.isArray(world.exported.inject) && world.exported.inject.includes('workspaces'))
   world.exported.apply(world.ctx)
   await wait()
-  check('empty Workspace section is hidden', world.hidden('ws-b'))
-  check('non-empty Workspace section stays visible', !world.hidden('ws-a') && !world.hidden('ws-c'))
+  check('view switch mounts with three segments', world.control() !== null
+    && world.control().querySelectorAll('button[data-mode]').length === 3)
+  check('default view is active', world.activeMode() === 'active' && world.hidden('ws-b'))
+  check('Workspace with a visible Session stays', !world.hidden('ws-a'))
+  check('archived-only Workspace is hidden in the active view', world.hidden('ws-c'))
+  check('active Session row stays visible', !world.sessionHidden('s1'))
+  check('archived Session row is hidden in the active view', world.sessionHidden('s2'))
+  check('archive list is absent in the active view', world.archivePanel() === null)
 
   // 2. Snapshot updates re-evaluate emptiness.
-  world.update({ phase: 'ready', items: [
+  world.update({ phase: 'ready', archivedSessionIds: [], items: [
     { workspaceId: 'ws-a', sessionIds: [] },
     { workspaceId: 'ws-b', sessionIds: ['s3'] },
     { workspaceId: 'ws-c', sessionIds: ['s2'] },
@@ -203,7 +241,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
 
 // 5. Pending snapshots never hide anything.
 {
-  const world = boot({ phase: 'pending', items, mode: 'done' })
+  const world = boot({ phase: 'pending', items })
   world.exported.apply(world.ctx)
   await wait()
   check('pending snapshot hides nothing', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
@@ -211,93 +249,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.window.close()
 }
 
-// 6. Workspaces whose sessions are all archived are hidden too.
-{
-  const world = boot({ items: [
-    { workspaceId: 'ws-a', sessionIds: ['s1'] },
-    { workspaceId: 'ws-b', sessionIds: ['s2', 's3'] },
-    { workspaceId: 'ws-c', sessionIds: ['s4'] },
-  ], archivedSessionIds: ['s2', 's3'], mode: 'done' })
-  world.exported.apply(world.ctx)
-  await wait()
-  check('archived-only Workspace is hidden', world.hidden('ws-b'))
-  check('Workspaces with visible sessions stay', !world.hidden('ws-a') && !world.hidden('ws-c'))
-  const diag = world.window.__dshHideEmptyWorkspaces
-  check('diagnostics publish version and state', diag !== undefined && diag.version === '0.3.0' && diag.state === 'ready')
-  check('diagnostics report the view and the hidden id', diag.mode === 'done'
-    && Array.isArray(diag.hidden) && diag.hidden.includes('ws-b'))
-  world.dispose()
-  world.window.close()
-}
-
-// 7. includeArchived=1 restores the original "zero sessions" rule.
-{
-  const world = boot({ items: [
-    { workspaceId: 'ws-a', sessionIds: ['s1'] },
-    { workspaceId: 'ws-b', sessionIds: ['s2'] },
-    { workspaceId: 'ws-c', sessionIds: [] },
-  ], archivedSessionIds: ['s2'], includeArchived: '1', mode: 'done' })
-  world.exported.apply(world.ctx)
-  await wait()
-  check('includeArchived keeps archived-only Workspace visible', !world.hidden('ws-b'))
-  check('includeArchived still hides zero-session Workspace', world.hidden('ws-c'))
-  world.dispose()
-  world.window.close()
-}
-
-// 8. localStorage opt-out disables the filter without uninstalling.
-{
-  const world = boot({ items, stored: '0', mode: 'done' })
-  world.exported.apply(world.ctx)
-  await wait()
-  check('opt-out keeps every Workspace visible', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
-  check('opt-out removes the view switch', world.control() === null)
-  world.dispose()
-  world.window.close()
-}
-
-// 9. The Settings tab registers and its injected actions drive the filter.
-{
-  const world = boot({ items: [
-    { workspaceId: 'ws-a', sessionIds: ['s1'] },
-    { workspaceId: 'ws-b', sessionIds: ['s2'] },
-    { workspaceId: 'ws-c', sessionIds: ['s3'] },
-  ], archivedSessionIds: ['s2'], mode: 'done' })
-  world.exported.apply(world.ctx)
-  await wait()
-  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
-  check('settings tab registers into settings.plugins.tab', registration !== undefined)
-  check('settings tab id and order', registration.options.id === 'hide-empty-workspaces'
-    && registration.options.order === 60)
-  check('settings tab label resolves through the locale namespace',
-    registration.options.label() === 'hideEmptyWorkspaces.tab')
-  const injected = registration.options.inject()
-  check('injected status reports the hidden Workspace', injected.status().hidden.includes('ws-b'))
-  check('injected flags expose the defaults', injected.getFlags().enabled === true
-    && injected.getFlags().includeArchived === false && injected.getFlags().mode === 'done')
-  injected.setFlag('includeArchived', true)
-  await wait()
-  check('includeArchived toggle un-hides the archived-only Workspace', !world.hidden('ws-b'))
-  check('includeArchived toggle persists to localStorage',
-    world.window.localStorage.getItem('dsh.hideEmptyWorkspaces.includeArchived') === '1')
-  injected.setFlag('includeArchived', false)
-  await wait()
-  check('disabling includeArchived hides it again', world.hidden('ws-b'))
-  const versions = await injected.versions()
-  check('versions fetch returns loaded and installed versions',
-    versions.loadedVersion === '0.2.0' && versions.installedVersion === '0.2.1')
-  injected.setMode('workspaces')
-  await wait()
-  check('injected setMode switches and persists the view',
-    world.activeMode() === 'workspaces' && world.storedMode() === 'workspaces')
-  injected.setFlag('enabled', false)
-  await wait()
-  check('enabled toggle shows every Workspace', !world.hidden('ws-b') && world.control() === null)
-  world.dispose()
-  world.window.close()
-}
-
-// 10. A Workspace holding only a blank Session counts as empty.
+// 6. IncludeBlank decides whether a blank-only Workspace counts as visible.
 {
   const world = boot({
     items: [
@@ -309,7 +261,6 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
       s1: { id: 's1', blank: false },
       'blank-1': { id: 'blank-1', blank: true },
     },
-    mode: 'done',
   })
   world.exported.apply(world.ctx)
   await wait()
@@ -328,7 +279,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.window.close()
 }
 
-// 11. A Workspace holding only subagent child Sessions counts as empty.
+// 7. A Workspace holding only subagent child Sessions counts as empty.
 {
   const world = boot({
     items: [
@@ -342,92 +293,174 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
       'real-1': { id: 'real-1', blank: false },
       'archived-1': { id: 'archived-1', blank: false },
     },
-    mode: 'done',
   })
   world.exported.apply(world.ctx)
   await wait()
   check('subagent-only Workspace is hidden', world.hidden('ws-a'))
   check('Workspace with a real Session stays visible', !world.hidden('ws-b'))
   check('subagent Session does not rescue an archived-only Workspace', world.hidden('ws-c'))
-  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
-  const injected = registration.options.inject()
-  injected.setFlag('includeArchived', true)
-  await wait()
-  check('includeArchived keeps a subagent-only Workspace hidden', world.hidden('ws-a'))
-  injected.setFlag('includeBlank', true)
-  await wait()
-  check('includeBlank keeps a subagent-only Workspace hidden', world.hidden('ws-a'))
   world.dispose()
   world.window.close()
 }
 
-// 12. The view switch mounts with three segments; the default view filters by running state.
+// 8. localStorage opt-out disables the filter without uninstalling.
+{
+  const world = boot({ items, stored: '0' })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('opt-out keeps every Workspace visible', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
+  check('opt-out removes the view switch', world.control() === null)
+  world.dispose()
+  world.window.close()
+}
+
+// 9. The Settings tab registers and its injected actions drive the filter.
+{
+  const world = boot({ items: [
+    { workspaceId: 'ws-a', sessionIds: ['s1'] },
+    { workspaceId: 'ws-b', sessionIds: [] },
+    { workspaceId: 'ws-c', sessionIds: ['s2'] },
+  ], archivedSessionIds: ['s2'] })
+  world.exported.apply(world.ctx)
+  await wait()
+  const registration = world.registrations.find(entry => entry.options.name === 'settings.plugins.tab')
+  check('settings tab registers into settings.plugins.tab', registration !== undefined)
+  check('settings tab id and order', registration.options.id === 'hide-empty-workspaces'
+    && registration.options.order === 60)
+  check('settings tab label resolves through the locale namespace',
+    registration.options.label() === 'hideEmptyWorkspaces.tab')
+  const injected = registration.options.inject()
+  check('injected status reports the hidden Workspace', injected.status().hidden.includes('ws-b')
+    && injected.status().mode === 'active')
+  check('injected flags expose the defaults', injected.getFlags().enabled === true
+    && injected.getFlags().includeBlank === false)
+  const versions = await injected.versions()
+  check('versions fetch returns loaded and installed versions',
+    versions.loadedVersion === '0.2.0' && versions.installedVersion === '0.3.1')
+  injected.setMode('archived')
+  await wait()
+  check('injected setMode switches and persists the view',
+    world.activeMode() === 'archived' && world.storedMode() === 'archived')
+  injected.setFlag('enabled', false)
+  await wait()
+  check('enabled toggle restores the native list', !world.hidden('ws-b')
+    && world.control() === null && world.archivePanel() === null)
+  world.dispose()
+  world.window.close()
+}
+
+// 10. The archived view renders the archive list and unarchives in one click.
 {
   const world = boot({
-    items: [
-      { workspaceId: 'ws-a', sessionIds: ['s1'] },
-      { workspaceId: 'ws-b', sessionIds: ['s2'] },
-      { workspaceId: 'ws-c', sessionIds: [] },
-    ],
+    items,
+    archivedSessionIds: ['s2', 's9'],
     sessionsById: {
-      s1: { id: 's1', blank: false, running: true },
-      s2: { id: 's2', blank: false, running: false },
+      s1: { id: 's1', blank: false, title: 'first', updatedAt: Date.now() },
+      s2: { id: 's2', blank: false, title: 'archived one', updatedAt: Date.now() - 3600000 },
+      s9: { id: 's9', blank: false, title: 'archived two', updatedAt: Date.now() - 7200000 },
     },
     sections: [
       { ws: 'ws-a', sessions: ['s1'] },
-      { ws: 'ws-b', sessions: ['s2'] },
-      { ws: 'ws-c', sessions: [] },
+      { ws: 'ws-b', sessions: [] },
+      { ws: 'ws-c', sessions: ['s2'] },
     ],
   })
   world.exported.apply(world.ctx)
   await wait()
-  check('view switch mounts with three segments', world.control() !== null
-    && world.control().querySelectorAll('button[data-mode]').length === 3)
-  check('default view is running', world.activeMode() === 'running')
-  check('running Workspace stays visible', !world.hidden('ws-a'))
-  check('done-only Workspace is hidden in the running view', world.hidden('ws-b'))
-  check('empty Workspace is hidden in the running view', world.hidden('ws-c'))
-  check('running Session row stays visible', !world.sessionHidden('s1'))
-  check('done Session row is hidden in the running view', world.sessionHidden('s2'))
-
-  // 13. Switching to Done flips the row visibility and persists.
-  world.clickMode('done')
+  world.clickMode('archived')
   await wait()
-  check('done view persists the choice', world.storedMode() === 'done')
-  check('done view reveals the done-only Workspace', !world.hidden('ws-b'))
-  check('done view hides the running-only Workspace', world.hidden('ws-a'))
-  check('done view shows the done Session row', !world.sessionHidden('s2'))
-  check('done view hides the running Session row', world.sessionHidden('s1'))
+  check('archived view marks the list area', world.listArea().hasAttribute('data-dsh-hew-archive'))
+  check('archived view renders one row per archived Session', world.archiveRows().length === 2)
+  check('archived view lists titles newest first', world.archiveText().includes('archived one')
+    && world.archiveText().includes('archived two'))
+  check('archived view reports the archive count', world.archiveText().includes('archiveCount'))
+  const firstRow = world.archiveRows()[0]
+  check('archive row shows its Workspace and time', firstRow.textContent.includes('Workspace C'))
+  check('archive rows are outside the native tree marks', world.window.document
+    .querySelectorAll('.dsh-hew-archive-row[data-dsh-hide-empty]').length === 0)
+  const button = firstRow.querySelector('.dsh-hew-archive-btn')
+  check('archive row offers unarchive', button !== null && button.textContent.includes('unarchive'))
+  button.click()
+  await wait()
+  check('unarchive click calls the Workspace service', world.unarchived.includes('s2'))
 
-  // 14. Workspaces view keeps every Workspace and folds the Session rows.
+  world.update({ phase: 'ready', archivedSessionIds: [], items })
+  await wait()
+  check('emptied archive shows its empty copy', world.archiveRows().length === 0
+    && world.archiveText().includes('emptyArchived'))
+
+  // 11. Switching to Workspaces restores the native list with every Workspace row.
   world.clickMode('workspaces')
   await wait()
-  check('workspaces view keeps every Workspace', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
-  check('workspaces view hides every Session row', world.sessionHidden('s1') && world.sessionHidden('s2'))
-  check('workspaces view shows no empty hint', world.hint() === null)
+  check('workspaces view drops the archive mask', !world.listArea().hasAttribute('data-dsh-hew-archive'))
+  check('workspaces view keeps every Workspace row', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
+  check('workspaces view hides Session rows', world.sessionHidden('s1'))
+  world.dispose()
+  world.window.close()
+}
 
-  // 15. The Session views show an empty hint when nothing matches.
-  world.update({ phase: 'ready', items: [
+// 12. The active view with nothing visible shows its empty hint.
+{
+  const world = boot({ items: [
     { workspaceId: 'ws-a', sessionIds: [] },
     { workspaceId: 'ws-b', sessionIds: [] },
-    { workspaceId: 'ws-c', sessionIds: [] },
   ] })
-  world.clickMode('running')
+  world.exported.apply(world.ctx)
   await wait()
-  check('running view with no matches shows its hint', (world.hint() ?? '').includes('emptyRunning'))
-  world.clickMode('done')
+  check('active view with no visible Session shows its hint', (world.hint() ?? '').includes('emptyActive'))
+  world.clickMode('workspaces')
   await wait()
-  check('done view with no matches shows its hint', (world.hint() ?? '').includes('emptyDone'))
+  check('workspaces view shows no empty hint', world.hint() === null)
+  world.dispose()
+  world.window.close()
+}
 
-  // 16. The switch yields to the collapsed rail.
+// 13. The archive view stays read-only when the host exposes no Workspace service.
+{
+  const world = boot({
+    items: [{ workspaceId: 'ws-c', sessionIds: ['s2'], title: 'Workspace C', path: '/tmp/ws-c' }],
+    archivedSessionIds: ['s2'],
+    sessionsById: { s2: { id: 's2', blank: false, title: 'archived one' } },
+    sections: [{ ws: 'ws-c', sessions: ['s2'] }],
+    workspaceService: false,
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  world.clickMode('archived')
+  await wait()
+  check('read-only archive lists its rows', world.archiveRows().length === 1)
+  const button = world.archiveRows()[0].querySelector('.dsh-hew-archive-btn')
+  check('read-only archive disables unarchive', button.disabled === true)
+  check('read-only archive explains itself', world.archiveText().includes('noHostActions'))
+  world.dispose()
+  world.window.close()
+}
+
+// 14. The switch yields to the collapsed rail.
+{
   const rail = boot({ items, rail: true })
   rail.exported.apply(rail.ctx)
   await wait()
   check('rail chrome mounts no view switch', rail.control() === null)
   rail.dispose()
   rail.window.close()
-  world.dispose()
-  world.window.close()
+}
+
+// 15. Stored 0.3.0 view values fold into the active view.
+{
+  const running = boot({ items, mode: 'running' })
+  running.exported.apply(running.ctx)
+  await wait()
+  check('stored running folds into active', running.activeMode() === 'active')
+  running.dispose()
+  running.window.close()
+
+  const done = boot({ items, mode: 'done' })
+  done.exported.apply(done.ctx)
+  await wait()
+  check('stored done folds into active', done.activeMode() === 'active')
+  done.dispose()
+  done.window.close()
 }
 
 if (failures > 0) {

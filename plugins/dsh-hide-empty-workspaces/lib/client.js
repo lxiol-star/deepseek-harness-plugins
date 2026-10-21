@@ -4,22 +4,25 @@
  * Two surfaces, one bundle:
  *
  * 1. Sidebar views. A segmented control at the top of the native Workspace
- *    browser switches the session list between `running` (进行中), `done`
- *    (已完成) and `workspaces` (工作空间). The `workspaces` view lists every
- *    Workspace — including ones with no visible Sessions — so a historical
- *    Workspace can start a new Session from its row's native hover action
- *    without being hunted down first. `running` and `done` filter the Session
- *    rows and hide Workspaces left without a matching row.
+ *    browser switches the region between `active` (进行中), `archived` (已归档)
+ *    and `workspaces` (工作空间). The `active` view is the native session list
+ *    with archived Sessions filtered out and Workspaces left without a visible
+ *    Session hidden. The `archived` view renders the archive list itself: the
+ *    native browser never renders archived rows (its own archived filter hides
+ *    them, and the plugin must not mutate that persisted filter), so this view
+ *    lists archived Sessions with their Workspace and an inline "取消归档"
+ *    action. The `workspaces` view keeps every Workspace row and folds Session
+ *    rows, so a historical Workspace can start a new Session from its native
+ *    hover actions without being hunted down first.
  *
- * 2. Hide-empty rule (the original behaviour, now expressed as the session
+ * 2. Hide-empty rule (the original behaviour, now the `active` view's session
  *    visibility rule). A Session counts when the native browser would render a
- *    row for it: not in the Workspace Controller's archive set (unless opted
- *    in), not blank (unless opted in), and not a subagent child (child rows
- *    live in the parent header's catalog). A Workspace with no visible Session
- *    disappears from the session views. Emptiness comes from the snapshots
- *    (`items[].sessionIds` plus the Session list), never from rendered rows: a
- *    collapsed group renders no session rows, so counting the DOM would hide
- *    working directories.
+ *    row for it: not in the Workspace Controller's archive set, not blank
+ *    (unless opted in), and not a subagent child (child rows live in the parent
+ *    header's catalog). Emptiness comes from the snapshots (`items[].sessionIds`
+ *    plus the Session list), never from rendered rows: a collapsed group
+ *    renders no session rows, so counting the DOM would hide working
+ *    directories.
  *
  * The same bundle contributes a Settings -> Plugins tab that reports status,
  * compares the loaded and installed versions, exposes the toggles and the
@@ -40,6 +43,10 @@ window.__ModuleLoader__.load({
     const ATTR = 'data-dsh-hide-empty'
     /** Attribute (and ::after content) carried by the list area when a view matches nothing. */
     const EMPTY_ATTR = 'data-dsh-hide-empty-hint'
+    /** Attribute on the list area while the archive list replaces the native tree. */
+    const ARCHIVE_ATTR = 'data-dsh-hew-archive'
+    /** Class of the injected archive panel and its rows. */
+    const ARCHIVE_CLASS = 'dsh-hew-archive'
     /** Row-key prefix emitted by ui-workspace for one Workspace group. */
     const ROW_PREFIX = 'workspace:'
     /** Row-key prefix emitted by ui-workspace for one Session row. */
@@ -48,22 +55,24 @@ window.__ModuleLoader__.load({
     const OVERFLOW_PREFIX = 'overflow:'
     /** Setting `0` shows the native, unfiltered browser without uninstalling. */
     const STORAGE_KEY = 'dsh.hideEmptyWorkspaces'
-    /** Setting `1` also counts archived sessions as visible. */
-    const INCLUDE_ARCHIVED_KEY = 'dsh.hideEmptyWorkspaces.includeArchived'
     /** Setting `1` also counts blank sessions (created, never chatted) as visible. */
     const INCLUDE_BLANK_KEY = 'dsh.hideEmptyWorkspaces.includeBlank'
-    /** Persisted sidebar view: `running`, `done` or `workspaces`. */
+    /** Persisted sidebar view: `active`, `archived` or `workspaces`. */
     const MODE_KEY = 'dsh.hideEmptyWorkspaces.mode'
     /** Host route that reports loaded and installed versions. */
     const STATUS_PATH = '/hide-empty-workspaces/status'
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.0'
+    const VERSION = '0.3.1'
     /** Sidebar views, in segment order. */
-    const MODES = ['running', 'done', 'workspaces']
+    const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
-    const DEFAULT_MODE = 'running'
+    const DEFAULT_MODE = 'active'
+    /** Values written by 0.3.0, folded into the active view. */
+    const LEGACY_MODES = { running: 'active', done: 'active' }
+    /** Archive list cap: the archive is a restore surface, not a history browser. */
+    const ARCHIVE_LIMIT = 200
 
     /** Chinese copy. */
     const zh = {
@@ -83,7 +92,6 @@ window.__ModuleLoader__.load({
       upToDate: '已安装版本与已加载版本一致。',
       flags: '开关',
       enabled: '启用侧栏筛选',
-      includeArchived: '归档会话也算作有会话',
       includeBlank: '空白会话也算作有会话',
       actions: '操作',
       reapply: '重新应用',
@@ -94,11 +102,21 @@ window.__ModuleLoader__.load({
       modeLabel: '当前视图',
       defaultView: '默认视图',
       modesLabel: '会话视图',
-      modeRunning: '进行中',
-      modeDone: '已完成',
+      modeActive: '进行中',
+      modeArchived: '已归档',
       modeWorkspaces: '工作空间',
-      emptyRunning: '暂无进行中的会话\n切到「已完成」看历史，或「工作空间」开新会话',
-      emptyDone: '暂无已完成的会话\n切到「进行中」或「工作空间」',
+      emptyActive: '暂无会话\n切到「已归档」看归档会话，或「工作空间」开新会话',
+      emptyArchived: '暂无已归档会话',
+      archiveCount: '已归档会话 · {n}',
+      archiveMore: '只显示最近的 {n} 个已归档会话',
+      unarchive: '取消归档',
+      unarchiveFailed: '取消归档失败',
+      noHostActions: '当前宿主未提供工作区操作服务，只能查看。',
+      sessionUntitled: '未命名',
+      timeNow: '刚刚',
+      timeMinutes: '{n} 分钟前',
+      timeHours: '{n} 小时前',
+      timeDays: '{n} 天前',
     }
 
     /** English copy. */
@@ -119,7 +137,6 @@ window.__ModuleLoader__.load({
       upToDate: 'Loaded versions match the installed package.',
       flags: 'Options',
       enabled: 'Enable the sidebar views',
-      includeArchived: 'Count archived sessions as visible',
       includeBlank: 'Count blank sessions as visible',
       actions: 'Actions',
       reapply: 'Re-apply',
@@ -130,11 +147,21 @@ window.__ModuleLoader__.load({
       modeLabel: 'Current view',
       defaultView: 'Default view',
       modesLabel: 'Session views',
-      modeRunning: 'In progress',
-      modeDone: 'Done',
+      modeActive: 'Active',
+      modeArchived: 'Archived',
       modeWorkspaces: 'Workspaces',
-      emptyRunning: 'No session is in progress.\nSwitch to Done for history, or Workspaces to start a new session.',
-      emptyDone: 'No finished session here.\nSwitch to In progress or Workspaces.',
+      emptyActive: 'No session here.\nSwitch to Archived for the archive, or Workspaces to start a new session.',
+      emptyArchived: 'No archived sessions',
+      archiveCount: 'Archived sessions · {n}',
+      archiveMore: 'Only the latest {n} archived sessions are listed',
+      unarchive: 'Unarchive',
+      unarchiveFailed: 'Unarchive failed',
+      noHostActions: 'This host exposes no Workspace actions; the list is read-only.',
+      sessionUntitled: 'Untitled',
+      timeNow: 'now',
+      timeMinutes: '{n} min ago',
+      timeHours: '{n} h ago',
+      timeDays: '{n} d ago',
     }
 
     /** Inline styles keep the tab readable without shipping a stylesheet. */
@@ -172,15 +199,14 @@ window.__ModuleLoader__.load({
 
     /**
      * Persist one flag using the encoding its default requires.
-     * @param name - `enabled`, `includeArchived` or `includeBlank`.
+     * @param name - `enabled` or `includeBlank`.
      * @param value - desired boolean.
      */
     function writeFlag(name, value) {
       try {
-        if (name === 'includeArchived' || name === 'includeBlank') {
-          const key = name === 'includeArchived' ? INCLUDE_ARCHIVED_KEY : INCLUDE_BLANK_KEY
-          if (value) localStorage.setItem(key, '1')
-          else localStorage.removeItem(key)
+        if (name === 'includeBlank') {
+          if (value) localStorage.setItem(INCLUDE_BLANK_KEY, '1')
+          else localStorage.removeItem(INCLUDE_BLANK_KEY)
           return
         }
         if (value) localStorage.removeItem(STORAGE_KEY)
@@ -191,13 +217,15 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Read the persisted sidebar view.
-     * @returns one of {@link MODES}, or {@link DEFAULT_MODE}.
+     * Read the persisted sidebar view, folding 0.3.0's running/done values.
+     * @returns one of {@link MODES}.
      */
     function readMode() {
       try {
         const value = localStorage.getItem(MODE_KEY)
-        return MODES.includes(value) ? value : DEFAULT_MODE
+        if (MODES.includes(value)) return value
+        const legacy = LEGACY_MODES[value]
+        return legacy === undefined ? DEFAULT_MODE : legacy
       } catch {
         return DEFAULT_MODE
       }
@@ -222,9 +250,25 @@ window.__ModuleLoader__.load({
      * @returns the label.
      */
     function modeLabel(t, mode) {
-      if (mode === 'running') return t('modeRunning')
-      if (mode === 'done') return t('modeDone')
+      if (mode === 'active') return t('modeActive')
+      if (mode === 'archived') return t('modeArchived')
       return t('modeWorkspaces')
+    }
+
+    /**
+     * Compact relative time label.
+     * @param t - locale translate bound to this plugin's namespace.
+     * @param updatedAt - epoch milliseconds; absent or zero reads as now.
+     * @returns the label.
+     */
+    function timeLabel(t, updatedAt) {
+      const timestamp = typeof updatedAt === 'number' && updatedAt > 0 ? updatedAt : Date.now()
+      const minutes = Math.floor(Math.max(0, Date.now() - timestamp) / 60000)
+      if (minutes < 1) return t('timeNow')
+      if (minutes < 60) return t('timeMinutes', { n: String(minutes) })
+      const hours = Math.floor(minutes / 60)
+      if (hours < 24) return t('timeHours', { n: String(hours) })
+      return t('timeDays', { n: String(Math.floor(hours / 24)) })
     }
 
     /**
@@ -316,13 +360,6 @@ window.__ModuleLoader__.load({
           h('label', { style: styles.check },
             h('input', {
               type: 'checkbox',
-              checked: flags.includeArchived,
-              onChange: (event) => { props.setFlag('includeArchived', event.target.checked) },
-            }),
-            t('includeArchived')),
-          h('label', { style: styles.check },
-            h('input', {
-              type: 'checkbox',
               checked: flags.includeBlank,
               onChange: (event) => { props.setFlag('includeBlank', event.target.checked) },
             }),
@@ -347,15 +384,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Locate the native sidebar browser root: the element owning both the
-     * section label (wide chrome only) and the list area.
+     * Locate the native sidebar browser root. Several plugins ship a
+     * sectionLabel class, so the tree's rows are the anchor: the root is the
+     * nearest ancestor with a direct sectionHeader child. Falling back to the
+     * list area (only this browser uses that class) covers an empty or rail
+     * chrome.
      * @returns the root element, or null when the browser is not mounted.
      */
     function browserRoot() {
-      const label = document.querySelector('[class*="sectionLabel"]')
-      if (label !== null && label.parentElement !== null) {
-        const header = label.parentElement
-        if (header.parentElement !== null) return header.parentElement
+      const row = document.querySelector('[data-row-key^="workspace:"], [data-row-key^="session:"], [data-row-key="empty"]')
+      if (row !== null) {
+        let element = row.parentElement
+        for (let depth = 0; element !== null && depth < 20; depth += 1) {
+          if (element.querySelector(':scope > [class*="sectionHeader"]') !== null) return element
+          element = element.parentElement
+        }
       }
       const area = document.querySelector('[class*="listArea"]')
       return area === null ? null : area.parentElement
@@ -391,6 +434,15 @@ window.__ModuleLoader__.load({
         throw error
       }
 
+      /** The Workspace UI service; absent on hosts that do not ship the native browser. */
+      const uiWorkspace = () => {
+        try {
+          return ctx.get('uiWorkspace')
+        } catch {
+          return undefined
+        }
+      }
+
       const listeners = new Set()
       const emit = () => { for (const listener of listeners) listener() }
 
@@ -399,7 +451,6 @@ window.__ModuleLoader__.load({
         state: 'loading',
         mode: readMode(),
         hidden: [],
-        includeArchived: false,
         includeBlank: false,
         error: null,
       }
@@ -414,11 +465,25 @@ window.__ModuleLoader__.load({
         '.dsh-hew-modes button:hover{color:var(--dsw-alias-label-primary, inherit)}',
         '.dsh-hew-modes button[aria-selected="true"]{background:var(--dsw-alias-bg-base, #fff);color:var(--dsw-alias-label-primary, inherit);box-shadow:0 1px 2px rgba(0,0,0,.10)}',
         `[class*="listArea"][${EMPTY_ATTR}]::after{content:attr(${EMPTY_ATTR});display:block;padding:16px 12px;color:var(--dsw-alias-label-tertiary, inherit);font-size:12px;line-height:1.6;white-space:pre-line}`,
+        `[class*="listArea"][${ARCHIVE_ATTR}] > :not(.${ARCHIVE_CLASS}){display:none !important}`,
+        `.${ARCHIVE_CLASS}{display:flex;flex-direction:column;gap:2px;padding:6px 8px 12px;flex:1 1 auto;min-height:0;overflow:auto}`,
+        `.${ARCHIVE_CLASS}-head{padding:4px 6px;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
+        `.${ARCHIVE_CLASS}-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px}`,
+        `.${ARCHIVE_CLASS}-row:hover{background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.10))}`,
+        `.${ARCHIVE_CLASS}-main{flex:1 1 auto;min-width:0}`,
+        `.${ARCHIVE_CLASS}-title{color:var(--dsw-alias-label-primary, inherit);font-size:13px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
+        `.${ARCHIVE_CLASS}-meta{color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
+        `.${ARCHIVE_CLASS}-btn{flex:none;border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35));background:transparent;color:var(--dsw-alias-label-secondary, inherit);border-radius:6px;padding:3px 8px;font:inherit;font-size:11px;line-height:16px;cursor:pointer}`,
+        `.${ARCHIVE_CLASS}-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary, inherit);border-color:var(--dsw-alias-border-l3, rgba(127,127,127,.55))}`,
+        `.${ARCHIVE_CLASS}-btn:disabled{cursor:default;opacity:.6}`,
+        `.${ARCHIVE_CLASS}-empty{padding:12px 8px;color:var(--dsw-alias-label-tertiary, inherit);font-size:12px;line-height:1.6}`,
+        `.${ARCHIVE_CLASS}-hint{padding:2px 6px 8px;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
       ].join('\n')
       document.head.appendChild(style)
 
       let frame = 0
       let control = null
+      let archivePanel = null
 
       /** Build the segmented view switch. */
       function buildControl() {
@@ -473,35 +538,166 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * Classify one Session for the current toggles and views.
+       * Classify one Session for the active view's toggles.
        * @param id - Session id from a Workspace membership or a rendered row.
        * @param archived - archive set from the Workspace snapshot.
        * @param summaries - Session summaries by id.
-       * @param includeArchived - whether archived sessions count as visible.
        * @param includeBlank - whether blank sessions count as visible.
-       * @returns `subagent`, `archived`, `blank`, `running`, `done` or `unknown`.
+       * @returns `subagent`, `archived`, `blank`, `visible` or `unknown`.
        */
-      function stateOf(id, archived, summaries, includeArchived, includeBlank) {
+      function stateOf(id, archived, summaries, includeBlank) {
         const key = String(id)
         const summary = summaries[key]
         if (summary !== undefined && summary !== null && summary.origin === 'subagent') return 'subagent'
         // The archive set is authoritative even before its summary arrives.
-        if (!includeArchived && archived.has(key)) return 'archived'
+        if (archived.has(key)) return 'archived'
         if (summary === undefined || summary === null) return 'unknown'
-        if (summary.blank === true) return includeBlank ? 'done' : 'blank'
-        return summary.running === true ? 'running' : 'done'
+        if (summary.blank === true) return includeBlank ? 'visible' : 'blank'
+        return 'visible'
       }
 
       /**
-       * Whether a Session row is visible in one view.
+       * Whether a Session row belongs to the active view.
        * @param state - classification from {@link stateOf}.
-       * @param mode - one of {@link MODES}.
-       * @returns true when the view keeps that row.
+       * @returns true when the row stays visible.
        */
-      function stateVisible(state, mode) {
-        if (state === 'subagent' || state === 'archived' || state === 'blank') return false
-        if (mode === 'running') return state === 'running'
-        return state === 'done' || state === 'unknown'
+      function stateVisible(state) {
+        return state === 'visible' || state === 'unknown'
+      }
+
+      /**
+       * Archived Sessions rendered by the archive view, newest first.
+       * @param snapshot - Workspace snapshot with the archive set.
+       * @param summaries - Session summaries by id.
+       * @returns display rows plus whether the list was capped.
+       */
+      function archiveEntries(snapshot, summaries) {
+        const workspaceOf = (sessionId) => {
+          for (const item of snapshot.items) {
+            if (item.sessionIds !== undefined && item.sessionIds.includes(sessionId)) return item
+          }
+          return undefined
+        }
+        const rows = []
+        for (const rawId of snapshot.archivedSessionIds || []) {
+          const id = String(rawId)
+          const summary = summaries[id]
+          if (summary === undefined || summary === null) continue
+          if (summary.origin === 'subagent') continue
+          const workspace = workspaceOf(id)
+          rows.push({
+            id,
+            title: typeof summary.title === 'string' && summary.title.trim() !== ''
+              ? summary.title.trim()
+              : t('sessionUntitled'),
+            workspace: workspace === undefined ? '' : workspaceTitle(workspace),
+            updatedAt: typeof summary.updatedAt === 'number' ? summary.updatedAt : 0,
+          })
+        }
+        rows.sort((left, right) => right.updatedAt - left.updatedAt)
+        const capped = rows.length > ARCHIVE_LIMIT
+        const limited = capped ? rows.slice(0, ARCHIVE_LIMIT) : rows
+        return {
+          capped,
+          entries: limited.map(entry => ({
+            id: entry.id,
+            title: entry.title,
+            workspace: entry.workspace,
+            time: timeLabel(t, entry.updatedAt),
+          })),
+        }
+      }
+
+      /** Remove the injected archive list and its native-content mask. */
+      function removeArchivePanel() {
+        if (archivePanel !== null) archivePanel.remove()
+        archivePanel = null
+        const area = document.querySelector(`[${ARCHIVE_ATTR}]`)
+        if (area !== null) area.removeAttribute(ARCHIVE_ATTR)
+      }
+
+      /**
+       * Render the archive list over the native tree.
+       * @param snapshot - Workspace snapshot with the archive set.
+       * @param summaries - Session summaries by id.
+       */
+      function renderArchivePanel(snapshot, summaries) {
+        const area = document.querySelector('[class*="listArea"]')
+        if (area === null) return
+        const { entries, capped } = archiveEntries(snapshot, summaries)
+        const panel = document.createElement('div')
+        panel.className = ARCHIVE_CLASS
+        panel.setAttribute('role', 'list')
+        panel.setAttribute('aria-label', t('modeArchived'))
+        const head = document.createElement('div')
+        head.className = `${ARCHIVE_CLASS}-head`
+        head.textContent = t('archiveCount', { n: String(snapshot.archivedSessionIds?.length ?? entries.length) })
+        panel.appendChild(head)
+        if (entries.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = `${ARCHIVE_CLASS}-empty`
+          empty.textContent = t('emptyArchived')
+          panel.appendChild(empty)
+        }
+        const service = uiWorkspace()
+        if (service === undefined && entries.length > 0) {
+          const hint = document.createElement('div')
+          hint.className = `${ARCHIVE_CLASS}-hint`
+          hint.textContent = t('noHostActions')
+          panel.appendChild(hint)
+        }
+        for (const entry of entries) panel.appendChild(archiveRow(entry, service))
+        if (capped) {
+          const hint = document.createElement('div')
+          hint.className = `${ARCHIVE_CLASS}-hint`
+          hint.textContent = t('archiveMore', { n: String(ARCHIVE_LIMIT) })
+          panel.appendChild(hint)
+        }
+        if (archivePanel !== null) archivePanel.remove()
+        archivePanel = panel
+        area.setAttribute(ARCHIVE_ATTR, '')
+        area.appendChild(panel)
+      }
+
+      /**
+       * One archive row: title, Workspace, time and the unarchive action.
+       * @param entry - display row from {@link archiveEntries}.
+       * @param service - the Workspace UI service, when the host provides it.
+       * @returns the row element.
+       */
+      function archiveRow(entry, service) {
+        const rowElement = document.createElement('div')
+        rowElement.className = `${ARCHIVE_CLASS}-row`
+        rowElement.setAttribute('role', 'listitem')
+        rowElement.dataset.sessionId = entry.id
+        const main = document.createElement('div')
+        main.className = `${ARCHIVE_CLASS}-main`
+        const title = document.createElement('div')
+        title.className = `${ARCHIVE_CLASS}-title`
+        title.textContent = entry.title
+        title.title = entry.title
+        const meta = document.createElement('div')
+        meta.className = `${ARCHIVE_CLASS}-meta`
+        meta.textContent = entry.workspace === '' ? entry.time : `${entry.workspace} · ${entry.time}`
+        main.append(title, meta)
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = `${ARCHIVE_CLASS}-btn`
+        button.textContent = t('unarchive')
+        button.disabled = service === undefined
+        button.addEventListener('click', () => {
+          if (service === undefined) return
+          button.disabled = true
+          service.unarchiveSession(entry.id).then(
+            () => { schedule() },
+            () => {
+              button.disabled = false
+              button.textContent = t('unarchiveFailed')
+            },
+          )
+        })
+        rowElement.append(main, button)
+        return rowElement
       }
 
       /** Apply the current snapshots and view to the rendered rows. */
@@ -513,43 +709,48 @@ window.__ModuleLoader__.load({
           diagnostics.state = snapshot !== undefined && snapshot !== null && snapshot.phase === 'ready'
             ? 'ready'
             : 'waiting'
-          if (!enabled || snapshot === undefined || snapshot === null) {
+          if (!enabled || snapshot === undefined || snapshot === null || diagnostics.state !== 'ready') {
             clearMarks()
             clearEmptyHint()
+            removeArchivePanel()
             removeControl()
-            diagnostics.hidden = []
-            emit()
-            return
-          }
-          if (diagnostics.state !== 'ready') {
-            clearMarks()
-            clearEmptyHint()
             diagnostics.hidden = []
             emit()
             return
           }
 
           const mode = readMode()
-          const includeArchived = readFlag(INCLUDE_ARCHIVED_KEY, false)
           const includeBlank = readFlag(INCLUDE_BLANK_KEY, false)
           diagnostics.mode = mode
-          diagnostics.includeArchived = includeArchived
           diagnostics.includeBlank = includeBlank
-
           const archived = new Set((snapshot.archivedSessionIds || []).map(String))
           const summaries = sessionSummaries(sessions)
+
+          if (mode === 'archived') {
+            clearMarks()
+            clearEmptyHint()
+            renderArchivePanel(snapshot, summaries)
+            diagnostics.hidden = []
+            ensureControl(mode)
+            emit()
+            return
+          }
+          removeArchivePanel()
+
           const hiddenWorkspaces = new Set()
           let visibleSessions = 0
-          for (const item of snapshot.items) {
-            const ids = item !== undefined && item !== null && item.sessionIds !== undefined
-              ? item.sessionIds
-              : []
-            let visible = 0
-            for (const id of ids) {
-              if (stateVisible(stateOf(id, archived, summaries, includeArchived, includeBlank), mode)) visible += 1
+          if (mode === 'active') {
+            for (const item of snapshot.items) {
+              const ids = item !== undefined && item !== null && item.sessionIds !== undefined
+                ? item.sessionIds
+                : []
+              let visible = 0
+              for (const id of ids) {
+                if (stateVisible(stateOf(id, archived, summaries, includeBlank))) visible += 1
+              }
+              visibleSessions += visible
+              if (visible === 0) hiddenWorkspaces.add(String(item.workspaceId))
             }
-            visibleSessions += visible
-            if (mode !== 'workspaces' && visible === 0) hiddenWorkspaces.add(String(item.workspaceId))
           }
 
           for (const workspaceRow of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) {
@@ -560,7 +761,7 @@ window.__ModuleLoader__.load({
           }
           for (const sessionRow of document.querySelectorAll(`[data-row-key^="${SESSION_PREFIX}"]`)) {
             const id = (sessionRow.getAttribute('data-row-key') || '').slice(SESSION_PREFIX.length)
-            const keep = mode !== 'workspaces' && stateVisible(stateOf(id, archived, summaries, includeArchived, includeBlank), mode)
+            const keep = mode === 'active' && stateVisible(stateOf(id, archived, summaries, includeBlank))
             if (keep) sessionRow.removeAttribute(ATTR)
             else sessionRow.setAttribute(ATTR, '')
           }
@@ -584,11 +785,11 @@ window.__ModuleLoader__.load({
       function updateEmptyHint(mode, visibleSessions, workspaceCount) {
         const area = document.querySelector('[class*="listArea"]')
         if (area === null) return
-        if (mode === 'workspaces' || visibleSessions > 0 || workspaceCount === 0) {
+        if (mode !== 'active' || visibleSessions > 0 || workspaceCount === 0) {
           area.removeAttribute(EMPTY_ATTR)
           return
         }
-        area.setAttribute(EMPTY_ATTR, t(mode === 'running' ? 'emptyRunning' : 'emptyDone'))
+        area.setAttribute(EMPTY_ATTR, t('emptyActive'))
       }
 
       /** Coalesce snapshot and DOM bursts into one frame. */
@@ -615,7 +816,6 @@ window.__ModuleLoader__.load({
         },
         getFlags: () => ({
           enabled: readFlag(STORAGE_KEY, true),
-          includeArchived: readFlag(INCLUDE_ARCHIVED_KEY, false),
           includeBlank: readFlag(INCLUDE_BLANK_KEY, false),
           mode: readMode(),
         }),
@@ -646,8 +846,7 @@ window.__ModuleLoader__.load({
           subtree: true,
         })
         const onStorage = (event) => {
-          if (event.key === STORAGE_KEY || event.key === INCLUDE_ARCHIVED_KEY
-            || event.key === INCLUDE_BLANK_KEY || event.key === MODE_KEY) schedule()
+          if (event.key === STORAGE_KEY || event.key === INCLUDE_BLANK_KEY || event.key === MODE_KEY) schedule()
         }
         window.addEventListener('storage', onStorage)
         schedule()
@@ -659,6 +858,7 @@ window.__ModuleLoader__.load({
           if (frame !== 0) cancelAnimationFrame(frame)
           removeControl()
           control = null
+          removeArchivePanel()
           style.remove()
           clearMarks()
           clearEmptyHint()
@@ -674,6 +874,18 @@ window.__ModuleLoader__.load({
         locale: NS,
         inject: injected,
       }, SettingsTab))
+    }
+
+    /**
+     * Display title of one Workspace item.
+     * @param item - Workspace snapshot item.
+     * @returns the stored title, the path's last segment, or empty.
+     */
+    function workspaceTitle(item) {
+      if (typeof item.title === 'string' && item.title.trim() !== '') return item.title.trim()
+      const path = typeof item.path === 'string' ? item.path : ''
+      const segments = path.split(/[\\/]/u).filter(Boolean)
+      return segments.length === 0 ? '' : segments[segments.length - 1]
     }
 
     /**

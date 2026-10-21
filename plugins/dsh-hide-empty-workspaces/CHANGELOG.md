@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- The middle view is the **archive**, not "finished running Sessions": `已归档` now lists archived Sessions (newest first, capped) with their Workspace and an inline `取消归档` action, because the native browser never renders archived rows and the plugin must not mutate the native archived filter.
+- Views are now `进行中` (active: native list minus archived, empty Workspaces hidden), `已归档` (the archive list) and `工作空间` (every Workspace, Session rows folded).
+- `includeArchived` is retired: the archive has its own view. The stored 0.3.0 view values (`running` / `done`) fold into `active`.
+- 0.3.0's running/no-running split is gone; the archive list is the history surface instead.
+
 ## 0.3.0
 
 - Add a segmented sidebar view switch above the native Workspace browser: `进行中` (running Sessions), `已完成` (finished Sessions) and `工作空间` (every Workspace, including those with no visible Sessions).
