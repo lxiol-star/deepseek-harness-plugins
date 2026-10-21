@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6
+
+- The archive lists every archived Session; the 200-row cap and its "only the latest 200" hint are gone. Row count is now whatever the Workspace registry archives.
+
 ## 0.3.5
 
 - Archive groups start collapsed and expand on a click on the Workspace header (chevron + count; the expanded set survives panel rebuilds).

@@ -8,7 +8,7 @@ Give the native DeepSeek Harness sidebar a small view switch — **进行中 / �
 
 - **侧栏视图切换**：原生侧栏会话区顶部多一条分段：`进行中`、`已归档`、`工作空间`，点一下直接切换，不用进设置。
 - **进行中（active）**：原生会话列表去掉已归档会话；没有可见会话的工作区自动隐藏。可见会话 = 未归档、非空白、且**不是子代理会话**（子代理行只出现在父会话的目录里）。新建的空白会话默认有 **10 分钟宽限期**（可配，`0` 表示立即算空），刚建/自动注册的工作区不会立刻消失。
-- **已归档（archived）**：原生浏览器本身不渲染归档行（它自己的归档筛选默认隐藏，插件也不去改那份持久化设置），所以这一档直接渲染归档列表，**按工作区分类**：每个工作区一个分组标题（带数量），**默认折叠**，点标题展开查看该工作区的归档会话；组内按更新时间倒序，工作区按最近归档时间倒序排列，不属于任何工作区的会话归入「未分组」。展开后可点会话行「取消归档并打开」（取消归档后直接进入会话），或点行尾「取消归档」只恢复到进行中列表。
+- **已归档（archived）**：原生浏览器本身不渲染归档行（它自己的归档筛选默认隐藏，插件也不去改那份持久化设置），所以这一档直接渲染归档列表，**按工作区分类**：每个工作区一个分组标题（带数量），**默认折叠**，点标题展开查看该工作区的归档会话（全部展示，不截断）；组内按更新时间倒序，工作区按最近归档时间倒序排列，不属于任何工作区的会话归入「未分组」。展开后可点会话行「取消归档并打开」（取消归档后直接进入会话），或点行尾「取消归档」只恢复到进行中列表。
 - **工作空间（workspaces）**：列出**全部工作区**（包括平时被隐藏、没有可见会话的历史/空工作区），会话行收起；在行上 hover 出现原生的「+ 新会话」，直接在那个目录开新会话，历史工作区不用再翻会话列表去找。
 - **只读判断**：按 Workspace Controller 与 Session 快照计算，不依赖 DOM 里渲染了几行——折叠的工作区不会因为“看不见会话行”被误判为空。
 - 不删除工作区注册、不移动或归档会话、不改 profile；卸载后立即恢复原生侧栏。
@@ -20,18 +20,18 @@ Give the native DeepSeek Harness sidebar a small view switch — **进行中 / �
 在 DSH 插件管理器中填入下面的 GitHub 地址（需支持 `path:` 子目录的版本）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.5&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.6&path:/plugins/dsh-hide-empty-workspaces
 ```
 
 或者使用 CLI：
 
 ```sh
-dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.5&path:/plugins/dsh-hide-empty-workspaces"
+dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.6&path:/plugins/dsh-hide-empty-workspaces"
 ```
 
 Web profile 把 `desktop` 换成 `web`。安装后**完全退出并重新打开 DSH**（客户端 bundle 在启动时加载）；只升级客户端时刷新页面即可。
 
-也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.3.5.tgz`，在设置 → 插件 → 添加插件里选择本地包。
+也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.3.6.tgz`，在设置 → 插件 → 添加插件里选择本地包。
 
 ## 侧栏视图
 
@@ -80,7 +80,7 @@ localStorage.setItem('dsh.hideEmptyWorkspaces.mode', 'archived') // active / arc
 
 ```js
 window.__dshHideEmptyWorkspaces
-// { version: '0.3.5', state: 'ready', mode: 'active', hidden: ['ws-...'], includeBlank: false, error: null }
+// { version: '0.3.6', state: 'ready', mode: 'active', hidden: ['ws-...'], includeBlank: false, error: null }
 ```
 
 `state: 'waiting'` 表示工作区快照还没就绪；`state: 'error'` 时 `error` 给出原因。`hidden` 是当前视图里被判空并隐藏的 Workspace ID 列表。

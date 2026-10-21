@@ -68,15 +68,13 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.5'
+    const VERSION = '0.3.6'
     /** Sidebar views, in segment order. */
     const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
     const DEFAULT_MODE = 'active'
     /** Values written by 0.3.0, folded into the active view. */
     const LEGACY_MODES = { running: 'active', done: 'active' }
-    /** Archive list cap: the archive is a restore surface, not a history browser. */
-    const ARCHIVE_LIMIT = 200
 
     /** Chinese copy. */
     const zh = {
@@ -114,7 +112,6 @@ window.__ModuleLoader__.load({
       emptyActive: '暂无会话\n切到「已归档」看归档会话，或「工作空间」开新会话',
       emptyArchived: '暂无已归档会话',
       archiveCount: '已归档会话 · {n}',
-      archiveMore: '只显示最近的 {n} 个已归档会话',
       unarchive: '取消归档',
       openArchived: '取消归档并打开会话',
       collapseGroup: '折叠工作区',
@@ -165,7 +162,6 @@ window.__ModuleLoader__.load({
       emptyActive: 'No session here.\nSwitch to Archived for the archive, or Workspaces to start a new session.',
       emptyArchived: 'No archived sessions',
       archiveCount: 'Archived sessions · {n}',
-      archiveMore: 'Only the latest {n} archived sessions are listed',
       unarchive: 'Unarchive',
       openArchived: 'Unarchive and open',
       collapseGroup: 'Collapse workspace',
@@ -619,7 +615,7 @@ window.__ModuleLoader__.load({
        * Archived Sessions rendered by the archive view, newest first.
        * @param snapshot - Workspace snapshot with the archive set.
        * @param summaries - Session summaries by id.
-       * @returns display rows plus whether the list was capped.
+       * @returns display groups, newest Workspace first.
        */
       function archiveEntries(snapshot, summaries) {
         const workspaceOf = (sessionId) => {
@@ -658,24 +654,13 @@ window.__ModuleLoader__.load({
         // The Workspace holding the most recently archived Session leads.
         ordered.sort((left, right) => (right.rows[0].updatedAt - left.rows[0].updatedAt)
           || left.title.localeCompare(right.title))
-        let remaining = ARCHIVE_LIMIT
-        const shown = []
-        for (const group of ordered) {
-          if (remaining <= 0) break
-          const rows = group.rows.slice(0, remaining)
-          remaining -= rows.length
-          shown.push({ key: group.key, title: group.title, rows })
-        }
-        const total = ordered.reduce((sum, group) => sum + group.rows.length, 0)
-        const capped = total > ARCHIVE_LIMIT
         return {
-          capped,
           // The panel is DOM the plugin owns; recreating it on every mutation
           // would feed the observer forever. This digest gates the rebuild.
-          signature: `${snapshot.archivedSessionIds?.length ?? 0}#${shown.map(group => `${group.key}:${group.title}:${group.rows
+          signature: `${snapshot.archivedSessionIds?.length ?? 0}#${ordered.map(group => `${group.key}:${group.title}:${group.rows
             .map(row => `${row.id}:${row.updatedAt}:${row.title}`)
             .join(',')}`).join('|')}`,
-          groups: shown.map(group => ({
+          groups: ordered.map(group => ({
             key: group.key,
             title: group.title,
             entries: group.rows.map(row => ({
@@ -699,10 +684,9 @@ window.__ModuleLoader__.load({
       /**
        * Render the archive list over the native tree.
        * @param snapshot - Workspace snapshot with the archive set.
-       * @param entries - display rows from {@link archiveEntries}.
-       * @param capped - whether the row list was capped.
+       * @param groups - display groups from {@link archiveEntries}.
        */
-      function renderArchivePanel(snapshot, groups, capped) {
+      function renderArchivePanel(snapshot, groups) {
         const area = document.querySelector('[class*="listArea"]')
         if (area === null) return
         const rowCount = groups.reduce((sum, group) => sum + group.entries.length, 0)
@@ -729,12 +713,6 @@ window.__ModuleLoader__.load({
         }
         for (const group of groups) {
           panel.appendChild(archiveGroup(group, service))
-        }
-        if (capped) {
-          const hint = document.createElement('div')
-          hint.className = `${ARCHIVE_CLASS}-hint`
-          hint.textContent = t('archiveMore', { n: String(ARCHIVE_LIMIT) })
-          panel.appendChild(hint)
         }
         if (archivePanel !== null) archivePanel.remove()
         archivePanel = panel
@@ -899,7 +877,7 @@ window.__ModuleLoader__.load({
             }
             const archive = archiveEntries(snapshot, summaries)
             if (archivePanel === null || archiveSignature !== archive.signature) {
-              renderArchivePanel(snapshot, archive.groups, archive.capped)
+              renderArchivePanel(snapshot, archive.groups)
               archiveSignature = archive.signature
             }
             diagnostics.hidden = []

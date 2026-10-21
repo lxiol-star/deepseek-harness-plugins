@@ -543,6 +543,34 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   railArchive.window.close()
 }
 
+// 17. Every archived Session is listed; the archive has no row cap.
+{
+  const ids = Array.from({ length: 205 }, (_, index) => `a${index}`)
+  const summaries = Object.fromEntries(ids.map((id, index) => [id, {
+    id,
+    blank: false,
+    title: `archived ${index}`,
+    updatedAt: Date.now() - index * 1000,
+  }]))
+  const world = boot({
+    items: [{ workspaceId: 'ws-a', sessionIds: ids, title: 'Workspace A', path: '/tmp/ws-a' }],
+    archivedSessionIds: ids,
+    sessionsById: summaries,
+    sections: [{ ws: 'ws-a', sessions: ids }],
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  world.clickMode('archived')
+  await wait()
+  check('archive lists every archived Session', world.archiveRows().length === 205)
+  check('archive shows no truncation hint', !world.archiveText().includes('archiveMore'))
+  world.groupHeaders()[0].click()
+  await wait()
+  check('expanded archive group reveals all its rows', world.visibleArchiveRows().length === 205)
+  world.dispose()
+  world.window.close()
+}
+
 // 15. Stored 0.3.0 view values fold into the active view.
 {
   const running = boot({ items, mode: 'running' })
