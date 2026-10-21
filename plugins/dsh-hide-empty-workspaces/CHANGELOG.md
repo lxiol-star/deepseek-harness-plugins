@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add a segmented sidebar view switch above the native Workspace browser: `进行中` (running Sessions), `已完成` (finished Sessions) and `工作空间` (every Workspace, including those with no visible Sessions).
+- The `工作空间` view keeps Workspace rows and hides Session rows, so a historical Workspace's native hover actions (New Session / menu) start a new Session there without hunting through the tree.
+- `进行中` / `已完成` filter Session rows and hide Workspaces left without a matching row; the list area shows a view-specific empty hint instead of a blank column.
+- The view choice is persisted (`dsh.hideEmptyWorkspaces.mode`) and exposed in the Settings tab, which also gains a Default view selector.
+- Empty Workspaces stay hidden in the two session views; the `工作空间` view is the way to reach them again. Version 0.2.2's visibility rule (archived unless opted in, blank unless opted in, never subagent) is unchanged.
+
 ## 0.2.2
 
 - A Workspace whose only remaining Sessions are subagent children now counts as empty and is hidden. Subagent Sessions never render as Workspace rows (their rows live in the parent header's catalog), but they were counted as visible, so a Workspace left with only teammate/child Sessions kept showing with zero rows.
