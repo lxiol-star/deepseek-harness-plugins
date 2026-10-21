@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+- Archive groups start collapsed and expand on a click on the Workspace header (chevron + count; the expanded set survives panel rebuilds).
+- A Session row in an expanded group is clickable: it unarchives the Session and opens it, so archived content is one click away. The row's 取消归档 button still restores a Session without opening it.
+- Rows stay inert (and unarchive stays disabled) when the host exposes no Workspace service.
+- Carries 0.3.4's blank-session grace period: a freshly created blank Session keeps its Workspace visible for 10 minutes (configurable, `0` restores immediate hiding), and a blank Session without a usable `updatedAt` stays visible.
+
 ## 0.3.4
 
 - Blank Sessions keep their Workspace visible for a grace period (default 10 minutes), so a freshly scaffolded or auto-registered Workspace is usable before anyone types.

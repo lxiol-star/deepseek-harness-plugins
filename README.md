@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | [dsh-session-board](plugins/dsh-session-board/) | 会话卡片看板、工作区树、DSH 归档同步、搜索筛选、可选 Wiki 归档提炼 | 实验性，已在 macOS Harness Dev 环境验证 |
 | [dsh-think-bounce-pet](plugins/dsh-think-bounce-pet/) | 思考弹球桌宠：常驻球/思考球、拍飞与拖拽投掷、鼠标碰撞、重力与物理参数实时可调 | 上游 0.1.1，修复 macOS 窗口顶栏拖拽；收录社区插件（MIT），已在本地验证 |
-| [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏视图切换（进行中 / 已归档 / 工作空间）：已归档档按工作区分组（默认折叠），展开可查看并取消归档/打开会话，工作空间档可挑历史工作区开新会话；没有可见会话的工作区在进行中视图隐藏 | 0.3.4，视图选择持久化、设置页可改默认视图与诊断；冒烟通过，dev2 与主应用已实测页签 |
+| [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏视图切换（进行中 / 已归档 / 工作空间）：已归档档按工作区分组（默认折叠），展开可查看并取消归档/打开会话，工作空间档可挑历史工作区开新会话；没有可见会话的工作区在进行中视图隐藏 | 0.3.5，视图选择持久化；空白会话宽限期、设置页可改默认视图与诊断；冒烟通过，dev2 与主应用已实测页签 |
 | [dsh-workspace-autoregister](plugins/dsh-workspace-autoregister/) | 会话中新建的工作区目录自动加入工作区列表，并创建首个空会话，无需在侧栏手动添加 | 0.1.0，Host-only，Node 测试 + desktop profile Host 侧端到端收录验证通过；窗口渲染未做 DOM 核对 |
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。
@@ -29,7 +29,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.3.6&path:/plugin
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.4&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.5&path:/plugins/dsh-hide-empty-workspaces
 # 工作区自动收录
 github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.1&path:/plugins/dsh-workspace-autoregister
 ```
