@@ -6,7 +6,7 @@
 
 ## 仓库与分支
 
-- 仓库：`/Users/lxiol/.dsh-dev/bot/workspace/deepseek-harness-plugins`
+- 仓库：本地 checkout 的 `deepseek-harness-plugins`（路径因机器而异，不写入仓库）
 - 插件：`plugins/dsh-session-board`（公开仓库，Apache-2.0）
 - 版本：升到 `0.3.0`，更新 `CHANGELOG.md` / `README.md`
 - **不要** `git tag`、不要 `gh release`、不要 push；实现与验证完成即可，由 Lead 发布。
