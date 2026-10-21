@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.2'
+    const VERSION = '0.3.3'
     /** Sidebar views, in segment order. */
     const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
@@ -113,6 +113,7 @@ window.__ModuleLoader__.load({
       unarchiveFailed: '取消归档失败',
       noHostActions: '当前宿主未提供工作区操作服务，只能查看。',
       sessionUntitled: '未命名',
+      ungrouped: '未分组',
       timeNow: '刚刚',
       timeMinutes: '{n} 分钟前',
       timeHours: '{n} 小时前',
@@ -158,6 +159,7 @@ window.__ModuleLoader__.load({
       unarchiveFailed: 'Unarchive failed',
       noHostActions: 'This host exposes no Workspace actions; the list is read-only.',
       sessionUntitled: 'Untitled',
+      ungrouped: 'Ungrouped',
       timeNow: 'now',
       timeMinutes: '{n} min ago',
       timeHours: '{n} h ago',
@@ -468,6 +470,9 @@ window.__ModuleLoader__.load({
         `[class*="listArea"][${ARCHIVE_ATTR}] > :not(.${ARCHIVE_CLASS}){display:none !important}`,
         `.${ARCHIVE_CLASS}{display:flex;flex-direction:column;gap:2px;padding:6px 8px 12px;flex:1 1 auto;min-height:0;overflow:auto}`,
         `.${ARCHIVE_CLASS}-head{padding:4px 6px;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
+        `.${ARCHIVE_CLASS}-group{display:flex;align-items:baseline;gap:6px;min-width:0;padding:10px 6px 3px}`,
+        `.${ARCHIVE_CLASS}-group-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary, inherit);font-size:11px;line-height:16px;font-weight:600}`,
+        `.${ARCHIVE_CLASS}-group-count{flex:none;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
         `.${ARCHIVE_CLASS}-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px}`,
         `.${ARCHIVE_CLASS}-row:hover{background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.10))}`,
         `.${ARCHIVE_CLASS}-main{flex:1 1 auto;min-width:0}`,
@@ -579,37 +584,61 @@ window.__ModuleLoader__.load({
           }
           return undefined
         }
-        const rows = []
+        const groups = new Map()
         for (const rawId of snapshot.archivedSessionIds || []) {
           const id = String(rawId)
           const summary = summaries[id]
           if (summary === undefined || summary === null) continue
           if (summary.origin === 'subagent') continue
           const workspace = workspaceOf(id)
-          rows.push({
+          const key = workspace === undefined ? '' : String(workspace.workspaceId)
+          let group = groups.get(key)
+          if (group === undefined) {
+            group = {
+              key,
+              title: workspace === undefined ? t('ungrouped') : workspaceTitle(workspace),
+              rows: [],
+            }
+            groups.set(key, group)
+          }
+          group.rows.push({
             id,
             title: typeof summary.title === 'string' && summary.title.trim() !== ''
               ? summary.title.trim()
               : t('sessionUntitled'),
-            workspace: workspace === undefined ? '' : workspaceTitle(workspace),
             updatedAt: typeof summary.updatedAt === 'number' ? summary.updatedAt : 0,
           })
         }
-        rows.sort((left, right) => right.updatedAt - left.updatedAt)
-        const capped = rows.length > ARCHIVE_LIMIT
-        const limited = capped ? rows.slice(0, ARCHIVE_LIMIT) : rows
+        const ordered = [...groups.values()]
+        for (const group of ordered) group.rows.sort((left, right) => right.updatedAt - left.updatedAt)
+        // The Workspace holding the most recently archived Session leads.
+        ordered.sort((left, right) => (right.rows[0].updatedAt - left.rows[0].updatedAt)
+          || left.title.localeCompare(right.title))
+        let remaining = ARCHIVE_LIMIT
+        const shown = []
+        for (const group of ordered) {
+          if (remaining <= 0) break
+          const rows = group.rows.slice(0, remaining)
+          remaining -= rows.length
+          shown.push({ key: group.key, title: group.title, rows })
+        }
+        const total = ordered.reduce((sum, group) => sum + group.rows.length, 0)
+        const capped = total > ARCHIVE_LIMIT
         return {
           capped,
           // The panel is DOM the plugin owns; recreating it on every mutation
           // would feed the observer forever. This digest gates the rebuild.
-          signature: `${snapshot.archivedSessionIds?.length ?? 0}#${limited
-            .map(entry => `${entry.id}:${entry.updatedAt}:${entry.title}:${entry.workspace}`)
-            .join('|')}`,
-          entries: limited.map(entry => ({
-            id: entry.id,
-            title: entry.title,
-            workspace: entry.workspace,
-            time: timeLabel(t, entry.updatedAt),
+          signature: `${snapshot.archivedSessionIds?.length ?? 0}#${shown.map(group => `${group.key}:${group.title}:${group.rows
+            .map(row => `${row.id}:${row.updatedAt}:${row.title}`)
+            .join(',')}`).join('|')}`,
+          groups: shown.map(group => ({
+            key: group.key,
+            title: group.title,
+            entries: group.rows.map(row => ({
+              id: row.id,
+              title: row.title,
+              time: timeLabel(t, row.updatedAt),
+            })),
           })),
         }
       }
@@ -629,31 +658,46 @@ window.__ModuleLoader__.load({
        * @param entries - display rows from {@link archiveEntries}.
        * @param capped - whether the row list was capped.
        */
-      function renderArchivePanel(snapshot, entries, capped) {
+      function renderArchivePanel(snapshot, groups, capped) {
         const area = document.querySelector('[class*="listArea"]')
         if (area === null) return
+        const rowCount = groups.reduce((sum, group) => sum + group.entries.length, 0)
         const panel = document.createElement('div')
         panel.className = ARCHIVE_CLASS
         panel.setAttribute('role', 'list')
         panel.setAttribute('aria-label', t('modeArchived'))
         const head = document.createElement('div')
         head.className = `${ARCHIVE_CLASS}-head`
-        head.textContent = t('archiveCount', { n: String(snapshot.archivedSessionIds?.length ?? entries.length) })
+        head.textContent = t('archiveCount', { n: String(snapshot.archivedSessionIds?.length ?? rowCount) })
         panel.appendChild(head)
-        if (entries.length === 0) {
+        if (rowCount === 0) {
           const empty = document.createElement('div')
           empty.className = `${ARCHIVE_CLASS}-empty`
           empty.textContent = t('emptyArchived')
           panel.appendChild(empty)
         }
         const service = uiWorkspace()
-        if (service === undefined && entries.length > 0) {
+        if (service === undefined && rowCount > 0) {
           const hint = document.createElement('div')
           hint.className = `${ARCHIVE_CLASS}-hint`
           hint.textContent = t('noHostActions')
           panel.appendChild(hint)
         }
-        for (const entry of entries) panel.appendChild(archiveRow(entry, service))
+        for (const group of groups) {
+          const groupElement = document.createElement('div')
+          groupElement.className = `${ARCHIVE_CLASS}-group`
+          groupElement.setAttribute('role', 'group')
+          const groupTitle = document.createElement('span')
+          groupTitle.className = `${ARCHIVE_CLASS}-group-title`
+          groupTitle.textContent = group.title
+          groupTitle.title = group.title
+          const groupCount = document.createElement('span')
+          groupCount.className = `${ARCHIVE_CLASS}-group-count`
+          groupCount.textContent = String(group.entries.length)
+          groupElement.append(groupTitle, groupCount)
+          panel.appendChild(groupElement)
+          for (const entry of group.entries) panel.appendChild(archiveRow(entry, service))
+        }
         if (capped) {
           const hint = document.createElement('div')
           hint.className = `${ARCHIVE_CLASS}-hint`
@@ -685,7 +729,7 @@ window.__ModuleLoader__.load({
         title.title = entry.title
         const meta = document.createElement('div')
         meta.className = `${ARCHIVE_CLASS}-meta`
-        meta.textContent = entry.workspace === '' ? entry.time : `${entry.workspace} · ${entry.time}`
+        meta.textContent = entry.time
         main.append(title, meta)
         const button = document.createElement('button')
         button.type = 'button'
@@ -746,7 +790,7 @@ window.__ModuleLoader__.load({
             }
             const archive = archiveEntries(snapshot, summaries)
             if (archivePanel === null || archiveSignature !== archive.signature) {
-              renderArchivePanel(snapshot, archive.entries, archive.capped)
+              renderArchivePanel(snapshot, archive.groups, archive.capped)
               archiveSignature = archive.signature
             }
             diagnostics.hidden = []

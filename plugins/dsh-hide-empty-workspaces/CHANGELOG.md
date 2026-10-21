@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- The archived view groups archived Sessions by Workspace: one group header per Workspace (with its archived count), Sessions inside a group newest first, Workspaces lead by their most recently archived Session, and archived Sessions outside every Workspace fall under 未分组.
+- The per-row Workspace suffix moved into the group header, so rows carry title and time.
+
 ## 0.3.2
 
 - The archive panel is rebuilt only when the archived set, titles or Workspace names change. Rebuilding it on every DOM mutation fed the plugin's own observer and kept a repaint loop alive in the archived view.
