@@ -138,7 +138,7 @@ function workspaceChoices(groups) {
 // src/client/BoardFilterBar.tsx
 var import_jsx_runtime = require("react/jsx-runtime");
 function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, onGrouping }) {
-  let workspaces = (0, import_react.useMemo)(() => workspaceChoices(groups), [groups]), total = groups.reduce((sum, group) => sum + group.entries.length, 0), active = filters.query !== "" || filters.status !== "all" || filters.workspace !== "" || (filters.archive ?? "active") !== "active";
+  let workspaces = (0, import_react.useMemo)(() => workspaceChoices(groups), [groups]), total = groups.reduce((sum, group) => sum + group.entries.length, 0), active = filters.query !== "" || filters.status !== "all" || filters.workspace !== "" || (filters.archive ?? "active") !== "active", archivedOnly = (filters.archive ?? "active") === "archived";
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filters", role: "search", "aria-label": t("filter.label"), children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { type: "search", className: "sb-filter-search", "aria-label": t("filter.search"), placeholder: t("filter.search"), value: filters.query, onChange: (event) => onChange({ ...filters, query: event.target.value }) }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filter-row", children: [
@@ -160,6 +160,17 @@ function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, onGroup
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "archived", children: t("filter.archiveOnly") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "all", children: t("filter.archiveAll") })
       ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "sb-btn",
+          "aria-pressed": archivedOnly,
+          title: t("filter.onlyArchived"),
+          onClick: () => onChange({ ...filters, archive: archivedOnly ? "active" : "archived" }),
+          children: t("filter.onlyArchived")
+        }
+      ),
       onGrouping ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { "aria-label": t("filter.grouping"), value: grouping ?? "status", onChange: (event) => onGrouping(event.target.value), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "status", children: t("filter.byStatus") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "workspace", children: t("filter.byWorkspace") }),
@@ -664,7 +675,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.6",
+      "data-session-board-version": "0.4.1",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -688,7 +699,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.3.6",
+      "data-session-board-version": "0.4.1",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1184,7 +1195,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.3.6",
+        "data-session-board-version": "0.4.1",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2664,6 +2675,7 @@ var NS = "session-board", en = {
   "filter.archive": "Archive visibility",
   "filter.archiveActive": "Hide archived",
   "filter.archiveOnly": "View archived",
+  "filter.onlyArchived": "Archived only",
   "filter.archiveAll": "All sessions",
   "filter.grouping": "Group sessions",
   "filter.byStatus": "By status",
@@ -2860,6 +2872,7 @@ var NS = "session-board", en = {
   "filter.archive": "\u5F52\u6863\u663E\u793A",
   "filter.archiveActive": "\u9690\u85CF\u5DF2\u5F52\u6863",
   "filter.archiveOnly": "\u67E5\u770B\u5DF2\u5F52\u6863",
+  "filter.onlyArchived": "\u4EC5\u5F52\u6863",
   "filter.archiveAll": "\u5168\u90E8\u4F1A\u8BDD",
   "filter.grouping": "\u4F1A\u8BDD\u5206\u7EC4\u65B9\u5F0F",
   "filter.byStatus": "\u6309\u72B6\u6001",

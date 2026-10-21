@@ -138,6 +138,23 @@ describe('actual React components', () => {
     expect(change).toHaveBeenLastCalledWith({ query: '', status: 'all', workspace: '', archive: 'active' })
     expect(view.container.querySelector('[role=status]')?.textContent).toBe('1 of 1 sessions')
   })
+  it('archived-only button toggles the archive filter', async () => {
+    const change = vi.fn()
+    const filters = { query: '', status: 'all' as const, workspace: '' }
+    const props = { groups: [{ id: 'attention', entries: [entry] }], t: components.t, filters, shown: 1, onChange: change }
+    const view = mount(components.BoardFilterBar, props); await view.render(props)
+    const button = [...view.container.querySelectorAll('button')].find(candidate => candidate.getAttribute('aria-pressed') !== null)!
+    expect(button.textContent).toBe('Archived only')
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    await React.act(async () => { button.click() })
+    expect(change).toHaveBeenLastCalledWith({ ...filters, archive: 'archived' })
+    const toggled = { ...props, filters: { ...filters, archive: 'archived' as const } }
+    await view.render(toggled)
+    const pressed = [...view.container.querySelectorAll('button')].find(candidate => candidate.getAttribute('aria-pressed') !== null)!
+    expect(pressed.getAttribute('aria-pressed')).toBe('true')
+    await React.act(async () => { pressed.click() })
+    expect(change).toHaveBeenLastCalledWith({ ...filters, archive: 'active' })
+  })
   it('keeps hidden selection and selects only visible results', async () => {
     const controller = new components.BatchController({ preview: vi.fn(), commit: vi.fn() })
     controller.toggle('session-one')

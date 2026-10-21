@@ -10,6 +10,7 @@ export function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, 
   const workspaces = useMemo(() => workspaceChoices(groups), [groups])
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
   const active = filters.query !== '' || filters.status !== 'all' || filters.workspace !== '' || (filters.archive ?? 'active') !== 'active'
+  const archivedOnly = (filters.archive ?? 'active') === 'archived'
   return <div className="sb-filters" role="search" aria-label={t('filter.label')}>
     <input type="search" className="sb-filter-search" aria-label={t('filter.search')} placeholder={t('filter.search')} value={filters.query} onChange={event => onChange({ ...filters, query: event.target.value })} />
     <div className="sb-filter-row">
@@ -27,6 +28,13 @@ export function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, 
       <select aria-label={t('filter.archive')} value={filters.archive ?? 'active'} onChange={event => onChange({ ...filters, archive: event.target.value as ArchiveFilter })}>
         <option value="active">{t('filter.archiveActive')}</option><option value="archived">{t('filter.archiveOnly')}</option><option value="all">{t('filter.archiveAll')}</option>
       </select>
+      <button
+        type="button"
+        className="sb-btn"
+        aria-pressed={archivedOnly}
+        title={t('filter.onlyArchived')}
+        onClick={() => onChange({ ...filters, archive: archivedOnly ? 'active' : 'archived' })}
+      >{t('filter.onlyArchived')}</button>
       {onGrouping ? <select aria-label={t('filter.grouping')} value={grouping ?? 'status'} onChange={event => onGrouping(event.target.value as GroupingMode)}>
         <option value="status">{t('filter.byStatus')}</option><option value="workspace">{t('filter.byWorkspace')}</option><option value="tree">{t('filter.byTree')}</option>
       </select> : null}

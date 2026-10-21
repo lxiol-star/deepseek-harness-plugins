@@ -27,6 +27,7 @@ export declare const en: {
     readonly 'filter.archive': "Archive visibility";
     readonly 'filter.archiveActive': "Hide archived";
     readonly 'filter.archiveOnly': "View archived";
+    readonly 'filter.onlyArchived': "Archived only";
     readonly 'filter.archiveAll': "All sessions";
     readonly 'filter.grouping': "Group sessions";
     readonly 'filter.byStatus': "By status";
