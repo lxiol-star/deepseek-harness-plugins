@@ -57,6 +57,10 @@ window.__ModuleLoader__.load({
     const STORAGE_KEY = 'dsh.hideEmptyWorkspaces'
     /** Setting `1` also counts blank sessions (created, never chatted) as visible. */
     const INCLUDE_BLANK_KEY = 'dsh.hideEmptyWorkspaces.includeBlank'
+    /** Minutes a fresh blank session keeps its Workspace visible before counting as empty. */
+    const BLANK_GRACE_KEY = 'dsh.hideEmptyWorkspaces.blankGraceMinutes'
+    /** Default grace period for a newly created blank session. */
+    const DEFAULT_BLANK_GRACE_MINUTES = 10
     /** Persisted sidebar view: `active`, `archived` or `workspaces`. */
     const MODE_KEY = 'dsh.hideEmptyWorkspaces.mode'
     /** Host route that reports loaded and installed versions. */
@@ -64,7 +68,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.3'
+    const VERSION = '0.3.4'
     /** Sidebar views, in segment order. */
     const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
@@ -93,6 +97,8 @@ window.__ModuleLoader__.load({
       flags: '开关',
       enabled: '启用侧栏筛选',
       includeBlank: '空白会话也算作有会话',
+      blankGrace: '空白会话宽限期（分钟）',
+      blankGraceHint: '新建后多久内仍算作有会话；0 表示立即算空。',
       actions: '操作',
       reapply: '重新应用',
       reload: '刷新页面',
@@ -139,6 +145,8 @@ window.__ModuleLoader__.load({
       flags: 'Options',
       enabled: 'Enable the sidebar views',
       includeBlank: 'Count blank sessions as visible',
+      blankGrace: 'Blank session grace (minutes)',
+      blankGraceHint: 'How long a new blank session keeps its Workspace visible; 0 means immediately empty.',
       actions: 'Actions',
       reapply: 'Re-apply',
       reload: 'Reload page',
@@ -180,6 +188,7 @@ window.__ModuleLoader__.load({
       check: { display: 'flex', gap: '8px', alignItems: 'center' },
       buttons: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
       button: { border: '1px solid var(--dsw-alias-border-default, rgba(128,128,128,.4))', background: 'transparent', color: 'inherit', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '13px' },
+      number: { width: '88px', color: 'inherit', background: 'transparent', border: '1px solid var(--dsw-alias-border-default, rgba(128,128,128,.4))', borderRadius: '8px', padding: '4px 8px' },
       select: { border: '1px solid var(--dsw-alias-border-default, rgba(128,128,128,.4))', background: 'transparent', color: 'inherit', borderRadius: '8px', padding: '4px 8px', fontSize: '13px' },
       pre: { margin: 0, padding: '10px', borderRadius: '8px', background: 'rgba(128,128,128,.08)', overflowX: 'auto', fontSize: '12px' },
     }
@@ -367,6 +376,17 @@ window.__ModuleLoader__.load({
             }),
             t('includeBlank')),
           h('label', { style: styles.check },
+            h('span', null, t('blankGrace')),
+            h('input', {
+              type: 'number',
+              min: 0,
+              step: 1,
+              value: flags.blankGraceMinutes,
+              style: styles.number,
+              onChange: (event) => { props.setBlankGrace(Number(event.target.value)) },
+            })),
+          h('div', { style: styles.ok }, t('blankGraceHint')),
+          h('label', { style: styles.check },
             h('span', null, t('defaultView')),
             h('select', {
               style: styles.select,
@@ -454,6 +474,7 @@ window.__ModuleLoader__.load({
         mode: readMode(),
         hidden: [],
         includeBlank: false,
+        blankGraceMinutes: DEFAULT_BLANK_GRACE_MINUTES,
         error: null,
       }
       window.__dshHideEmptyWorkspaces = diagnostics
@@ -551,14 +572,19 @@ window.__ModuleLoader__.load({
        * @param includeBlank - whether blank sessions count as visible.
        * @returns `subagent`, `archived`, `blank`, `visible` or `unknown`.
        */
-      function stateOf(id, archived, summaries, includeBlank) {
+      function stateOf(id, archived, summaries, includeBlank, graceMs, now) {
         const key = String(id)
         const summary = summaries[key]
         if (summary !== undefined && summary !== null && summary.origin === 'subagent') return 'subagent'
         // The archive set is authoritative even before its summary arrives.
         if (archived.has(key)) return 'archived'
         if (summary === undefined || summary === null) return 'unknown'
-        if (summary.blank === true) return includeBlank ? 'visible' : 'blank'
+        if (summary.blank === true) {
+          if (includeBlank) return 'visible'
+          // Unknown age stays visible: missing data must not hide a Workspace.
+          if (typeof summary.updatedAt !== 'number') return 'visible'
+          return now - summary.updatedAt < graceMs ? 'visible' : 'blank'
+        }
         return 'visible'
       }
 
@@ -802,6 +828,8 @@ window.__ModuleLoader__.load({
 
           const hiddenWorkspaces = new Set()
           let visibleSessions = 0
+          const graceMs = readGraceMinutes() * 60_000
+          const now = Date.now()
           if (mode === 'active') {
             for (const item of snapshot.items) {
               const ids = item !== undefined && item !== null && item.sessionIds !== undefined
@@ -809,7 +837,7 @@ window.__ModuleLoader__.load({
                 : []
               let visible = 0
               for (const id of ids) {
-                if (stateVisible(stateOf(id, archived, summaries, includeBlank))) visible += 1
+                if (stateVisible(stateOf(id, archived, summaries, includeBlank, graceMs, now))) visible += 1
               }
               visibleSessions += visible
               if (visible === 0) hiddenWorkspaces.add(String(item.workspaceId))
@@ -824,7 +852,8 @@ window.__ModuleLoader__.load({
           }
           for (const sessionRow of document.querySelectorAll(`[data-row-key^="${SESSION_PREFIX}"]`)) {
             const id = (sessionRow.getAttribute('data-row-key') || '').slice(SESSION_PREFIX.length)
-            const keep = mode === 'active' && stateVisible(stateOf(id, archived, summaries, includeBlank))
+            const keep = mode === 'active'
+              && stateVisible(stateOf(id, archived, summaries, includeBlank, graceMs, now))
             if (keep) sessionRow.removeAttribute(ATTR)
             else sessionRow.setAttribute(ATTR, '')
           }
@@ -960,6 +989,21 @@ window.__ModuleLoader__.load({
       const list = sessions.list.getSnapshot()
       if (list === undefined || list === null || list.byId === undefined) return {}
       return list.byId
+    }
+
+    /**
+     * Read the blank-session grace period.
+     * @returns whole minutes, or the default when unset or invalid.
+     */
+    function readGraceMinutes() {
+      try {
+        const raw = localStorage.getItem(BLANK_GRACE_KEY)
+        if (raw === null) return DEFAULT_BLANK_GRACE_MINUTES
+        const value = Number(raw)
+        return Number.isFinite(value) && value >= 0 ? Math.floor(value) : DEFAULT_BLANK_GRACE_MINUTES
+      } catch {
+        return DEFAULT_BLANK_GRACE_MINUTES
+      }
     }
 
     /** Drop every hide mark, used while the snapshots are not ready or on dispose. */

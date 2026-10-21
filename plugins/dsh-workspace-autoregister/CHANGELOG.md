@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- A Workspace's `HANDOFF.md` (configurable) is sent as the first message of the auto-created Session, so the new chat starts with the scaffolding conversation's handoff.
+- New config: `sendHandoff` (default true), `handoffFile` (default `HANDOFF.md`), `handoffMaxBytes` (default 32 KiB).
+- Handoff failures are logged as warnings and never fail the registration.
+
 ## 0.1.0 — 2026-10-20
 
 - 新增 Host-only 插件：监听已结束的工具调用，识别具备工作区特征的目录，并自动注册到 Workspace 列表；侧栏通过宿主现有实时 feed 更新，无需在侧栏手动点 **+**。

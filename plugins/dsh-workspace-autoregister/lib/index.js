@@ -17,8 +17,9 @@
  * @module dsh-workspace-autoregister
  */
 
-import { readdir } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { readFile, readdir } from 'node:fs/promises'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 /** Plugin name registered with the Loader. */
 export const name = 'workspace-autoregister'
@@ -35,6 +36,9 @@ const DEFAULT_CONFIG = {
   createSession: true,
   skipSessionDirectory: true,
   scanAncestors: 3,
+  sendHandoff: true,
+  handoffFile: 'HANDOFF.md',
+  handoffMaxBytes: 32768,
 }
 
 /** Config fields that name workspace signature entries. */
@@ -83,7 +87,7 @@ export const Config = {
         requiredDirectories: [...DEFAULT_CONFIG.requiredDirectories],
       }
       const issues = []
-      const knownFields = new Set(['enabled', 'createSession', 'skipSessionDirectory', 'scanAncestors', ...CONFIG_NAME_FIELDS])
+      const knownFields = new Set(['enabled', 'createSession', 'skipSessionDirectory', 'scanAncestors', 'sendHandoff', 'handoffFile', 'handoffMaxBytes', ...CONFIG_NAME_FIELDS])
       for (const key of Object.keys(input)) {
         if (!knownFields.has(key)) issues.push({ message: `unknown config field '${key}'`, path: [key] })
       }
@@ -106,6 +110,25 @@ export const Config = {
         if (!Number.isInteger(ancestors) || ancestors < 0 || ancestors > 8) {
           issues.push({ message: 'scanAncestors must be an integer between 0 and 8', path: ['scanAncestors'] })
         } else config.scanAncestors = ancestors
+      }
+      if ('sendHandoff' in input) {
+        if (typeof input.sendHandoff !== 'boolean') {
+          issues.push({ message: 'sendHandoff must be a boolean', path: ['sendHandoff'] })
+        } else config.sendHandoff = input.sendHandoff
+      }
+      if ('handoffFile' in input) {
+        const file = input.handoffFile
+        const isPlainName = typeof file === 'string' && file !== '' && file !== '.' && file !== '..'
+          && !file.includes('/') && !file.includes('\\')
+        if (!isPlainName) {
+          issues.push({ message: 'handoffFile must be a plain file name inside the Workspace', path: ['handoffFile'] })
+        } else config.handoffFile = file
+      }
+      if ('handoffMaxBytes' in input) {
+        const limit = input.handoffMaxBytes
+        if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) {
+          issues.push({ message: 'handoffMaxBytes must be an integer between 1 and 1000000', path: ['handoffMaxBytes'] })
+        } else config.handoffMaxBytes = limit
       }
       for (const field of CONFIG_NAME_FIELDS) {
         if (!(field in input)) continue
@@ -240,6 +263,29 @@ function resolveConfig(config) {
 }
 
 /**
+ * Read the Workspace's handoff prompt, the entry a scaffolding Session leaves
+ * for the first Session of a newly registered Workspace.
+ *
+ * @param workspacePath - absolute Workspace directory.
+ * @param settings - resolved plugin config.
+ * @returns the prompt text, or `undefined` when the file is missing or blank.
+ */
+async function readHandoff(workspacePath, settings) {
+  let text
+  try {
+    text = await readFile(join(workspacePath, settings.handoffFile), 'utf8')
+  } catch {
+    return undefined
+  }
+  const trimmed = text.trim()
+  if (trimmed === '') return undefined
+  const body = trimmed.length > settings.handoffMaxBytes
+    ? `${trimmed.slice(0, settings.handoffMaxBytes)}\n\n（交接提示词已截断）`
+    : trimmed
+  return `（工作区交接提示词，来自 ${settings.handoffFile}）\n\n${body}`
+}
+
+/**
  * Install the workspace scanner on the Host context.
  * @param ctx - plugin context carrying `workspaceRegistry` and, when composed, `sessionController`.
  * @param config - validated row config; defaults apply when omitted.
@@ -288,10 +334,26 @@ export function apply(ctx, config) {
     if (disposed || settings.createSession !== true) return
     const sessions = ctx.get('sessionController')
     if (sessions === undefined) return
+    let created
     try {
-      await sessions.create({ workspaceId: workspace.id })
+      created = await sessions.create({ workspaceId: workspace.id })
     } catch (error) {
       warn(`workspace ${workspace.path} was added but its first Session could not be created`, error)
+      return
+    }
+    if (disposed || settings.sendHandoff !== true) return
+    const handoff = await readHandoff(workspace.path, settings)
+    if (handoff === undefined) return
+    try {
+      await sessions.prompt({
+        requestId: randomUUID(),
+        sessionId: created.sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: handoff }],
+      }, AbortSignal.timeout(30_000))
+      ctx.logger.info('dsh-workspace-autoregister: handed off %s into %s', settings.handoffFile, workspace.path)
+    } catch (error) {
+      warn(`workspace ${workspace.path} got its first Session but the handoff prompt was not accepted`, error)
     }
   }
 

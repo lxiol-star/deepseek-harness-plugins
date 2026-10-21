@@ -38,6 +38,9 @@ const EXPECTED_DEFAULT_CONFIG = {
   createSession: true,
   skipSessionDirectory: true,
   scanAncestors: 3,
+  sendHandoff: true,
+  handoffFile: 'HANDOFF.md',
+  handoffMaxBytes: 32768,
 }
 
 function delay(milliseconds) {
@@ -216,12 +219,19 @@ function createHarness(options = {}) {
 
 function createSessionControllerRecorder(options = {}) {
   const calls = []
+  const prompts = []
   return {
     calls,
+    prompts,
     async create(input) {
       calls.push(input)
       if (options.rejectWith !== undefined) throw options.rejectWith
-      return { id: `session-${calls.length}`, workspaceId: input.workspaceId }
+      return { sessionId: `session-${calls.length}`, workspaceId: input.workspaceId }
+    },
+    async prompt(input) {
+      prompts.push(input)
+      if (options.rejectPromptWith !== undefined) throw options.rejectPromptWith
+      return { accepted: true }
     },
   }
 }
@@ -270,6 +280,9 @@ test('Config.validate keeps every provided value', () => {
     createSession: false,
     skipSessionDirectory: false,
     scanAncestors: 0,
+    sendHandoff: false,
+    handoffFile: 'HANDOFF.md',
+    handoffMaxBytes: 1024,
   })
   assert.equal(outcome.issues, undefined)
   assert.deepEqual(outcome.value, {
@@ -280,6 +293,9 @@ test('Config.validate keeps every provided value', () => {
     createSession: false,
     skipSessionDirectory: false,
     scanAncestors: 0,
+    sendHandoff: false,
+    handoffFile: 'HANDOFF.md',
+    handoffMaxBytes: 1024,
   })
 })
 
@@ -472,6 +488,41 @@ test('registers a signature Workspace and creates its first Session once', async
   assert.equal(harness.loggerCalls.info.length, 1)
   assert.match(harness.loggerCalls.info[0][0], /added workspace/)
   assert.deepEqual(harness.loggerCalls.warn, [])
+})
+
+test('a HANDOFF.md becomes the first Session prompt', async t => {
+  const root = await createTempRoot(t)
+  const workspaceDirectory = await createWorkspaceDirectory(root, 'handoff-workspace')
+  await writeFile(join(workspaceDirectory, 'HANDOFF.md'), '# 交接\n\n把 gateway 的计费改动接过来。\n')
+  const sessions = createSessionControllerRecorder()
+  const harness = createHarness({ services: { sessionController: sessions } })
+  apply(harness.ctx, validatedConfig({ scanAncestors: 1 }))
+
+  harness.fire(toolExec({ path: workspaceDirectory }))
+  await waitFor(() => sessions.prompts.length === 1, 'handoff prompt')
+
+  assert.equal(sessions.prompts[0].sessionId, 'session-1')
+  assert.equal(sessions.prompts[0].mode, 'queue')
+  assert.equal(typeof sessions.prompts[0].requestId, 'string')
+  const text = sessions.prompts[0].content[0].text
+  assert.match(text, /HANDOFF\.md/)
+  assert.match(text, /gateway 的计费改动接过来/)
+  assert.equal(harness.loggerCalls.warn.length, 0)
+})
+
+test('sendHandoff:false creates the first Session without a prompt', async t => {
+  const root = await createTempRoot(t)
+  const workspaceDirectory = await createWorkspaceDirectory(root, 'no-handoff')
+  await writeFile(join(workspaceDirectory, 'HANDOFF.md'), 'should not be sent')
+  const sessions = createSessionControllerRecorder()
+  const harness = createHarness({ services: { sessionController: sessions } })
+  apply(harness.ctx, validatedConfig({ scanAncestors: 1, sendHandoff: false }))
+
+  harness.fire(toolExec({ path: workspaceDirectory }))
+  await waitFor(() => sessions.calls.length === 1, 'first Session creation')
+  await flushEventLoop()
+
+  assert.deepEqual(sessions.prompts, [])
 })
 
 test('createSession:false registers the Workspace without a first Session', async t => {

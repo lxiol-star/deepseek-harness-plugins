@@ -262,7 +262,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
     ],
     sessionsById: {
       s1: { id: 's1', blank: false },
-      'blank-1': { id: 'blank-1', blank: true },
+      'blank-1': { id: 'blank-1', blank: true, updatedAt: Date.now() - 20 * 60_000 },
     },
   })
   world.exported.apply(world.ctx)
@@ -504,6 +504,26 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('stored done folds into active', done.activeMode() === 'active')
   done.dispose()
   done.window.close()
+}
+
+// 12. A fresh blank Session keeps its Workspace visible during the grace period.
+{
+  const world = boot({
+    items: [
+      { workspaceId: 'ws-a', sessionIds: ['blank-new'] },
+      { workspaceId: 'ws-b', sessionIds: ['blank-old'] },
+    ],
+    sessionsById: {
+      'blank-new': { id: 'blank-new', blank: true, updatedAt: Date.now() - 60_000 },
+      'blank-old': { id: 'blank-old', blank: true, updatedAt: Date.now() - 30 * 60_000 },
+    },
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('fresh blank Workspace stays visible during grace', !world.hidden('ws-a'))
+  check('stale blank Workspace is hidden after grace', world.hidden('ws-b'))
+  world.dispose()
+  world.window.close()
 }
 
 if (failures > 0) {

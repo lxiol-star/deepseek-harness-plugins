@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Blank Sessions keep their Workspace visible for a grace period (default 10 minutes), so a freshly scaffolded or auto-registered Workspace is usable before anyone types.
+- Add the `dsh.hideEmptyWorkspaces.blankGraceMinutes` setting and a Settings number input; `0` restores the immediate-hide rule.
+- A blank Session without a usable `updatedAt` stays visible instead of being hidden on missing data.
+
 ## 0.3.3
 
 - The archived view groups archived Sessions by Workspace: one group header per Workspace (with its archived count), Sessions inside a group newest first, Workspaces lead by their most recently archived Session, and archived Sessions outside every Workspace fall under 未分组.

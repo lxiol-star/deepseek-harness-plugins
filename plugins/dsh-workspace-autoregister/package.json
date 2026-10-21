@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace-autoregister",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Automatically add a workspace created during a conversation to the DeepSeek Harness workspace list.",
   "type": "module",
   "engines": {

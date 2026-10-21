@@ -29,9 +29,9 @@ github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.3.6&path:/plugin
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.3&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.4&path:/plugins/dsh-hide-empty-workspaces
 # 工作区自动收录
-github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.0&path:/plugins/dsh-workspace-autoregister
+github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.1&path:/plugins/dsh-workspace-autoregister
 ```
 
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。
