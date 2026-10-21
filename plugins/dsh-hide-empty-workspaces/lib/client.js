@@ -116,6 +116,9 @@ window.__ModuleLoader__.load({
       archiveCount: '已归档会话 · {n}',
       archiveMore: '只显示最近的 {n} 个已归档会话',
       unarchive: '取消归档',
+      openArchived: '取消归档并打开会话',
+      collapseGroup: '折叠工作区',
+      expandGroup: '展开工作区',
       unarchiveFailed: '取消归档失败',
       noHostActions: '当前宿主未提供工作区操作服务，只能查看。',
       sessionUntitled: '未命名',
@@ -164,6 +167,9 @@ window.__ModuleLoader__.load({
       archiveCount: 'Archived sessions · {n}',
       archiveMore: 'Only the latest {n} archived sessions are listed',
       unarchive: 'Unarchive',
+      openArchived: 'Unarchive and open',
+      collapseGroup: 'Collapse workspace',
+      expandGroup: 'Expand workspace',
       unarchiveFailed: 'Unarchive failed',
       noHostActions: 'This host exposes no Workspace actions; the list is read-only.',
       sessionUntitled: 'Untitled',
@@ -491,9 +497,19 @@ window.__ModuleLoader__.load({
         `[class*="listArea"][${ARCHIVE_ATTR}] > :not(.${ARCHIVE_CLASS}){display:none !important}`,
         `.${ARCHIVE_CLASS}{display:flex;flex-direction:column;gap:2px;padding:6px 8px 12px;flex:1 1 auto;min-height:0;overflow:auto}`,
         `.${ARCHIVE_CLASS}-head{padding:4px 6px;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
-        `.${ARCHIVE_CLASS}-group{display:flex;align-items:baseline;gap:6px;min-width:0;padding:10px 6px 3px}`,
+        `.${ARCHIVE_CLASS}-group{display:flex;flex-direction:column;min-width:0;padding:2px 0}`,
+        `.${ARCHIVE_CLASS}-group-header{display:flex;align-items:center;gap:6px;width:100%;min-width:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:6px;border-radius:6px;cursor:pointer}`,
+        `.${ARCHIVE_CLASS}-group-header:hover{background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.10))}`,
+        `.${ARCHIVE_CLASS}-group-header:focus-visible{outline:1px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #4d6bfe));outline-offset:-1px}`,
+        `.${ARCHIVE_CLASS}-caret{flex:none;width:10px;color:var(--dsw-alias-label-tertiary, inherit);font-size:10px;line-height:16px;transition:transform .12s ease}`,
+        `.${ARCHIVE_CLASS}-group-header[aria-expanded="true"] .${ARCHIVE_CLASS}-caret{transform:rotate(90deg)}`,
         `.${ARCHIVE_CLASS}-group-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary, inherit);font-size:11px;line-height:16px;font-weight:600}`,
         `.${ARCHIVE_CLASS}-group-count{flex:none;color:var(--dsw-alias-label-tertiary, inherit);font-size:11px;line-height:16px}`,
+        `.${ARCHIVE_CLASS}-group-rows{display:flex;flex-direction:column;gap:2px;padding-inline-start:16px}`,
+        `.${ARCHIVE_CLASS}-group-rows[hidden]{display:none !important}`,
+        `.${ARCHIVE_CLASS}-row:not(.${ARCHIVE_CLASS}-row-clickable){cursor:default}`,
+        `.${ARCHIVE_CLASS}-row-clickable{cursor:pointer}`,
+        `.${ARCHIVE_CLASS}-row-clickable:focus-visible{outline:1px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #4d6bfe));outline-offset:-1px}`,
         `.${ARCHIVE_CLASS}-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px}`,
         `.${ARCHIVE_CLASS}-row:hover{background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.10))}`,
         `.${ARCHIVE_CLASS}-main{flex:1 1 auto;min-width:0}`,
@@ -511,6 +527,8 @@ window.__ModuleLoader__.load({
       let control = null
       let archivePanel = null
       let archiveSignature = ''
+      /** Workspace groups the user expanded in the archive view; collapsed by default. */
+      const expandedGroups = new Set()
 
       /** Build the segmented view switch. */
       function buildControl() {
@@ -710,19 +728,7 @@ window.__ModuleLoader__.load({
           panel.appendChild(hint)
         }
         for (const group of groups) {
-          const groupElement = document.createElement('div')
-          groupElement.className = `${ARCHIVE_CLASS}-group`
-          groupElement.setAttribute('role', 'group')
-          const groupTitle = document.createElement('span')
-          groupTitle.className = `${ARCHIVE_CLASS}-group-title`
-          groupTitle.textContent = group.title
-          groupTitle.title = group.title
-          const groupCount = document.createElement('span')
-          groupCount.className = `${ARCHIVE_CLASS}-group-count`
-          groupCount.textContent = String(group.entries.length)
-          groupElement.append(groupTitle, groupCount)
-          panel.appendChild(groupElement)
-          for (const entry of group.entries) panel.appendChild(archiveRow(entry, service))
+          panel.appendChild(archiveGroup(group, service))
         }
         if (capped) {
           const hint = document.createElement('div')
@@ -737,6 +743,53 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * One collapsible Workspace group in the archive list. Groups start
+       * collapsed (the archive is browsed by Workspace first) and remember the
+       * expanded state while the plugin lives.
+       * @param group - display group from {@link archiveEntries}.
+       * @param service - the Workspace UI service, when the host provides it.
+       * @returns the group element.
+       */
+      function archiveGroup(group, service) {
+        const groupElement = document.createElement('div')
+        groupElement.className = `${ARCHIVE_CLASS}-group`
+        groupElement.setAttribute('role', 'group')
+        groupElement.dataset.workspaceKey = group.key
+        const expanded = expandedGroups.has(group.key)
+        const header = document.createElement('button')
+        header.type = 'button'
+        header.className = `${ARCHIVE_CLASS}-group-header`
+        header.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+        header.setAttribute('aria-label', `${expanded ? t('collapseGroup') : t('expandGroup')}: ${group.title}`)
+        header.title = group.title
+        const caret = document.createElement('span')
+        caret.className = `${ARCHIVE_CLASS}-caret`
+        caret.setAttribute('aria-hidden', 'true')
+        caret.textContent = '▸'
+        const title = document.createElement('span')
+        title.className = `${ARCHIVE_CLASS}-group-title`
+        title.textContent = group.title
+        const count = document.createElement('span')
+        count.className = `${ARCHIVE_CLASS}-group-count`
+        count.textContent = String(group.entries.length)
+        header.append(caret, title, count)
+        const rows = document.createElement('div')
+        rows.className = `${ARCHIVE_CLASS}-group-rows`
+        rows.hidden = !expanded
+        for (const entry of group.entries) rows.appendChild(archiveRow(entry, service))
+        header.addEventListener('click', () => {
+          const next = !expandedGroups.has(group.key)
+          if (next) expandedGroups.add(group.key)
+          else expandedGroups.delete(group.key)
+          header.setAttribute('aria-expanded', next ? 'true' : 'false')
+          header.setAttribute('aria-label', `${next ? t('collapseGroup') : t('expandGroup')}: ${group.title}`)
+          rows.hidden = !next
+        })
+        groupElement.append(header, rows)
+        return groupElement
+      }
+
+      /**
        * One archive row: title, Workspace, time and the unarchive action.
        * @param entry - display row from {@link archiveEntries}.
        * @param service - the Workspace UI service, when the host provides it.
@@ -747,6 +800,36 @@ window.__ModuleLoader__.load({
         rowElement.className = `${ARCHIVE_CLASS}-row`
         rowElement.setAttribute('role', 'listitem')
         rowElement.dataset.sessionId = entry.id
+        if (service !== undefined) {
+          rowElement.classList.add(`${ARCHIVE_CLASS}-row-clickable`)
+          rowElement.tabIndex = 0
+          rowElement.title = t('openArchived')
+          const view = () => {
+            if (rowElement.dataset.busy === '1') return
+            rowElement.dataset.busy = '1'
+            service.unarchiveSession(entry.id).then(
+              () => {
+                try {
+                  service.openSession(entry.id)
+                } catch (error) {
+                  console.warn('dsh-hide-empty-workspaces: open archived session failed', error)
+                }
+                schedule()
+              },
+              () => { delete rowElement.dataset.busy },
+            )
+          }
+          rowElement.addEventListener('click', (event) => {
+            const target = event.target
+            if (target instanceof window.Element && target.closest('button') !== null) return
+            view()
+          })
+          rowElement.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            view()
+          })
+        }
         const main = document.createElement('div')
         main.className = `${ARCHIVE_CLASS}-main`
         const title = document.createElement('div')

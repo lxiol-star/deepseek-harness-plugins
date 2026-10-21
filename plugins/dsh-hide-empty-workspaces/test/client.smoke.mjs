@@ -75,9 +75,10 @@ function boot({
     },
   }
   const unarchived = []
+  const opened = []
   const workspaceUi = {
     unarchiveSession: async (sessionId) => { unarchived.push(sessionId) },
-    openSession: () => {},
+    openSession: (sessionId) => { opened.push(sessionId) },
   }
   const dispose = []
   const registrations = []
@@ -128,6 +129,7 @@ function boot({
     ctx,
     registrations,
     unarchived,
+    opened,
     dispose: () => { for (const cleanup of dispose) cleanup() },
     get exported() { return exported },
     update(next) {
@@ -171,6 +173,20 @@ function boot({
     },
     archiveGroups() {
       return [...window.document.querySelectorAll('.dsh-hew-archive-group-title')].map(element => element.textContent)
+    },
+    groupHeaders() {
+      return [...window.document.querySelectorAll('.dsh-hew-archive-group-header')]
+    },
+    expandedGroups() {
+      return world.groupHeaders()
+        .filter(header => header.getAttribute('aria-expanded') === 'true')
+        .map(header => header.querySelector('.dsh-hew-archive-group-title').textContent)
+    },
+    visibleArchiveRows() {
+      return world.archiveRows().filter(row => {
+        const rows = row.parentElement
+        return rows !== null && rows.hidden !== true
+      })
     },
     hint() {
       return world.listArea().getAttribute('data-dsh-hide-empty-hint')
@@ -352,25 +368,26 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.window.close()
 }
 
-// 10. The archived view groups the archive by Workspace and unarchives in one click.
+// 10. The archived view groups the archive by Workspace, collapsed until expanded.
 {
   const world = boot({
     items: [
       { workspaceId: 'ws-a', sessionIds: ['s1', 's10'], title: 'Workspace A', path: '/tmp/ws-a' },
       { workspaceId: 'ws-b', sessionIds: [], title: 'Workspace B', path: '/tmp/ws-b' },
-      { workspaceId: 'ws-c', sessionIds: ['s2'], title: 'Workspace C', path: '/tmp/ws-c' },
+      { workspaceId: 'ws-c', sessionIds: ['s2', 's11'], title: 'Workspace C', path: '/tmp/ws-c' },
     ],
-    archivedSessionIds: ['s2', 's9', 's10'],
+    archivedSessionIds: ['s2', 's9', 's10', 's11'],
     sessionsById: {
       s1: { id: 's1', blank: false, title: 'first', updatedAt: Date.now() },
       s2: { id: 's2', blank: false, title: 'archived one', updatedAt: Date.now() - 3600000 },
       s9: { id: 's9', blank: false, title: 'archived two', updatedAt: Date.now() - 7200000 },
       s10: { id: 's10', blank: false, title: 'archived zero', updatedAt: Date.now() - 1800000 },
+      s11: { id: 's11', blank: false, title: 'archived three', updatedAt: Date.now() - 9000000 },
     },
     sections: [
       { ws: 'ws-a', sessions: ['s1', 's10'] },
       { ws: 'ws-b', sessions: [] },
-      { ws: 'ws-c', sessions: ['s2'] },
+      { ws: 'ws-c', sessions: ['s2', 's11'] },
     ],
   })
   world.exported.apply(world.ctx)
@@ -378,17 +395,28 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.clickMode('archived')
   await wait()
   check('archived view marks the list area', world.listArea().hasAttribute('data-dsh-hew-archive'))
-  check('archived view groups Sessions by Workspace', world.archiveRows().length === 3
+  check('archived view groups Sessions by Workspace', world.archiveRows().length === 4
     && world.archiveGroups().length === 3)
   check('archive groups lead with the most recently archived Workspace',
     world.archiveGroups()[0] === 'Workspace A' && world.archiveGroups()[1] === 'Workspace C'
     && world.archiveGroups()[2].includes('ungrouped'))
+  check('archive groups start collapsed', world.groupHeaders().length === 3
+    && world.expandedGroups().length === 0 && world.visibleArchiveRows().length === 0)
   check('archive group counts are rendered', world.archiveText().includes('Workspace A'))
-  check('archive rows carry their titles', world.archiveText().includes('archived zero')
-    && world.archiveText().includes('archived one') && world.archiveText().includes('archived two'))
   check('archive head reports the archive count', world.archiveText().includes('archiveCount'))
   check('archive rows are outside the native tree marks', world.window.document
     .querySelectorAll('.dsh-hew-archive-row[data-dsh-hide-empty]').length === 0)
+
+  // Expanding one Workspace reveals its archived Sessions; others stay folded.
+  world.groupHeaders()[0].click()
+  await wait()
+  check('expanding a group reveals its archived Sessions', world.expandedGroups().length === 1
+    && world.expandedGroups()[0] === 'Workspace A' && world.visibleArchiveRows().length === 1)
+  check('other groups stay collapsed', world.visibleArchiveRows().length === 1)
+  world.groupHeaders()[0].click()
+  await wait()
+  check('collapsing a group hides its rows again', world.visibleArchiveRows().length === 0)
+
   // The panel is plugin-owned DOM: concurrent refreshes must not stack copies
   // or feed the mutation observer in a loop.
   await wait()
@@ -397,18 +425,42 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.listArea().appendChild(world.window.document.createElement('div'))
   await wait()
   check('unrelated DOM churn keeps one panel and its rows', world.window.document.querySelectorAll('.dsh-hew-archive').length === 1
-    && world.archiveRows().length === 3)
-  const button = world.window.document
-    .querySelector('.dsh-hew-archive-row[data-session-id="s2"] .dsh-hew-archive-btn')
+    && world.archiveRows().length === 4)
+
+  // A snapshot update rebuilds the panel but keeps the expanded Workspace open.
+  world.groupHeaders()[1].click()
+  await wait()
+  check('second group expands independently', world.expandedGroups().includes('Workspace C'))
+  world.update({ phase: 'ready', archivedSessionIds: ['s2', 's10', 's11'], items: [
+    { workspaceId: 'ws-a', sessionIds: ['s1', 's10'], title: 'Workspace A', path: '/tmp/ws-a' },
+    { workspaceId: 'ws-b', sessionIds: [], title: 'Workspace B', path: '/tmp/ws-b' },
+    { workspaceId: 'ws-c', sessionIds: ['s2', 's11'], title: 'Workspace C', path: '/tmp/ws-c' },
+  ] })
+  await wait()
+  check('rebuild keeps the expanded group open', world.expandedGroups().includes('Workspace C'))
+  check('rebuild keeps collapsed groups collapsed', !world.expandedGroups().includes('Workspace A'))
+
+  // Clicking a row unarchives it and opens the Session.
+  const row = world.window.document.querySelector('.dsh-hew-archive-row[data-session-id="s2"]')
+  check('clickable archive row exposes a view affordance', row.classList.contains('dsh-hew-archive-row-clickable')
+    && row.tabIndex === 0 && row.title.includes('openArchived'))
+  row.click()
+  await wait()
+  check('row click unarchives and opens the Session', world.unarchived.includes('s2') && world.opened.includes('s2'))
+
+  // The explicit unarchive button still works without opening.
+  const buttonRow = world.window.document.querySelector('.dsh-hew-archive-row[data-session-id="s11"]')
+  const button = buttonRow.querySelector('.dsh-hew-archive-btn')
   check('archive row offers unarchive', button !== null && button.textContent.includes('unarchive'))
   button.click()
   await wait()
-  check('unarchive click calls the Workspace service', world.unarchived.includes('s2'))
+  check('unarchive button calls the Workspace service', world.unarchived.includes('s11'))
+  check('unarchive button does not open the Session', !world.opened.includes('s11'))
 
   world.update({ phase: 'ready', archivedSessionIds: [], items: [
     { workspaceId: 'ws-a', sessionIds: ['s1', 's10'], title: 'Workspace A', path: '/tmp/ws-a' },
     { workspaceId: 'ws-b', sessionIds: [], title: 'Workspace B', path: '/tmp/ws-b' },
-    { workspaceId: 'ws-c', sessionIds: ['s2'], title: 'Workspace C', path: '/tmp/ws-c' },
+    { workspaceId: 'ws-c', sessionIds: ['s2', 's11'], title: 'Workspace C', path: '/tmp/ws-c' },
   ] })
   await wait()
   check('emptied archive shows its empty copy', world.archiveRows().length === 0
@@ -456,6 +508,8 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('read-only archive lists its rows', world.archiveRows().length === 1)
   const button = world.archiveRows()[0].querySelector('.dsh-hew-archive-btn')
   check('read-only archive disables unarchive', button.disabled === true)
+  check('read-only archive keeps rows unclickable', !world.archiveRows()[0]
+    .classList.contains('dsh-hew-archive-row-clickable') && world.archiveRows()[0].tabIndex !== 0)
   check('read-only archive explains itself', world.archiveText().includes('noHostActions'))
   world.dispose()
   world.window.close()
