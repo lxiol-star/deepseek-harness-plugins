@@ -370,6 +370,15 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   world.clickMode('archived')
   await wait()
   check('archived view marks the list area', world.listArea().hasAttribute('data-dsh-hew-archive'))
+  // The panel is plugin-owned DOM: concurrent refreshes must not stack copies
+  // or feed the mutation observer in a loop.
+  await wait()
+  await wait()
+  check('archived view keeps exactly one panel', world.window.document.querySelectorAll('.dsh-hew-archive').length === 1)
+  world.listArea().appendChild(world.window.document.createElement('div'))
+  await wait()
+  check('unrelated DOM churn keeps one panel and its rows', world.window.document.querySelectorAll('.dsh-hew-archive').length === 1
+    && world.archiveRows().length === 2)
   check('archived view renders one row per archived Session', world.archiveRows().length === 2)
   check('archived view lists titles newest first', world.archiveText().includes('archived one')
     && world.archiveText().includes('archived two'))
@@ -444,6 +453,24 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   check('rail chrome mounts no view switch', rail.control() === null)
   rail.dispose()
   rail.window.close()
+}
+
+// 16. The archive view stays in the rail chrome without injecting a panel.
+{
+  const railArchive = boot({
+    items: [{ workspaceId: 'ws-c', sessionIds: ['s2'], title: 'Workspace C', path: '/tmp/ws-c' }],
+    archivedSessionIds: ['s2'],
+    sessionsById: { s2: { id: 's2', blank: false, title: 'archived one' } },
+    sections: [{ ws: 'ws-c', sessions: ['s2'] }],
+    mode: 'archived',
+    rail: true,
+  })
+  railArchive.exported.apply(railArchive.ctx)
+  await wait()
+  check('rail chrome injects no archive panel and no switch', railArchive.archivePanel() === null
+    && railArchive.control() === null)
+  railArchive.dispose()
+  railArchive.window.close()
 }
 
 // 15. Stored 0.3.0 view values fold into the active view.

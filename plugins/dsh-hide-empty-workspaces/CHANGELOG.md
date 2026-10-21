@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- The archive panel is rebuilt only when the archived set, titles or Workspace names change. Rebuilding it on every DOM mutation fed the plugin's own observer and kept a repaint loop alive in the archived view.
+- The archive view injects nothing in the collapsed rail.
+
 ## 0.3.1
 
 - The middle view is the **archive**, not "finished running Sessions": `已归档` now lists archived Sessions (newest first, capped) with their Workspace and an inline `取消归档` action, because the native browser never renders archived rows and the plugin must not mutate the native archived filter.

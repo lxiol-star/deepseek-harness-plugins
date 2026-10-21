@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.1'
+    const VERSION = '0.3.2'
     /** Sidebar views, in segment order. */
     const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
@@ -484,6 +484,7 @@ window.__ModuleLoader__.load({
       let frame = 0
       let control = null
       let archivePanel = null
+      let archiveSignature = ''
 
       /** Build the segmented view switch. */
       function buildControl() {
@@ -599,6 +600,11 @@ window.__ModuleLoader__.load({
         const limited = capped ? rows.slice(0, ARCHIVE_LIMIT) : rows
         return {
           capped,
+          // The panel is DOM the plugin owns; recreating it on every mutation
+          // would feed the observer forever. This digest gates the rebuild.
+          signature: `${snapshot.archivedSessionIds?.length ?? 0}#${limited
+            .map(entry => `${entry.id}:${entry.updatedAt}:${entry.title}:${entry.workspace}`)
+            .join('|')}`,
           entries: limited.map(entry => ({
             id: entry.id,
             title: entry.title,
@@ -612,6 +618,7 @@ window.__ModuleLoader__.load({
       function removeArchivePanel() {
         if (archivePanel !== null) archivePanel.remove()
         archivePanel = null
+        archiveSignature = ''
         const area = document.querySelector(`[${ARCHIVE_ATTR}]`)
         if (area !== null) area.removeAttribute(ARCHIVE_ATTR)
       }
@@ -619,12 +626,12 @@ window.__ModuleLoader__.load({
       /**
        * Render the archive list over the native tree.
        * @param snapshot - Workspace snapshot with the archive set.
-       * @param summaries - Session summaries by id.
+       * @param entries - display rows from {@link archiveEntries}.
+       * @param capped - whether the row list was capped.
        */
-      function renderArchivePanel(snapshot, summaries) {
+      function renderArchivePanel(snapshot, entries, capped) {
         const area = document.querySelector('[class*="listArea"]')
         if (area === null) return
-        const { entries, capped } = archiveEntries(snapshot, summaries)
         const panel = document.createElement('div')
         panel.className = ARCHIVE_CLASS
         panel.setAttribute('role', 'list')
@@ -729,7 +736,19 @@ window.__ModuleLoader__.load({
           if (mode === 'archived') {
             clearMarks()
             clearEmptyHint()
-            renderArchivePanel(snapshot, summaries)
+            const root = browserRoot()
+            if (root !== null && isRail(root)) {
+              removeArchivePanel()
+              ensureControl(mode)
+              diagnostics.hidden = []
+              emit()
+              return
+            }
+            const archive = archiveEntries(snapshot, summaries)
+            if (archivePanel === null || archiveSignature !== archive.signature) {
+              renderArchivePanel(snapshot, archive.entries, archive.capped)
+              archiveSignature = archive.signature
+            }
             diagnostics.hidden = []
             ensureControl(mode)
             emit()
