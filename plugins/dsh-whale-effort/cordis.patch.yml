@@ -1,0 +1,13 @@
+# Bundle patch layer for dsh-whale-effort.
+#
+# The row loads this package's main entry as the host half (policy injection,
+# Ultra/lightning session state and the guidance RPC channel). The `dsh.client`
+# declaration in package.json makes the web application load ./lib/client.js as
+# the browser half, which renders the effort slider inside DSH's native model
+# selector.
+#
+# Purely additive: no official bundle row is patched, and removing this row plus
+# the package dependency is a complete uninstall.
+- insert:
+    - id: dsh-whale-effort
+      name: dsh-whale-effort
