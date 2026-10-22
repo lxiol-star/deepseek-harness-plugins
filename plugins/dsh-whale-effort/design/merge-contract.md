@@ -174,7 +174,7 @@ Rules for `fx-porter`:
 
 ## Verification
 
-- `cd plugins/dsh-whale-effort && DSH_REPO=/Users/lxiol/project/code/github/deepseek-harness npm run check`
+- `cd plugins/dsh-whale-effort && DSH_REPO=/path/to/deepseek-harness npm run check`
 - `DSH_REPO=... npm run build`; committed `lib/` must match a fresh build.
 - Unit tests cover: policy selection/dedup input, metrics math, state normalization,
   effort display-level mapping (Ultra → MAX), locale key symmetry.
