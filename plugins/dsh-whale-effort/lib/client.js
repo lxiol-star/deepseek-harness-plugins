@@ -2894,6 +2894,7 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
       setTurboUnavailable(turbo === null);
       return;
     }
+    hydratedRef.current = !1, setUltraMode(!1);
     let cancelled = !1, failures = 0, timer, tick = async () => {
       let snapshot = await turbo.state(sessionId);
       if (!cancelled) {

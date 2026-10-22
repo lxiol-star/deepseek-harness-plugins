@@ -485,6 +485,11 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
       setTurboUnavailable(turbo === null)
       return
     }
+    // A new session (or a re-mounted Host transport) starts un-hydrated: the
+    // persisted Ultra flag and lightning state must be read again, and the
+    // previous session's Ultra display index must not leak across.
+    hydratedRef.current = false
+    setUltraMode(false)
     let cancelled = false
     let failures = 0
     let timer: ReturnType<typeof setTimeout> | undefined
