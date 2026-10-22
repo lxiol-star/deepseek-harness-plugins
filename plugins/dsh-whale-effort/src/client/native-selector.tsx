@@ -26,18 +26,36 @@ export function wrapNativeSelector(Native: (props: NativeProps) => ReactNode, re
   return function NativeReasoningSelector(props: NativeProps) {
     const [effort, setEffort] = useState(false)
     const panelRef = useRef<HTMLDivElement>(null)
-    // The native root menu stays open behind this pane. Remember the row that
-    // opened it so Escape/Shift+Tab can hand focus back instead of dropping it
-    // on <body> (which would leave the still-open native menu deaf to keys).
-    const effortRowRef = useRef<HTMLElement | null>(null)
-    const openEffortPane = (row: HTMLElement) => {
-      effortRowRef.current = row
-      setEffort(true)
+    // The native root menu stays open behind this pane. Show it again on
+    // Escape/Shift+Tab and hand focus back to the effort row: dropping focus on
+    // <body> leaves the still-open native menu deaf to the next Escape.
+    //
+    // The native root rows unmount while the plugin pane is shown, so the
+    // clicked node is stale by the time Escape runs. Query the live row
+    // instead; the native menu element survives, and its rows re-render after
+    // `setEffort(false)`. Two asynchronous attempts cover both commit timings.
+    const menuRef = useRef<Element | null>(null)
+    const openEffortPane = () => setEffort(true)
+    const rememberMenu = () => {
+      const pane = panelRef.current
+      menuRef.current = pane !== null && typeof pane.closest === 'function'
+        ? pane.closest('[role="menu"], [role="group"]')
+        : null
     }
     const restoreMenuFocus = () => {
+      const menu = menuRef.current
+      const attempt = (): boolean => {
+        const scope: ParentNode = menu !== null && menu.isConnected ? menu : document
+        const label = props.t('menu.effort')
+        const rows = Array.from(scope.querySelectorAll<HTMLElement>('button[role="menuitem"], [role="menuitem"]'))
+        const row = rows.find(candidate => (candidate.textContent ?? '').includes(label)) ?? null
+        if (row === null) return false
+        row.focus()
+        return true
+      }
       queueMicrotask(() => {
-        const row = effortRowRef.current
-        if (row !== null && row.isConnected) row.focus()
+        if (attempt()) return
+        requestAnimationFrame(() => { attempt() })
       })
     }
     // Always invoke the same native function, including all its hooks.
@@ -56,7 +74,7 @@ export function wrapNativeSelector(Native: (props: NativeProps) => ReactNode, re
           if (event.relatedTarget === null) event.stopPropagation()
         }} onKeyDown={event => {
           if (event.key === 'Escape' || (event.key === 'Tab' && event.shiftKey && event.target === event.currentTarget)) {
-            event.preventDefault(); event.stopPropagation(); setEffort(false); restoreMenuFocus()
+            event.preventDefault(); event.stopPropagation(); rememberMenu(); setEffort(false); restoreMenuFocus()
           }
         }}>
           {renderPanel(props)}
@@ -66,8 +84,8 @@ export function wrapNativeSelector(Native: (props: NativeProps) => ReactNode, re
       const [modelRow, effortRow] = root.props.children
       if (!isValidElement<ElementProps>(modelRow)) return element
       const row = isValidElement<ElementProps>(effortRow)
-        ? cloneElement(effortRow, { onClick: (event: { currentTarget: HTMLElement }) => openEffortPane(event.currentTarget) })
-        : cloneElement(modelRow, { key: 'reasoning-effort', ref: null, disabled: props.locked, onClick: (event: { currentTarget: HTMLElement }) => openEffortPane(event.currentTarget) } as ElementProps,
+        ? cloneElement(effortRow, { onClick: () => openEffortPane() })
+        : cloneElement(modelRow, { key: 'reasoning-effort', ref: null, disabled: props.locked, onClick: () => openEffortPane() } as ElementProps,
             <span>{props.t('menu.effort')}</span>, <span aria-hidden="true">›</span>)
       return cloneElement(element, {
         onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
@@ -81,7 +99,7 @@ export function wrapNativeSelector(Native: (props: NativeProps) => ReactNode, re
       }, cloneElement(root, {}, modelRow, row), panes[1], panes[2])
     })
     useLayoutEffect(() => {
-      if (!menuOpen) { setEffort(false); effortRowRef.current = null }
+      if (!menuOpen) { setEffort(false); menuRef.current = null }
       else if (effort) panelRef.current?.focus()
     }, [menuOpen, effort])
     return output
