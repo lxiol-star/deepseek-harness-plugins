@@ -307,7 +307,7 @@ export const zh: Record<keyof typeof en, string> = {
   'filter.grouping': '会话分组方式',
   'filter.byStatus': '按状态',
   'filter.byWorkspace': '按工作区',
-  'filter.byTree': '工作区树',
+  'filter.byTree': '项目树',
   'card.archived': '已归档到 Wiki',
   'workspace.unassigned': '未分配工作区',
 

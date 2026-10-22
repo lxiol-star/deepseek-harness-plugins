@@ -25,7 +25,7 @@
 
 ```text
 # 会话看板
-github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.7.0&path:/plugins/dsh-session-board
+github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.7.1&path:/plugins/dsh-session-board
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区

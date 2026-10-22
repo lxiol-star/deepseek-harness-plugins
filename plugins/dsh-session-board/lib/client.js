@@ -734,7 +734,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.7.0",
+      "data-session-board-version": "0.7.1",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -758,7 +758,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.7.0",
+      "data-session-board-version": "0.7.1",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1256,7 +1256,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.7.0",
+        "data-session-board-version": "0.7.1",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -3053,7 +3053,7 @@ var NS = "session-board", en = {
   "filter.grouping": "\u4F1A\u8BDD\u5206\u7EC4\u65B9\u5F0F",
   "filter.byStatus": "\u6309\u72B6\u6001",
   "filter.byWorkspace": "\u6309\u5DE5\u4F5C\u533A",
-  "filter.byTree": "\u5DE5\u4F5C\u533A\u6811",
+  "filter.byTree": "\u9879\u76EE\u6811",
   "card.archived": "\u5DF2\u5F52\u6863\u5230 Wiki",
   "workspace.unassigned": "\u672A\u5206\u914D\u5DE5\u4F5C\u533A",
   "batch.scopeMain": "\u9009\u4E2D\u7684\u4E3B\u4F1A\u8BDD",
