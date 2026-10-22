@@ -181,6 +181,25 @@ describe('actual React components', () => {
     })
     expect(view.container.querySelector('#sb-wiki-scripts-dir')).not.toBeNull()
   })
+  it('offers a separate archive-only action and confirms without synthesis copy', async () => {
+    const summary: ArchiveSummary = {
+      archived: 1, skipped: 0, empty: 0, failed: 0, selected: 1, dry_run: false,
+      results: [{ session: 'session-one', source: 'raw/sessions/one.md', action: 'archived' }],
+    }
+    const plan: ArchivePreview = { token: 'token', expiresAt: Date.now() + 30_000, mode: 'archive', summary: { ...summary, dry_run: true, results: [{ session: 'session-one', source: 'raw/sessions/one.md', action: 'would-archive' }] } }
+    const preview = vi.fn(async () => plan)
+    const controller = new components.BatchController({ preview, commit: async () => summary })
+    controller.toggle('session-one')
+    const props = { controller, groups: [{ id: 'attention', entries: [entry] }], t: components.t }
+    const view = mount(components.BatchToolbar, props); await view.render(props)
+    const archiveOnly = [...view.container.querySelectorAll('button')].find(button => button.textContent === 'Archive only')!
+    expect(archiveOnly).toBeDefined()
+    await React.act(async () => { archiveOnly.click() })
+    expect(preview).toHaveBeenCalledWith(['session-one'], 'archive')
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'confirming', mode: 'archive' })
+    expect(view.container.textContent).toContain('Confirm archive only')
+    expect(view.container.textContent).toContain('No model calls and no index update.')
+  })
   it('archived-only button toggles the archive filter', async () => {
     const change = vi.fn()
     const filters = { query: '', status: 'all' as const, workspace: '' }
@@ -220,6 +239,7 @@ describe('actual React components', () => {
     const plan: ArchivePreview = {
       token: 'token',
       expiresAt: Date.now() + 30_000,
+      mode: 'full',
       summary: { ...summary, dry_run: true, results: [{ session: 'session-one', source: 'raw/sessions/one.md', action: 'would-archive' }] },
     }
     const controller = new components.BatchController({ preview: async () => plan, commit: async () => summary })

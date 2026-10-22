@@ -201,36 +201,26 @@ def scope(args, archive):
     for session in requested:
         if session not in records:
             raise ValueError('SELECTION_MISMATCH')
-    selected = set(requested)
-    while True:
-        children = {sid for sid, row in records.items() if row['parent'] in selected}
-        if children <= selected:
-            break
-        selected |= children
-        if len(selected) > 200:
-            raise ValueError('SCOPE_TOO_LARGE')
-    pending = list(dict.fromkeys(requested + sorted(selected - set(requested))))
+    # Archive exactly what the user checked: no implicit child expansion.
+    # Children stay discoverable through the board like any other session.
     ordered = []
     missing = []
-    while pending:
-        ready = [sid for sid in pending if records[sid]['parent'] not in pending]
-        if not ready:
-            raise ValueError('SELECTION_MISMATCH')
-        for sid in ready:
-            pending.remove(sid)
-            row = dict(records[sid])
-            row['evidence'] = 'parentSession' if row['parent'] else 'selected session header'
-            events = load_events(archive, row['source'])
-            last_start = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/start'), default=-1)
-            last_end = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/end'), default=-1)
-            row['snapshot'] = last_start > last_end
-            ordered.append((row, events))
+    for session in dict.fromkeys(requested):
+        row = dict(records[session])
+        row['evidence'] = 'parentSession' if row['parent'] else 'selected session header'
+        events = load_events(archive, row['source'])
+        last_start = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/start'), default=-1)
+        last_end = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/end'), default=-1)
+        row['snapshot'] = last_start > last_end
+        ordered.append((row, events))
+    # Genuinely missing children (referenced but no transcript source) are
+    # still reported; unselected-but-existing children are not warnings.
     for row, events in ordered:
         for event in events:
             if event.get('type') != 'subagent/catalog':
                 continue
             child = event.get('data', {}).get('childId')
-            if isinstance(child, str) and child not in selected:
+            if isinstance(child, str) and child not in records:
                 missing.append({'session': child, 'parent': row['session']})
     return {'entries': [row for row, _events in ordered], 'missing': missing}
 
@@ -492,7 +482,7 @@ if __name__ == '__main__':
         log_line('fatal', traceback.format_exc())
         code = str(error) if str(error) in (
             'SELECTION_MISMATCH', 'INVALID_RESULT', 'INVALID_SELECTION', 'SCHEMA_UNAVAILABLE',
-            'ENGINE_UNAVAILABLE', 'STATE_UNAVAILABLE', 'SCOPE_TOO_LARGE',
+            'ENGINE_UNAVAILABLE', 'STATE_UNAVAILABLE',
         ) else ('ENGINE_UNAVAILABLE' if isinstance(error, (ImportError, FileNotFoundError)) else 'WORKFLOW_UNAVAILABLE')
         REAL_STDOUT.write(json.dumps({'error': code, 'detail': detail[:400]}, ensure_ascii=False) + '\n')
         raise SystemExit(1)

@@ -675,7 +675,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.2",
+      "data-session-board-version": "0.5.3",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -699,7 +699,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.2",
+      "data-session-board-version": "0.5.3",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1195,7 +1195,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.5.2",
+        "data-session-board-version": "0.5.3",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1801,6 +1801,12 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
   cursor: pointer;
 }
 .sb-batchbar__action:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent); }
+.sb-batchbar__secondary {
+  border-color: var(--dsw-alias-border-l1);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-batchbar__secondary:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batchbar__clear { margin-left: auto; background: transparent; border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
 
 /* -------------------------------------------------------------- overlay --- */
@@ -2346,7 +2352,7 @@ function parseArchiveSummary(raw) {
     if (r.page !== void 0 && typeof r.page != "string") throw new Error("Invalid archive page");
     return { session: r.session, source: r.source, action: r.action, ...r.page === void 0 ? {} : { page: r.page } };
   });
-  if (results.length !== v.selected || results.length > 200) throw new Error("Inconsistent archive rows");
+  if (results.length !== v.selected || results.length > 50) throw new Error("Inconsistent archive rows");
   let totals = results.reduce((n, row) => {
     let key = row.action === "would-archive" || row.action === "archived" ? "archived" : row.action;
     return n[key]++, n;
@@ -2364,7 +2370,7 @@ function safeRawPage(raw) {
 }
 function parseArchiveScope(raw) {
   let scope = record(raw);
-  if (!Array.isArray(scope.entries) || scope.entries.length > 200 || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
+  if (!Array.isArray(scope.entries) || scope.entries.length > 50 || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
   let entries = scope.entries.map((item) => {
     let row = record(item);
     if (typeof row.session != "string" || typeof row.source != "string" || row.parent !== null && typeof row.parent != "string" || !["main", "child"].includes(String(row.role)) || typeof row.evidence != "string" || typeof row.snapshot != "boolean") throw new Error("Invalid scope row");
@@ -2527,11 +2533,11 @@ var BoardFeedClient = class {
     }
     if (asRecord(payload.capabilities)?.workflow !== 2) throw new Error("HOST_OUTDATED");
   }
-  async previewArchive(sessionIds) {
+  async previewArchive(sessionIds, mode = "full") {
     await this.requireWorkflow();
-    let payload = await this.archiveRequest({ action: "preview", sessionIds }), preview = asRecord(payload.preview);
+    let payload = await this.archiveRequest({ action: "preview", sessionIds, mode }), preview = asRecord(payload.preview);
     if (typeof preview?.token != "string" || typeof preview.expiresAt != "number") throw new Error("INVALID_RESULT");
-    return { token: preview.token, expiresAt: preview.expiresAt, summary: parseArchiveSummary(preview.summary) };
+    return { token: preview.token, expiresAt: preview.expiresAt, summary: parseArchiveSummary(preview.summary), mode: preview.mode === "archive" ? "archive" : "full" };
   }
   async commitArchive(token) {
     await this.requireWorkflow();
@@ -2623,6 +2629,9 @@ function createStore(initial, options = {}) {
 }
 
 // src/client/batch.ts
+function modeOf(result, fallback) {
+  return result.workflow === void 0 && fallback === "archive" ? "archive" : "full";
+}
 function codeOf(error) {
   return error instanceof Error && error.message !== "" ? error.message : String(error);
 }
@@ -2635,7 +2644,7 @@ var BatchController = class {
     this.transport = transport;
   }
   transport;
-  state = createStore({ selected: [], phase: "idle", preview: null, result: null, error: null, errorDetail: null });
+  state = createStore({ selected: [], phase: "idle", mode: "full", preview: null, result: null, error: null, errorDetail: null });
   disposed = !1;
   getSnapshot = this.state.getSnapshot;
   subscribe = this.state.subscribe;
@@ -2668,12 +2677,12 @@ var BatchController = class {
     let s = this.getSnapshot();
     s.result === null && s.error === null || this.state.set({ ...s, result: null, error: null, errorDetail: null });
   };
-  preview = async () => {
+  preview = async (mode = "full") => {
     let s = this.getSnapshot();
     if (!(this.disposed || this.isBusy() || s.selected.length === 0)) {
-      this.state.set({ ...s, phase: "previewing", error: null, result: null });
+      this.state.set({ ...s, phase: "previewing", mode, error: null, errorDetail: null, result: null });
       try {
-        let preview = await this.transport.preview(s.selected);
+        let preview = await this.transport.preview(s.selected, mode);
         this.disposed || this.state.set({ ...this.getSnapshot(), phase: "confirming", preview });
       } catch (error) {
         this.disposed || this.state.set({ ...this.getSnapshot(), phase: "idle", error: codeOf(error), errorDetail: detailOf(error) });
@@ -2688,7 +2697,7 @@ var BatchController = class {
         let result = await this.transport.commit(s.preview.token);
         if (this.disposed) return;
         let incomplete = new Set(result.workflow?.synthesis.filter((row) => row.status === "failed" || row.status === "sensitive").map((row) => row.session) ?? []), succeeded = new Set(result.nativeArchive ? result.nativeArchive.filter((row) => ["archived", "already-archived", "empty-archived"].includes(row.status)).map((row) => row.session) : result.results.filter((row) => (row.action === "archived" || row.action === "skipped") && !incomplete.has(row.session)).map((row) => row.session));
-        this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", preview: null, result, error: null, errorDetail: null });
+        this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", mode: modeOf(result, s.mode), preview: null, result, error: null, errorDetail: null });
       } catch (error) {
         this.disposed || this.state.set({ ...s, phase: "idle", preview: null, error: codeOf(error), errorDetail: detailOf(error) });
       }
@@ -2808,16 +2817,20 @@ var NS = "session-board", en = {
   "batch.label": "Local Wiki archive",
   "batch.all": "Select visible (up to 50)",
   "batch.preview": "Preview archive and synthesis",
+  "batch.archiveOnly": "Archive only",
+  "batch.archiveOnlyHint": "Copy raw pages to the Wiki without model synthesis or an index update.",
+  "batch.confirmTitleArchive": "Confirm archive only",
+  "batch.destinationArchive": "Copy the raw pages into the configured Wiki root (default ~/wiki) and archive the Sessions in DSH. No model calls and no index update.",
+  "batch.confirmArchive": "Confirm archive only",
   "batch.working": "Working\u2026",
   "batch.confirmTitle": "Confirm archive and synthesis",
-  "batch.destination": "Archive to ~/wiki/raw/sessions/, then synthesize each session with the model chosen in Session board settings (the Wiki provider when none is chosen), and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.",
+  "batch.destination": "Archive raw pages into the configured Wiki root (default ~/wiki), then synthesize each session with the model chosen in Session board settings (the Wiki provider when none is chosen), and update the index. Successful idle sessions are then archived in DSH without deletion. Empty sessions skip synthesis and are archived in DSH. Active or changed sessions remain in the workspace.",
   "batch.planCounts": "{count} to copy \xB7 {skipped} unchanged",
   "batch.confirm": "Confirm archive and synthesis",
   "batch.cancel": "Cancel",
   "batch.result": "Copied {archived} \xB7 unchanged {skipped} \xB7 empty {empty} \xB7 failed {failed}",
   "batch.error": "Archive failed. Your selection is kept.",
   "batch.error.INVALID_SELECTION": "The selection became invalid. Select sessions again and preview before confirming.",
-  "batch.error.SCOPE_TOO_LARGE": "The selected Sessions expand to more than 200 with their children. Archive them in smaller batches.",
   "batch.error.HOST_OUTDATED": "This window has newer plugin code than the running Harness host. Quit and reopen Harness completely, then try again.",
   "batch.error.ARCHIVE_UNAVAILABLE": "Wiki archiver unavailable or timed out. Some pages may already exist; preview again before retrying.",
   "batch.error.INVALID_RESULT": "The archiver returned an invalid result.",
@@ -3046,16 +3059,20 @@ var NS = "session-board", en = {
   "batch.label": "\u672C\u5730 Wiki \u5F52\u6863",
   "batch.all": "\u5168\u9009\u5F53\u524D\u7ED3\u679C\uFF08\u6700\u591A 50\uFF09",
   "batch.preview": "\u9884\u89C8\u5F52\u6863\u4E0E\u63D0\u70BC",
+  "batch.archiveOnly": "\u4EC5\u5F52\u6863",
+  "batch.archiveOnlyHint": "\u53EA\u628A\u539F\u6587\u590D\u5236\u5230 Wiki\uFF0C\u4E0D\u8C03\u7528\u6A21\u578B\u63D0\u70BC\u3001\u4E0D\u66F4\u65B0\u7D22\u5F15\u3002",
+  "batch.confirmTitleArchive": "\u786E\u8BA4\u4EC5\u5F52\u6863",
+  "batch.destinationArchive": "\u53EA\u628A\u539F\u6587\u590D\u5236\u5230\u914D\u7F6E\u7684 Wiki \u6839\u76EE\u5F55\uFF08\u9ED8\u8BA4 ~/wiki\uFF09\u5E76\u5F52\u6863\u4F1A\u8BDD\uFF08DSH \u539F\u751F\u5F52\u6863\uFF09\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\u3001\u4E0D\u66F4\u65B0\u7D22\u5F15\u3002",
+  "batch.confirmArchive": "\u786E\u8BA4\u5F52\u6863\uFF08\u4E0D\u63D0\u70BC\uFF09",
   "batch.working": "\u5904\u7406\u4E2D\u2026",
   "batch.confirmTitle": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
-  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230 ~/wiki/raw/sessions/\uFF0C\u8131\u654F\u590D\u6838\u540E\u7528\u4F1A\u8BDD\u770B\u677F\u8BBE\u7F6E\u91CC\u9009\u62E9\u7684\u6A21\u578B\u9010\u4F1A\u8BDD\u63D0\u70BC\uFF08\u672A\u9009\u62E9\u65F6\u6CBF\u7528 Wiki provider\uFF09\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u6210\u529F\u540E\u5C06\u7A7A\u95F2\u4F1A\u8BDD\u5F52\u6863\u5230 DSH\uFF08\u4E0D\u5220\u9664\uFF09\uFF1B\u7A7A\u4F1A\u8BDD\u8DF3\u8FC7\u63D0\u70BC\u540E\u76F4\u63A5\u5F52\u6863\u3002\u8FD0\u884C\u4E2D\u6216\u6709\u65B0\u5185\u5BB9\u7684\u4F1A\u8BDD\u4FDD\u7559\u3002\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
+  "batch.destination": "\u539F\u6587\u5F52\u6863\u5230\u914D\u7F6E\u7684 Wiki \u6839\u76EE\u5F55\uFF08\u9ED8\u8BA4 ~/wiki\uFF09\uFF0C\u8131\u654F\u590D\u6838\u540E\u7528\u4F1A\u8BDD\u770B\u677F\u8BBE\u7F6E\u91CC\u9009\u62E9\u7684\u6A21\u578B\u9010\u4F1A\u8BDD\u63D0\u70BC\uFF08\u672A\u9009\u62E9\u65F6\u6CBF\u7528 Wiki provider\uFF09\uFF0C\u6700\u540E\u66F4\u65B0\u7D22\u5F15\u3002\u6210\u529F\u540E\u5C06\u7A7A\u95F2\u4F1A\u8BDD\u5F52\u6863\u5230 DSH\uFF08\u4E0D\u5220\u9664\uFF09\uFF1B\u7A7A\u4F1A\u8BDD\u8DF3\u8FC7\u63D0\u70BC\u540E\u76F4\u63A5\u5F52\u6863\u3002\u8FD0\u884C\u4E2D\u6216\u6709\u65B0\u5185\u5BB9\u7684\u4F1A\u8BDD\u4FDD\u7559\u3002\u63D0\u70BC\u4F1A\u5411\u5DF2\u914D\u7F6E\u7684\u6A21\u578B\u670D\u52A1\u53D1\u9001\u5F52\u6863\u6587\u672C\u3002",
   "batch.planCounts": "\u5C06\u590D\u5236 {count} \u4E2A \xB7 \u672A\u53D8\u5316 {skipped} \u4E2A",
   "batch.confirm": "\u786E\u8BA4\u5F52\u6863\u5E76\u63D0\u70BC",
   "batch.cancel": "\u53D6\u6D88",
   "batch.result": "\u5DF2\u590D\u5236 {archived} \xB7 \u672A\u53D8\u5316 {skipped} \xB7 \u7A7A\u4F1A\u8BDD {empty} \xB7 \u5931\u8D25 {failed}",
   "batch.error": "\u5F52\u6863\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u9009\u62E9\u3002",
   "batch.error.INVALID_SELECTION": "\u9009\u62E9\u5DF2\u5931\u6548\u3002\u8BF7\u91CD\u65B0\u52FE\u9009\u4F1A\u8BDD\uFF0C\u5E76\u5148\u9884\u89C8\u518D\u786E\u8BA4\u3002",
-  "batch.error.SCOPE_TOO_LARGE": "\u9009\u4E2D\u7684\u4F1A\u8BDD\u8FDE\u540C\u5B50\u4F1A\u8BDD\u8D85\u8FC7 200 \u4E2A\uFF0C\u8BF7\u5206\u6279\u5F52\u6863\u3002",
   "batch.error.HOST_OUTDATED": "\u5F53\u524D\u7A97\u53E3\u7684\u63D2\u4EF6\u4EE3\u7801\u6BD4\u6B63\u5728\u8FD0\u884C\u7684 Harness \u5BBF\u4E3B\u65B0\u3002\u8BF7\u5B8C\u5168\u9000\u51FA\u5E76\u91CD\u65B0\u6253\u5F00 Harness \u540E\u91CD\u8BD5\u3002",
   "batch.error.ARCHIVE_UNAVAILABLE": "\u672C\u5730\u5F52\u6863\u811A\u672C\u4E0D\u53EF\u7528\u6216\u8D85\u65F6\u3002\u90E8\u5206\u9875\u9762\u53EF\u80FD\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u65B0\u9884\u89C8\u540E\u91CD\u8BD5\u3002",
   "batch.error.INVALID_RESULT": "\u5F52\u6863\u811A\u672C\u8FD4\u56DE\u4E86\u65E0\u6548\u7ED3\u679C\u3002",
@@ -3197,12 +3214,15 @@ function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-btn", type: "button", disabled: busy || state.selected.length === 0, onClick: controller.clear, children: t("batch.clear") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-batchbar__action", type: "button", disabled: busy || state.selected.length === 0, onClick: () => {
         controller.preview();
-      }, children: t(busy ? "batch.working" : "batch.preview") })
+      }, children: t(busy ? "batch.working" : "batch.preview") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-batchbar__action sb-batchbar__secondary", type: "button", disabled: busy || state.selected.length === 0, onClick: () => {
+        controller.preview("archive");
+      }, title: t("batch.archiveOnlyHint"), children: t("batch.archiveOnly") })
     ] }),
     hiddenSelected > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "sb-batch-status", children: t("batch.hiddenSelected", { count: hiddenSelected }) }) : null,
     state.preview !== null && state.phase === "confirming" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batch-preview", role: "region", "aria-label": t("batch.confirmTitle"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("strong", { children: t("batch.confirmTitle") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("batch.destination") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("strong", { children: t(state.phase === "confirming" && state.mode === "archive" ? "batch.confirmTitleArchive" : "batch.confirmTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t(state.mode === "archive" ? "batch.destinationArchive" : "batch.destination") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { children: state.preview.summary.results.map((row) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
         titles.get(row.session) || row.session,
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-source", children: row.source }),
@@ -3215,7 +3235,7 @@ function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("batch.planCounts", { count: state.preview.summary.archived, skipped: state.preview.summary.skipped }) }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-batchbar__action", type: "button", onClick: () => {
         controller.confirm();
-      }, children: t("batch.confirm") }),
+      }, children: t(state.mode === "archive" ? "batch.confirmArchive" : "batch.confirm") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "sb-btn", type: "button", onClick: controller.cancel, children: t("batch.cancel") })
     ] }) : null,
     /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { role: "status", "aria-live": "polite", className: "sb-batch-status", children: busy ? t("batch.working") : null }),

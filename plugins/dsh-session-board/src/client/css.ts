@@ -560,6 +560,12 @@ export const STYLESHEET = `
   cursor: pointer;
 }
 .sb-batchbar__action:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent); }
+.sb-batchbar__secondary {
+  border-color: var(--dsw-alias-border-l1);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-batchbar__secondary:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batchbar__clear { margin-left: auto; background: transparent; border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
 
 /* -------------------------------------------------------------- overlay --- */

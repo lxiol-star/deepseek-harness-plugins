@@ -9,7 +9,7 @@
  */
 import { EMPTY_FEED, type BoardAckRecord, type BoardFeed, type BoardTurnStats } from '../shared/types.ts'
 import type { ReadonlyStore } from './store.ts'
-import { WIKI_WORKFLOW_CAPABILITY, parseArchiveSummary, WIKI_ARCHIVE_PATH, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
+import { WIKI_WORKFLOW_CAPABILITY, parseArchiveSummary, WIKI_ARCHIVE_PATH, type ArchiveMode, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
 
 /** One archive-route failure: the stable code plus the host's diagnostic line. */
 export class ArchiveRequestError extends Error {
@@ -222,12 +222,12 @@ export class BoardFeedClient implements ReadonlyStore<BoardFeedState> {
     const capabilities = asRecord(payload.capabilities)
     if (capabilities?.workflow !== WIKI_WORKFLOW_CAPABILITY) throw new Error('HOST_OUTDATED')
   }
-  async previewArchive(sessionIds: readonly string[]): Promise<ArchivePreview> {
+  async previewArchive(sessionIds: readonly string[], mode: ArchiveMode = 'full'): Promise<ArchivePreview> {
     await this.requireWorkflow()
-    const payload = await this.archiveRequest({ action: 'preview', sessionIds })
+    const payload = await this.archiveRequest({ action: 'preview', sessionIds, mode })
     const preview = asRecord(payload.preview)
     if (typeof preview?.token !== 'string' || typeof preview.expiresAt !== 'number') throw new Error('INVALID_RESULT')
-    return { token: preview.token, expiresAt: preview.expiresAt, summary: parseArchiveSummary(preview.summary) }
+    return { token: preview.token, expiresAt: preview.expiresAt, summary: parseArchiveSummary(preview.summary), mode: preview.mode === 'archive' ? 'archive' : 'full' }
   }
   async commitArchive(token: string): Promise<ArchiveSummary> {
     await this.requireWorkflow()

@@ -49,11 +49,6 @@ describe('Wiki archival safety', () => {
     for (const id of ['a,b', 'a b', '../x', '-x', '', '.','..']) expect(() => validateWikiIds([id])).toThrow('INVALID_SELECTION')
     expect(() => validateWikiIds([])).toThrow()
     expect(() => validateWikiIds(Array(51).fill('id'))).toThrow()
-    // The user selection keeps its 50 cap; the expanded scope has a larger one.
-    const many = (count: number): string[] => Array.from({ length: count }, (_, index) => `session-${index}`)
-    expect(validateWikiIds(many(50))).toHaveLength(50)
-    expect(validateWikiIds(many(200), 200)).toHaveLength(200)
-    expect(() => validateWikiIds(many(201), 200)).toThrow('INVALID_SELECTION')
   })
   it('archives against ~/.dsh when a GUI launch carries no DSH_HOME', async () => {
     const saved = process.env.DSH_HOME
@@ -83,12 +78,22 @@ describe('Wiki archival safety', () => {
   })
   it('archives one exact ID at a time with --full, synthesizes full paths, then indexes once', async () => {
     const order: string[] = []
-    const scoped = { entries: [
-      { session: 'main', source: 'source/main', parent: null, role: 'main', evidence: 'header', snapshot: false },
-      { session: 'child', source: 'source/child', parent: 'main', role: 'child', evidence: 'parentSession', snapshot: true },
-    ], missing: [{ session: 'missing', parent: 'main' }] }
     const run = vi.fn(async (operation: string, value: string) => {
-      if (operation === 'scope') return scoped
+      if (operation === 'scope') {
+        // The bridge returns exactly what the user checked, in that order.
+        const requested = JSON.parse(value) as string[]
+        return {
+          entries: requested.map((session, index) => ({
+            session,
+            source: `source/${session}`,
+            parent: session === 'child' ? 'main' : null,
+            role: session === 'child' ? 'child' : 'main',
+            evidence: session === 'child' ? 'parentSession' : 'selected session header',
+            snapshot: index === 1,
+          })),
+          missing: [{ session: 'missing', parent: 'main' }],
+        }
+      }
       order.push(`${operation}:${value}`)
       return operation === 'index' ? { status: 'updated' } : { status: 'synthesized', pages: ['experience/example.md'] }
     })
@@ -103,7 +108,7 @@ describe('Wiki archival safety', () => {
       return { stdout: output(ids, args.includes('--dry-run')) }
     })
     const service = createWikiArchiver({ home: '/test', dshHome: '/test/dev', workflow: run, execute })
-    const preview = await service.preview(['main'])
+    const preview = await service.preview(['main', 'child'])
     expect(preview.summary.scope?.missing).toHaveLength(1)
     expect(order).toEqual([])
     const result = await service.commit(preview.token)
@@ -166,7 +171,7 @@ describe('Wiki archival safety', () => {
 
 describe('authenticated connection route handler', () => {
   const fixture = () => {
-    const wikiArchive: WikiArchiver = { preview: vi.fn(async () => ({ token: 'token', expiresAt: 1, summary: JSON.parse(output(['id'], true)) })), commit: vi.fn(async () => JSON.parse(output(['id'], false))), close: vi.fn() }
+    const wikiArchive: WikiArchiver = { preview: vi.fn(async () => ({ token: 'token', expiresAt: 1, mode: 'full' as const, summary: JSON.parse(output(['id'], true)) })), commit: vi.fn(async () => JSON.parse(output(['id'], false))), close: vi.fn() }
     const routes = createBoardRoutes({ snapshot: () => EMPTY_FEED, ack: async () => true, wikiArchive, requestRejection: () => 401, warn: () => {} })
     return { wikiArchive, route: routes.fetchRoutes.find(route => route.path === BOARD_WIKI_ARCHIVE_PATH)! }
   }
@@ -305,38 +310,33 @@ describe('plugin-selected synthesis model', () => {
   })
 })
 
-describe('expanded scope limits', () => {
-  /**
-   * One archiver whose scope always returns `expandedCount` sessions for the
-   * single requested id, so the preview exercises the expanded scope path.
-   * @param expandedCount - entries the mocked bridge returns.
-   * @returns the service and the ids it will report.
-   */
-  function expandedFixture(expandedCount: number) {
-    const ids = ['id', ...Array.from({ length: expandedCount - 1 }, (_, index) => `child-${index}`)]
-    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(requestedIds(args), args.includes('--dry-run')) }))
+describe('exact selection and archive-only mode', () => {
+  it('rejects a scope that reports ids the user did not check', async () => {
     const run = async (operation: string) => operation === 'scope'
       ? {
-        entries: ids.map((session, index) => ({ session, source: `source/${session}`, parent: index === 0 ? null : 'id', role: index === 0 ? 'main' : 'child', evidence: index === 0 ? 'selected session header' : 'parentSession', snapshot: false })),
+        entries: [
+          { session: 'id', source: 'source/id', parent: null, role: 'main', evidence: 'selected session header', snapshot: false },
+          { session: 'child', source: 'source/child', parent: 'id', role: 'child', evidence: 'parentSession', snapshot: false },
+        ],
         missing: [],
       }
-      : operation === 'synthesize' ? { status: 'skipped', pages: [] } : { status: 'updated' }
-    const service = createWikiArchiver({ workflow: run, home: '/test', dshHome: '/test/.dsh', execute })
-    return { service, ids }
-  }
-
-  it('previews an expanded scope past the old 50 boundary', async () => {
-    const { service } = expandedFixture(60)
-    const plan = await service.preview(['id'])
-    expect(plan.summary.selected).toBe(60)
-    expect(plan.summary.results).toHaveLength(60)
-    service.close()
+      : { status: 'updated' }
+    const service = createWikiArchiver({ workflow: run, home: '/test', dshHome: '/test/.dsh-dev', execute: async () => ({ stdout: output(['id', 'child'], true) }) })
+    await expect(service.preview(['id'])).rejects.toThrow('SELECTION_MISMATCH')
   })
 
-  it('reports SCOPE_TOO_LARGE instead of a misleading invalid selection', async () => {
-    const { service } = expandedFixture(201)
-    await expect(service.preview(['id'])).rejects.toThrow('SCOPE_TOO_LARGE')
-    service.close()
+  it('offers an archive-only mode that skips synthesis and the index', async () => {
+    const run = vi.fn(async (operation: string) => operation === 'scope'
+      ? { entries: [{ session: 'id', source: 'source/id', parent: null, role: 'main', evidence: 'selected session header', snapshot: false }], missing: [] }
+      : { status: 'updated' })
+    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(['id'], args.includes('--dry-run')) }))
+    const service = createWikiArchiver({ workflow: run, home: '/test', dshHome: '/test/.dsh-dev', execute })
+    const plan = await service.preview(['id'], 'archive')
+    expect(plan.mode).toBe('archive')
+    const result = await service.commit(plan.token)
+    expect(result.archived).toBe(1)
+    expect(result.workflow).toBeUndefined()
+    expect(run.mock.calls.some(([operation]) => operation === 'synthesize' || operation === 'index' || operation === 'prompt' || operation === 'write')).toBe(false)
   })
 })
 

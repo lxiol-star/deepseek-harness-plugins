@@ -1,7 +1,9 @@
-import type { ArchivePreview, ArchiveSummary } from '../shared/archive.ts';
+import type { ArchiveMode, ArchivePreview, ArchiveSummary } from '../shared/archive.ts';
 export interface BatchState {
     selected: readonly string[];
     phase: 'idle' | 'previewing' | 'confirming' | 'archiving';
+    /** Follow-up selected for the next confirmation: full synthesis or archive only. */
+    mode: ArchiveMode;
     preview: ArchivePreview | null;
     result: ArchiveSummary | null;
     /** Stable error code for the localized message. */
@@ -10,7 +12,7 @@ export interface BatchState {
     errorDetail: string | null;
 }
 export interface ArchiveTransport {
-    preview(ids: readonly string[]): Promise<ArchivePreview>;
+    preview(ids: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>;
     commit(token: string): Promise<ArchiveSummary>;
 }
 /** One shared, explicit preview/confirm/write state machine for both views. */
@@ -31,7 +33,7 @@ export declare class BatchController {
      * and any error, so the panel stops occupying space once it has been read.
      */
     readonly dismissResult: () => void;
-    readonly preview: () => Promise<void>;
+    readonly preview: (mode?: ArchiveMode) => Promise<void>;
     readonly confirm: () => Promise<void>;
     isBusy(): boolean;
     dispose(): void;

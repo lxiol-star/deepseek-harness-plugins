@@ -19,16 +19,17 @@ export function BatchToolbar({ controller, groups, visibleGroups = groups, t }: 
         <button className="sb-btn" type="button" disabled={busy || visibleIds.length === 0} onClick={() => controller.selectAll(visibleIds)}>{t('batch.all')}</button>
         <button className="sb-btn" type="button" disabled={busy || state.selected.length === 0} onClick={controller.clear}>{t('batch.clear')}</button>
         <button className="sb-batchbar__action" type="button" disabled={busy || state.selected.length === 0} onClick={() => { void controller.preview() }}>{t(busy ? 'batch.working' : 'batch.preview')}</button>
+        <button className="sb-batchbar__action sb-batchbar__secondary" type="button" disabled={busy || state.selected.length === 0} onClick={() => { void controller.preview('archive') }} title={t('batch.archiveOnlyHint')}>{t('batch.archiveOnly')}</button>
       </div>
       {hiddenSelected > 0 ? <div className="sb-batch-status">{t('batch.hiddenSelected', { count: hiddenSelected })}</div> : null}
       {state.preview !== null && state.phase === 'confirming' ? (
         <div className="sb-batch-preview" role="region" aria-label={t('batch.confirmTitle')}>
-          <strong>{t('batch.confirmTitle')}</strong>
-          <p>{t('batch.destination')}</p>
+          <strong>{t(state.phase === 'confirming' && state.mode === 'archive' ? 'batch.confirmTitleArchive' : 'batch.confirmTitle')}</strong>
+          <p>{t(state.mode === 'archive' ? 'batch.destinationArchive' : 'batch.destination')}</p>
           <ul>{state.preview.summary.results.map(row => <li key={row.session}>{titles.get(row.session) || row.session}<small className="sb-batch-source">{row.source}</small>{state.preview?.summary.scope?.entries.filter(entry => entry.session === row.session).map(entry => <small key={entry.session} className="sb-batch-source">{t(entry.role === 'child' ? 'batch.scopeChild' : 'batch.scopeMain', { parent: entry.parent ?? '' })}{entry.snapshot ? ` · ${t('batch.snapshot')}` : ''}</small>)}</li>)}</ul>
           {state.preview.summary.scope?.missing.map(row => <p key={`${row.parent}:${row.session}`}>{t('batch.missing', row)}</p>)}
           <p>{t('batch.planCounts', { count: state.preview.summary.archived, skipped: state.preview.summary.skipped })}</p>
-          <button className="sb-batchbar__action" type="button" onClick={() => { void controller.confirm() }}>{t('batch.confirm')}</button>
+          <button className="sb-batchbar__action" type="button" onClick={() => { void controller.confirm() }}>{t(state.mode === 'archive' ? 'batch.confirmArchive' : 'batch.confirm')}</button>
           <button className="sb-btn" type="button" onClick={controller.cancel}>{t('batch.cancel')}</button>
         </div>
       ) : null}

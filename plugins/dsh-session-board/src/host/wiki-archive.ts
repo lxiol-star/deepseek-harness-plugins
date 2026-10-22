@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SCOPE, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
+import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SELECTION, type ArchiveMode, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
 import type { SynthesisModelSelection } from '../shared/synthesis.ts'
 import { DEFAULT_WIKI_CONFIG } from '../shared/wiki.ts'
 import { appendWikiLog, buildWikiRuntime, type WikiRuntime } from './wiki-config.ts'
@@ -21,7 +21,7 @@ export class WikiArchiveError extends Error {
   constructor(readonly code: string, readonly detail?: string) { super(code) }
 }
 export interface WikiArchiver {
-  preview(ids: readonly string[]): Promise<ArchivePreview>
+  preview(ids: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>
   commit(token: string): Promise<ArchiveSummary>
   close(): void
 }
@@ -271,7 +271,7 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
     }
   })
   const models = options.models
-  const previews = new Map<string, { ids: readonly string[]; expiresAt: number; sources: readonly string[]; scope: ArchiveScope }>()
+  const previews = new Map<string, { ids: readonly string[]; expiresAt: number; sources: readonly string[]; scope: ArchiveScope; mode: ArchiveMode }>()
   const controller = new AbortController()
   let busy = false
   let closed = false
@@ -325,22 +325,14 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   }
 
   return {
-    preview: async (raw) => exclusive(async () => {
+    preview: async (raw, mode = 'full') => exclusive(async () => {
       const requested = validateWikiIds(raw)
-      const rawScope = await workflow('scope', JSON.stringify(requested), controller.signal)
-      // Check the raw entry count first: the scope parser rejects an oversized
-      // list as "invalid", which used to surface as a misleading selection error.
-      const rawEntries = typeof rawScope === 'object' && rawScope !== null ? (rawScope as { entries?: unknown }).entries : undefined
-      if (Array.isArray(rawEntries) && rawEntries.length > MAX_ARCHIVE_SCOPE) {
-        throw new WikiArchiveError('SCOPE_TOO_LARGE', `the selected Sessions expand to ${rawEntries.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`)
-      }
-      const scope = parseArchiveScope(rawScope)
-      const expanded = scope.entries.map(entry => entry.session)
-      if (expanded.length > MAX_ARCHIVE_SCOPE) {
-        throw new WikiArchiveError('SCOPE_TOO_LARGE', `the selected Sessions expand to ${expanded.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`)
-      }
-      const ids = validateWikiIds(expanded, MAX_ARCHIVE_SCOPE)
-      if (requested.some(id => !ids.includes(id))) throw new WikiArchiveError('SELECTION_MISMATCH')
+      const scope = parseArchiveScope(await workflow('scope', JSON.stringify(requested), controller.signal))
+      const ids = validateWikiIds(scope.entries.map(entry => entry.session))
+      // Archive exactly what was checked: never add or drop ids behind the
+      // user's back. The bridge returns the requested order; a different set is
+      // a changed/ambiguous source set, not an invitation to archive more.
+      if (ids.length !== requested.length || requested.some(id => !ids.includes(id))) throw new WikiArchiveError('SELECTION_MISMATCH')
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key)
       // Dropped/cancelled previews must not permanently exhaust the map.
       if (previews.size >= 20) previews.delete(previews.keys().next().value as string)
@@ -352,8 +344,8 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       const rows = new Map(previewed.results.map(row => [row.session, row]))
       const summary: ArchiveSummary = { ...previewed, selected: ids.length, scope }
       const token = randomUUID(), expiresAt = now() + PREVIEW_TTL_MS
-      previews.set(token, { ids, expiresAt, sources: ids.map(id => rows.get(id)?.source ?? ''), scope })
-      return { token, expiresAt, summary }
+      previews.set(token, { ids, expiresAt, sources: ids.map(id => rows.get(id)?.source ?? ''), scope, mode })
+      return { token, expiresAt, summary, mode }
     }),
     commit: async (token) => exclusive(async () => {
       const plan = previews.get(token)
@@ -377,23 +369,26 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
           summary.results.push({ session: id, action: 'failed', source: plan.sources[plan.ids.indexOf(id)] ?? '' })
         }
       }
-      for (const row of summary.results) {
-        if (!row.page || !['archived', 'skipped'].includes(row.action)) continue
-        try {
-          synthesis.push(await synthesizeOne(row.session, row.page))
-        } catch {
-          if (closed) throw new WikiArchiveError('CANCELLED')
-          synthesis.push({ session: row.session, page: row.page, status: 'failed', pages: [], error: 'SYNTHESIS_FAILED' })
+      // `archive` stops at the raw copy: no model call, no index rewrite.
+      if (plan.mode === 'full') {
+        for (const row of summary.results) {
+          if (!row.page || !['archived', 'skipped'].includes(row.action)) continue
+          try {
+            synthesis.push(await synthesizeOne(row.session, row.page))
+          } catch {
+            if (closed) throw new WikiArchiveError('CANCELLED')
+            synthesis.push({ session: row.session, page: row.page, status: 'failed', pages: [], error: 'SYNTHESIS_FAILED' })
+          }
         }
+        let index: 'updated' | 'not-needed' | 'failed' = 'not-needed'
+        if (synthesis.some(row => row.pages.length > 0 || row.status === 'synthesized')) {
+          try {
+            const response = await workflow('index', '', controller.signal)
+            index = typeof response === 'object' && response !== null && 'status' in response && response.status === 'updated' ? 'updated' : 'failed'
+          } catch { index = 'failed' }
+        }
+        summary.workflow = { synthesis, index }
       }
-      let index: 'updated' | 'not-needed' | 'failed' = 'not-needed'
-      if (synthesis.some(row => row.pages.length > 0 || row.status === 'synthesized')) {
-        try {
-          const response = await workflow('index', '', controller.signal)
-          index = typeof response === 'object' && response !== null && 'status' in response && response.status === 'updated' ? 'updated' : 'failed'
-        } catch { index = 'failed' }
-      }
-      summary.workflow = { synthesis, index }
       return summary
     }),
     close: () => { closed = true; previews.clear(); controller.abort() },

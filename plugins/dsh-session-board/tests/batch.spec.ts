@@ -9,7 +9,7 @@ const summary = (rows: ArchiveSummary['results'], dry_run = false): ArchiveSumma
   failed: rows.filter(row => row.action === 'failed').length,
   selected: rows.length, dry_run, results: rows,
 })
-const plan: ArchivePreview = { token: 'token', expiresAt: Date.now() + 30_000, summary: summary([{ session: 'a', source: 'a', action: 'would-archive' }, { session: 'b', source: 'b', action: 'would-archive' }], true) }
+const plan: ArchivePreview = { token: 'token', expiresAt: Date.now() + 30_000, mode: 'full', summary: summary([{ session: 'a', source: 'a', action: 'would-archive' }, { session: 'b', source: 'b', action: 'would-archive' }], true) }
 
 describe('batch archive state machine', () => {
   it('preview never commits and confirmation commits exactly once', async () => {
@@ -51,6 +51,19 @@ describe('batch archive state machine', () => {
     controller.toggle('a'); await controller.preview(); controller.toggle('b'); await controller.confirm()
     expect(controller.getSnapshot().phase).toBe('idle')
     expect(commit).not.toHaveBeenCalled()
+  })
+  it('runs an archive-only preview and commit without a synthesis workflow', async () => {
+    const preview = vi.fn(async (_ids: readonly string[], _mode?: string) => ({ ...plan, mode: 'archive' as const }))
+    const commit = vi.fn(async () => summary([{ session: 'a', source: 'a', action: 'archived' }]))
+    const controller = new BatchController({ preview, commit })
+    controller.toggle('a')
+    await controller.preview('archive')
+    expect(preview).toHaveBeenCalledWith(['a'], 'archive')
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'confirming', mode: 'archive' })
+    await controller.confirm()
+    expect(commit).toHaveBeenCalledWith('token')
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'idle', mode: 'archive', error: null })
+    expect(controller.getSnapshot().result?.workflow).toBeUndefined()
   })
   it('caps and deduplicates select-all', () => {
     const controller = new BatchController({ preview: vi.fn(), commit: vi.fn() })

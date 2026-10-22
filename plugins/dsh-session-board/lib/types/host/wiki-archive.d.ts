@@ -1,4 +1,4 @@
-import { type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
+import { type ArchiveMode, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
 import type { SynthesisModelSelection } from '../shared/synthesis.ts';
 import { type WikiRuntime } from './wiki-config.ts';
 export declare class WikiArchiveError extends Error {
@@ -11,7 +11,7 @@ export declare class WikiArchiveError extends Error {
     constructor(code: string, detail?: string | undefined);
 }
 export interface WikiArchiver {
-    preview(ids: readonly string[]): Promise<ArchivePreview>;
+    preview(ids: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>;
     commit(token: string): Promise<ArchiveSummary>;
     close(): void;
 }

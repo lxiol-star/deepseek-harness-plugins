@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  MAX_ARCHIVE_SCOPE,
   MAX_ARCHIVE_SELECTION,
   WIKI_ARCHIVE_PATH,
   parseArchiveSummary,
@@ -161,15 +160,11 @@ describe('parseArchiveSummary', () => {
     expectRejected(payload => { payload.failed = 1 })
   })
 
-  it('bounds one expanded archive at MAX_ARCHIVE_SCOPE rows', () => {
-    // A summary describes the expanded scope (selection + children), which is
-    // larger than the 50-Session selection cap.
+  it('bounds one batch at MAX_ARCHIVE_SELECTION rows', () => {
     expect(parseArchiveSummary(summary(bulk(MAX_ARCHIVE_SELECTION))).selected).toBe(MAX_ARCHIVE_SELECTION)
-    expect(parseArchiveSummary(summary(bulk(MAX_ARCHIVE_SCOPE))).selected).toBe(MAX_ARCHIVE_SCOPE)
-    const over = summary(bulk(MAX_ARCHIVE_SCOPE + 1))
+    const over = summary(bulk(MAX_ARCHIVE_SELECTION + 1))
     expect(() => parseArchiveSummary(over)).toThrow('Inconsistent archive rows')
     expect(MAX_ARCHIVE_SELECTION).toBe(50)
-    expect(MAX_ARCHIVE_SCOPE).toBe(200)
   })
 
   it('keeps the wire path the client posts to', () => {

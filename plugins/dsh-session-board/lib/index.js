@@ -1962,7 +1962,6 @@ import { promisify as promisify2 } from "node:util";
 
 // src/shared/archive.ts
 var MAX_ARCHIVE_SELECTION = 50;
-var MAX_ARCHIVE_SCOPE = 200;
 var WIKI_WORKFLOW_CAPABILITY = 2;
 var WIKI_ARCHIVE_PATH = "/api/session-board/wiki-archive";
 function parseArchiveSummary(raw) {
@@ -1983,7 +1982,7 @@ function parseArchiveSummary(raw) {
     if (r.page !== void 0 && typeof r.page !== "string") throw new Error("Invalid archive page");
     return { session: r.session, source: r.source, action: r.action, ...r.page === void 0 ? {} : { page: r.page } };
   });
-  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SCOPE) throw new Error("Inconsistent archive rows");
+  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SELECTION) throw new Error("Inconsistent archive rows");
   const totals = results.reduce((n, row) => {
     const key = row.action === "would-archive" || row.action === "archived" ? "archived" : row.action;
     n[key]++;
@@ -2002,7 +2001,7 @@ function safeRawPage(raw) {
 }
 function parseArchiveScope(raw) {
   const scope = record(raw);
-  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SCOPE || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
+  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SELECTION || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
   const entries = scope.entries.map((item) => {
     const row = record(item);
     if (typeof row.session !== "string" || typeof row.source !== "string" || row.parent !== null && typeof row.parent !== "string" || !["main", "child"].includes(String(row.role)) || typeof row.evidence !== "string" || typeof row.snapshot !== "boolean") throw new Error("Invalid scope row");
@@ -2373,20 +2372,11 @@ function createWikiArchiver(options = {}) {
     return parseWrittenRow(await workflow("write", JSON.stringify({ page, output }), controller.signal), session, page);
   };
   return {
-    preview: async (raw) => exclusive(async () => {
+    preview: async (raw, mode = "full") => exclusive(async () => {
       const requested = validateWikiIds(raw);
-      const rawScope = await workflow("scope", JSON.stringify(requested), controller.signal);
-      const rawEntries = typeof rawScope === "object" && rawScope !== null ? rawScope.entries : void 0;
-      if (Array.isArray(rawEntries) && rawEntries.length > MAX_ARCHIVE_SCOPE) {
-        throw new WikiArchiveError("SCOPE_TOO_LARGE", `the selected Sessions expand to ${rawEntries.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`);
-      }
-      const scope = parseArchiveScope(rawScope);
-      const expanded = scope.entries.map((entry) => entry.session);
-      if (expanded.length > MAX_ARCHIVE_SCOPE) {
-        throw new WikiArchiveError("SCOPE_TOO_LARGE", `the selected Sessions expand to ${expanded.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`);
-      }
-      const ids = validateWikiIds(expanded, MAX_ARCHIVE_SCOPE);
-      if (requested.some((id) => !ids.includes(id))) throw new WikiArchiveError("SELECTION_MISMATCH");
+      const scope = parseArchiveScope(await workflow("scope", JSON.stringify(requested), controller.signal));
+      const ids = validateWikiIds(scope.entries.map((entry) => entry.session));
+      if (ids.length !== requested.length || requested.some((id) => !ids.includes(id))) throw new WikiArchiveError("SELECTION_MISMATCH");
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key);
       if (previews.size >= 20) previews.delete(previews.keys().next().value);
       const previewed = await perform(ids, true);
@@ -2394,8 +2384,8 @@ function createWikiArchiver(options = {}) {
       const rows = new Map(previewed.results.map((row) => [row.session, row]));
       const summary = { ...previewed, selected: ids.length, scope };
       const token = randomUUID2(), expiresAt = now() + PREVIEW_TTL_MS;
-      previews.set(token, { ids, expiresAt, sources: ids.map((id) => rows.get(id)?.source ?? ""), scope });
-      return { token, expiresAt, summary };
+      previews.set(token, { ids, expiresAt, sources: ids.map((id) => rows.get(id)?.source ?? ""), scope, mode });
+      return { token, expiresAt, summary, mode };
     }),
     commit: async (token) => exclusive(async () => {
       const plan = previews.get(token);
@@ -2404,7 +2394,7 @@ function createWikiArchiver(options = {}) {
       const currentScope = parseArchiveScope(await workflow("scope", JSON.stringify(plan.ids), controller.signal));
       if (JSON.stringify(currentScope.entries.map(({ snapshot: _snapshot, ...entry }) => entry)) !== JSON.stringify(plan.scope.entries.map(({ snapshot: _snapshot, ...entry }) => entry))) throw new WikiArchiveError("SELECTION_MISMATCH");
       const currentRows = new Map((await perform(plan.ids, true)).results.map((row) => [row.session, row]));
-      if (plan.ids.some((id, index2) => (currentRows.get(id)?.source ?? "") !== plan.sources[index2])) throw new WikiArchiveError("SELECTION_MISMATCH");
+      if (plan.ids.some((id, index) => (currentRows.get(id)?.source ?? "") !== plan.sources[index])) throw new WikiArchiveError("SELECTION_MISMATCH");
       if (closed) throw new WikiArchiveError("CANCELLED");
       const summary = { archived: 0, skipped: 0, empty: 0, failed: 0, selected: plan.ids.length, dry_run: false, results: [], scope: currentScope };
       const synthesis = [];
@@ -2422,25 +2412,27 @@ function createWikiArchiver(options = {}) {
           summary.results.push({ session: id, action: "failed", source: plan.sources[plan.ids.indexOf(id)] ?? "" });
         }
       }
-      for (const row of summary.results) {
-        if (!row.page || !["archived", "skipped"].includes(row.action)) continue;
-        try {
-          synthesis.push(await synthesizeOne(row.session, row.page));
-        } catch {
-          if (closed) throw new WikiArchiveError("CANCELLED");
-          synthesis.push({ session: row.session, page: row.page, status: "failed", pages: [], error: "SYNTHESIS_FAILED" });
+      if (plan.mode === "full") {
+        for (const row of summary.results) {
+          if (!row.page || !["archived", "skipped"].includes(row.action)) continue;
+          try {
+            synthesis.push(await synthesizeOne(row.session, row.page));
+          } catch {
+            if (closed) throw new WikiArchiveError("CANCELLED");
+            synthesis.push({ session: row.session, page: row.page, status: "failed", pages: [], error: "SYNTHESIS_FAILED" });
+          }
         }
-      }
-      let index = "not-needed";
-      if (synthesis.some((row) => row.pages.length > 0 || row.status === "synthesized")) {
-        try {
-          const response = await workflow("index", "", controller.signal);
-          index = typeof response === "object" && response !== null && "status" in response && response.status === "updated" ? "updated" : "failed";
-        } catch {
-          index = "failed";
+        let index = "not-needed";
+        if (synthesis.some((row) => row.pages.length > 0 || row.status === "synthesized")) {
+          try {
+            const response = await workflow("index", "", controller.signal);
+            index = typeof response === "object" && response !== null && "status" in response && response.status === "updated" ? "updated" : "failed";
+          } catch {
+            index = "failed";
+          }
         }
+        summary.workflow = { synthesis, index };
       }
-      summary.workflow = { synthesis, index };
       return summary;
     }),
     close: () => {
@@ -2530,7 +2522,8 @@ data: ${JSON.stringify(feed)}
       try {
         if (value.action === "capabilities") return jsonResponse2(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } });
         if (value.action === "preview") {
-          const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds));
+          const mode = value.mode === "archive" ? "archive" : "full";
+          const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds), mode);
           return jsonResponse2(200, { ok: true, preview });
         }
         if ((value.action === "start" || value.action === "status") && typeof value.token === "string" && value.token.length <= 100) {

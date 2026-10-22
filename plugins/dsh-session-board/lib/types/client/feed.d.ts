@@ -9,7 +9,7 @@
  */
 import { type BoardFeed } from '../shared/types.ts';
 import type { ReadonlyStore } from './store.ts';
-import { type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
+import { type ArchiveMode, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
 /** One archive-route failure: the stable code plus the host's diagnostic line. */
 export declare class ArchiveRequestError extends Error {
     readonly code: string;
@@ -70,7 +70,7 @@ export declare class BoardFeedClient implements ReadonlyStore<BoardFeedState> {
      * browser bundle can be newer than the host it talks to after an upgrade.
      */
     private requireWorkflow;
-    previewArchive(sessionIds: readonly string[]): Promise<ArchivePreview>;
+    previewArchive(sessionIds: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>;
     commitArchive(token: string): Promise<ArchiveSummary>;
     ack(sessionId: string): Promise<void>;
     /** Close the channel and stop reconnecting. */

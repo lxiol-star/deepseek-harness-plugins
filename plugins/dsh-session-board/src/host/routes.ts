@@ -222,7 +222,8 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       try {
         if (value.action === 'capabilities') return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } })
         if (value.action === 'preview') {
-          const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds))
+          const mode = value.mode === 'archive' ? 'archive' : 'full'
+          const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds), mode)
           return jsonResponse(200, { ok: true, preview })
         }
         if ((value.action === 'start' || value.action === 'status') && typeof value.token === 'string' && value.token.length <= 100) {

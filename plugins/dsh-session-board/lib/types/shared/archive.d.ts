@@ -45,19 +45,22 @@ export interface ArchiveSummary {
     scope?: ArchiveScope;
     workflow?: WikiWorkflowResult;
 }
+/**
+ * What a batch does after copying the selected Sessions into the raw layer.
+ *
+ * `full` follows with synthesis and the index update (the original flow);
+ * `archive` stops after the raw archive and DSH's native archive action, so a
+ * batch can be preserved without spending model calls.
+ */
+export type ArchiveMode = 'full' | 'archive';
 export interface ArchivePreview {
     token: string;
     expiresAt: number;
     summary: ArchiveSummary;
+    /** Which follow-up the confirmation will run. */
+    mode: ArchiveMode;
 }
 export declare const MAX_ARCHIVE_SELECTION = 50;
-/**
- * Cap for the expanded scope: the selected Sessions plus every archived child
- * discovered through `parentSession` / subagent catalogs. Selecting 25 Sessions
- * whose trees contain 30 children stays a sane batch; the old single 50 cap
- * rejected it with a misleading "selection is invalid" message.
- */
-export declare const MAX_ARCHIVE_SCOPE = 200;
 /**
  * Capability level the browser half requires from the running host half.
  *

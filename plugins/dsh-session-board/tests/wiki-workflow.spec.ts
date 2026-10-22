@@ -44,7 +44,7 @@ describe.skipIf(!wikiWriteIntegrationAvailable)('real wiki-synthesize.py write p
 })
 
 describe.skipIf(!wikiIntegrationAvailable)('real Python workflow bridge with synthetic inputs only', () => {
-  it('includes verified children and grandchildren, excludes unrelated sessions and reports missing children', () => {
+  it('scopes exactly the checked sessions and reports children with no source', () => {
     const f = fixture()
     for (const [id, parent] of [['main', null], ['child', 'main'], ['grandchild', 'child'], ['unrelated', null]]) {
       const dir = join(f.dsh, 'sessions', 'project', id!)
@@ -54,10 +54,14 @@ describe.skipIf(!wikiIntegrationAvailable)('real Python workflow bridge with syn
       writeFileSync(plain, events.map(row => JSON.stringify(row)).join('\n'))
       execFileSync(zstdBinary, ['-q', '-f', plain, '-o', join(dir, 'session.v4.jsonl.zstd')])
     }
-    const result = f.run('scope', '["main"]')
-    expect(result.entries.map((entry: { session: string }) => entry.session)).toEqual(['main', 'child', 'grandchild'])
-    expect(result.entries[1]).toMatchObject({ parent: 'main', role: 'child', snapshot: true })
-    expect(result.missing).toEqual([{ session: 'missing', parent: 'main' }])
+    // Checked sessions are archived as-is: no implicit child expansion.
+    const single = f.run('scope', '["main"]')
+    expect(single.entries.map((entry: { session: string }) => entry.session)).toEqual(['main'])
+    expect(single.missing).toEqual([{ session: 'missing', parent: 'main' }])
+    // Checking the children explicitly archives them, in the requested order.
+    const explicit = f.run('scope', '["main", "child", "grandchild"]')
+    expect(explicit.entries.map((entry: { session: string }) => entry.session)).toEqual(['main', 'child', 'grandchild'])
+    expect(explicit.entries[1]).toMatchObject({ parent: 'main', role: 'child', snapshot: true })
   })
   it('blocks recognizable credentials before launching any synthesis process', () => {
     const f = fixture(), page = 'raw/sessions/host/dsh/one.md'

@@ -86,23 +86,28 @@ describe.skipIf(!pythonAvailable)('vendored wiki engine bridge', () => {
     writeFileSync(join(home, 'wiki', 'SCHEMA.md'), '# Synthetic schema')
     const dsh = syntheticHome(home)
     const scope = run(home, dsh, 'scope', '["main"]') as { entries: { session: string; parent: string | null }[]; missing: unknown[] }
-    expect(scope.entries.map(entry => entry.session)).toEqual(['main', 'child'])
-    expect(scope.entries[1]).toMatchObject({ parent: 'main' })
+    expect(scope.entries.map(entry => entry.session)).toEqual(['main'])
     expect(scope.missing).toEqual([])
+    const both = run(home, dsh, 'scope', '["main", "child"]') as { entries: { session: string; parent: string | null }[] }
+    expect(both.entries.map(entry => entry.session)).toEqual(['main', 'child'])
+    expect(both.entries[1]).toMatchObject({ parent: 'main' })
     // stdout is exactly one JSON document: the log file carries diagnostics.
     const log = spawnSync('/bin/cat', [join(home, 'bridge.log')], { encoding: 'utf8' }).stdout
     expect(log).toContain('done')
   })
 
-  it.skipIf(!zstdAvailable)('expands past the old 50 boundary up to the 200-session scope cap', () => {
-    const home = mkdtempSync(join(tmpdir(), 'board-bridge-expand-'))
+  it.skipIf(!zstdAvailable)('archives exactly the checked sessions, not their children', () => {
+    const home = mkdtempSync(join(tmpdir(), 'board-bridge-exact-'))
     mkdirSync(join(home, 'wiki'), { recursive: true })
     writeFileSync(join(home, 'wiki', 'SCHEMA.md'), '# Synthetic schema')
     const dsh = join(home, 'dsh')
     transcript(home, dsh, 'main', null)
-    for (let index = 0; index < 60; index += 1) transcript(home, dsh, `child-${index}`, 'main')
-    const scope = run(home, dsh, 'scope', '["main"]') as { entries: { session: string }[] }
-    expect(scope.entries).toHaveLength(61)
+    transcript(home, dsh, 'child-one', 'main')
+    transcript(home, dsh, 'child-two', 'main')
+    const mainOnly = run(home, dsh, 'scope', '["main"]') as { entries: { session: string }[] }
+    expect(mainOnly.entries.map(entry => entry.session)).toEqual(['main'])
+    const picked = run(home, dsh, 'scope', '["main", "child-one"]') as { entries: { session: string }[] }
+    expect(picked.entries.map(entry => entry.session)).toEqual(['main', 'child-one'])
   }, 60_000)
 
   it('creates the diagnostic log directory on demand', () => {
