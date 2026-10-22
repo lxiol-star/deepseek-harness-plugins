@@ -24,6 +24,7 @@
 import { type ReactElement } from 'react';
 import type { GroupingMode } from './workspace-tree.ts';
 import type { BoardGroup } from '../shared/types.ts';
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts';
 import { type Translate } from './hooks.ts';
 /** Props of {@link BoardOverlay}. */
 export interface BoardOverlayProps {
@@ -44,6 +45,8 @@ export interface BoardOverlayProps {
     selectionDisabled?: boolean;
     collapsedGroups: Readonly<Record<string, boolean>>;
     onToggleGroup: (group: string) => void;
+    /** Workspace id → git facts, for the project tree. */
+    workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>;
 }
 /** The fullscreen board, or null while closed. */
 export declare function BoardOverlay(props: BoardOverlayProps): ReactElement | null;

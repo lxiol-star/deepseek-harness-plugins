@@ -4,7 +4,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 
 ## 功能
 
-- 按状态、工作区或工作区路径树分组，支持展开与折叠。
+- 按状态、工作区或**项目树**分组：项目树会探测每个工作区的 git `origin` 与当前分支，把同一仓库的不同分支工作区归到同一个项目节点下（分支名显示在标题旁），非 git 目录继续按路径树分组；支持多级展开与折叠。
 - 按标题、预览、工作区和状态搜索筛选。
 - 默认简洁卡片，展开后查看指令、Token、缓存、后台任务和长预览。
 - 直接读取 DSH 工作区快照的 `archivedSessionIds`：在客户端归档的会话，插件也显示“DSH 中已归档”，默认隐藏；客户端恢复后随快照更新。
@@ -32,10 +32,10 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.6.0.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.7.0.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.6.0.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.7.0.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

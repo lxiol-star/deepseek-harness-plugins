@@ -191,25 +191,31 @@ var import_react4 = require("react");
 function workspaceKey(entry) {
   return entry.workspaceId || entry.workspacePath || entry.workspaceTitle || "unassigned";
 }
-function buildWorkspaceNodes(groups, tree) {
-  let roots = [], byKey = /* @__PURE__ */ new Map();
+function workspaceEntries(groups) {
+  let byKey = /* @__PURE__ */ new Map();
   for (let entry of groups.flatMap((group) => group.entries)) {
-    if (!tree) {
-      let key2 = `workspace:${workspaceKey(entry)}`, node = byKey.get(key2);
-      node || (node = { key: key2, title: entry.workspaceTitle, path: entry.workspacePath ?? "", entries: [], children: [], count: 0 }, byKey.set(key2, node), roots.push(node)), node.entries.push(entry), node.count++;
-      continue;
-    }
-    let path = (entry.workspacePath ?? "").replaceAll("\\", "/"), drive = /^[A-Za-z]:\//.exec(path)?.[0] ?? (path.startsWith("/") ? "/" : ""), parts = path.slice(drive.length).split("/").filter(Boolean), parent = roots, prefix = drive, chain = [];
-    for (let part of parts) {
-      prefix += `${prefix.endsWith("/") || prefix === "" ? "" : "/"}${part}`;
-      let key2 = `path:${prefix}`, node = byKey.get(key2);
-      node || (node = { key: key2, title: part, path: prefix, entries: [], children: [], count: 0 }, byKey.set(key2, node), parent.push(node)), chain.push(node), parent = node.children;
-    }
-    let key = `tree-workspace:${workspaceKey(entry)}`, leaf = byKey.get(key);
-    leaf || (leaf = { key, title: entry.workspaceTitle || path, path, entries: [], children: [], count: 0 }, byKey.set(key, leaf), parent.push(leaf)), leaf.entries.push(entry), leaf.count++;
-    for (let node of chain) node.count++;
+    let key = workspaceKey(entry), bucket = byKey.get(key);
+    bucket === void 0 && (bucket = { key, title: entry.workspaceTitle, path: entry.workspacePath ?? "", entries: [], ...entry.workspaceId === void 0 ? {} : { workspaceId: entry.workspaceId } }, byKey.set(key, bucket)), bucket.entries.push(entry);
   }
-  let compact = (nodes) => nodes.map((node) => {
+  return [...byKey.values()];
+}
+function flatNodes(groups) {
+  return workspaceEntries(groups).map((bucket) => ({
+    key: `workspace:${bucket.key}`,
+    title: bucket.title,
+    path: bucket.path,
+    entries: bucket.entries,
+    children: [],
+    count: bucket.entries.length,
+    kind: "workspace"
+  })).sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path) || a.key.localeCompare(b.key));
+}
+function pathParts(path) {
+  let normalized = path.replaceAll("\\", "/"), drive = /^[A-Za-z]:\//.exec(normalized)?.[0] ?? (normalized.startsWith("/") ? "/" : "");
+  return { drive, parts: normalized.slice(drive.length).split("/").filter(Boolean) };
+}
+function compact(nodes) {
+  return nodes.map((node) => {
     let value = { ...node, children: compact(node.children) };
     for (; value.entries.length === 0 && value.children.length === 1; ) {
       let child = value.children[0];
@@ -217,7 +223,57 @@ function buildWorkspaceNodes(groups, tree) {
     }
     return value;
   }).sort((a, b) => a.path.localeCompare(b.path) || a.title.localeCompare(b.title) || a.key.localeCompare(b.key));
-  return tree ? compact(roots) : roots.sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path) || a.key.localeCompare(b.key));
+}
+function pathTrees(buckets) {
+  let roots = [], byKey = /* @__PURE__ */ new Map();
+  for (let bucket of buckets) {
+    let { drive, parts } = pathParts(bucket.path), parent = roots, prefix = drive, chain = [];
+    for (let part of parts) {
+      prefix += `${prefix.endsWith("/") || prefix === "" ? "" : "/"}${part}`;
+      let key = `path:${prefix}`, node = byKey.get(key);
+      node === void 0 && (node = { key, title: part, path: prefix, entries: [], children: [], count: 0, kind: "path" }, byKey.set(key, node), parent.push(node)), chain.push(node), parent = node.children;
+    }
+    let leafKey = `tree-workspace:${bucket.key}`, leaf = byKey.get(leafKey);
+    leaf === void 0 && (leaf = { key: leafKey, title: bucket.title || bucket.path, path: bucket.path.replaceAll("\\", "/"), entries: [], children: [], count: 0, kind: "workspace" }, byKey.set(leafKey, leaf), parent.push(leaf)), leaf.entries.push(...bucket.entries), leaf.count += bucket.entries.length;
+    for (let node of chain) node.count += bucket.entries.length;
+  }
+  return compact(roots);
+}
+function projectNodes(groups, meta) {
+  let buckets = workspaceEntries(groups), projects = /* @__PURE__ */ new Map(), rest = [];
+  for (let bucket of buckets) {
+    let info = bucket.workspaceId === void 0 ? void 0 : meta[bucket.workspaceId], projectKey = info?.projectKey;
+    if (info === void 0 || projectKey === void 0) {
+      rest.push(bucket);
+      continue;
+    }
+    let project = projects.get(projectKey);
+    project === void 0 && (project = { key: projectKey, title: info.projectLabel ?? projectKey.split("/").pop() ?? projectKey, remote: info.remote ?? projectKey, leaves: [] }, projects.set(projectKey, project)), project.leaves.push({ bucket, branch: info.branch ?? "" });
+  }
+  return [...[...projects.values()].sort((a, b) => a.title.localeCompare(b.title) || a.key.localeCompare(b.key)).map((project) => {
+    let children = project.leaves.sort((a, b) => a.bucket.title.localeCompare(b.bucket.title) || a.branch.localeCompare(b.branch)).map(({ bucket, branch }) => ({
+      key: `tree-workspace:${bucket.key}`,
+      title: bucket.title || bucket.path,
+      path: bucket.path.replaceAll("\\", "/"),
+      entries: bucket.entries,
+      children: [],
+      count: bucket.entries.length,
+      kind: "workspace",
+      ...branch === "" ? {} : { subtitle: branch }
+    }));
+    return {
+      key: `project:${project.key}`,
+      title: project.title,
+      path: project.remote,
+      entries: [],
+      children,
+      count: children.reduce((sum, child) => sum + child.count, 0),
+      kind: "project"
+    };
+  }), ...pathTrees(rest)];
+}
+function buildWorkspaceNodes(groups, tree, meta = {}) {
+  return tree ? projectNodes(groups, meta) : flatNodes(groups);
 }
 
 // src/client/SessionCard.tsx
@@ -553,7 +609,8 @@ function BoardList({
   onToggleSelect,
   selectionDisabled,
   emptyKey,
-  grouping = "status"
+  grouping = "status",
+  workspaceMeta
 }) {
   if (groups.reduce((sum, group) => sum + group.entries.length, 0) === 0) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
   if (grouping !== "status") {
@@ -563,15 +620,16 @@ function BoardList({
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": t("a11y.groupCount", { group: title, count: node.count }), children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: title }),
+          node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", children: node.subtitle }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
         ] }),
         open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-body", children: [
-          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey }) : null,
+          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, workspaceMeta }) : null,
           node.children.map(renderNode)
         ] }) : null
       ] }, node.key);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_jsx_runtime3.Fragment, { children: buildWorkspaceNodes(groups, grouping === "tree").map(renderNode) });
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_jsx_runtime3.Fragment, { children: buildWorkspaceNodes(groups, grouping === "tree", workspaceMeta ?? {}).map(renderNode) });
   }
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_jsx_runtime3.Fragment, { children: groups.map((group) => {
     if (group.entries.length === 0) return null;
@@ -646,7 +704,8 @@ function BoardDock(props) {
     emptyKey,
     selectionDisabled,
     collapsedGroups,
-    onToggleGroup
+    onToggleGroup,
+    workspaceMeta
   } = props, [dragging, setDragging] = (0, import_react5.useState)(!1), [liveWidth, setLiveWidth] = (0, import_react5.useState)(width), dragState = (0, import_react5.useRef)(null), hidden = useDocumentHidden(), total = groups.reduce((sum, group) => sum + group.entries.length, 0), onPointerDown = (0, import_react5.useCallback)((event) => {
     event.button === 0 && (event.preventDefault(), event.currentTarget.setPointerCapture(event.pointerId), dragState.current = { startX: event.clientX, startWidth: clampDockWidth(width), pointerId: event.pointerId, frame: null, latest: clampDockWidth(width) }, setDragging(!0));
   }, [width]), onPointerMove = (0, import_react5.useCallback)((event) => {
@@ -675,7 +734,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.6.0",
+      "data-session-board-version": "0.7.0",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -699,7 +758,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.6.0",
+      "data-session-board-version": "0.7.0",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -745,7 +804,8 @@ function BoardDock(props) {
               onAck,
               selected,
               onToggleSelect,
-              selectionDisabled
+              selectionDisabled,
+              workspaceMeta
             }
           )
         ] }),
@@ -1149,7 +1209,8 @@ function BoardOverlay(props) {
     emptyKey,
     selectionDisabled,
     collapsedGroups,
-    onToggleGroup
+    onToggleGroup,
+    workspaceMeta
   } = props, panelRef = (0, import_react6.useRef)(null), closeRef = (0, import_react6.useRef)(onClose);
   closeRef.current = onClose;
   let restoreLabelsRef = (0, import_react6.useRef)([]);
@@ -1195,7 +1256,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.6.0",
+        "data-session-board-version": "0.7.0",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1248,7 +1309,8 @@ function BoardOverlay(props) {
               onAck,
               selected,
               onToggleSelect,
-              selectionDisabled
+              selectionDisabled,
+              workspaceMeta
             }
           ) })
         ]
@@ -1946,6 +2008,7 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-root .sb-card[data-expanded="true"] { height: 320px; min-height: 320px; max-height: 320px; flex-basis: 320px; }
 .sb-card-details { align-self: flex-start; font-size: 11px; }
 .sb-workspace-node { min-width: 0; margin-bottom: 8px; }
+.sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }
@@ -2741,7 +2804,7 @@ var NS = "session-board", en = {
   "filter.grouping": "Group sessions",
   "filter.byStatus": "By status",
   "filter.byWorkspace": "By workspace",
-  "filter.byTree": "Workspace tree",
+  "filter.byTree": "Project tree",
   "card.archived": "Archived to Wiki",
   "workspace.unassigned": "Unassigned workspace",
   "batch.scopeMain": "Selected main session",
@@ -5137,6 +5200,54 @@ var ManagerController = class {
   }
 };
 
+// src/shared/workspace-meta.ts
+var WORKSPACE_META_PATH = "/api/session-board/workspace-meta";
+function parseWorkspaceMetaResponse(raw) {
+  if (typeof raw != "object" || raw === null || Array.isArray(raw)) return null;
+  let value = raw;
+  if (value.ok !== !0 || !Array.isArray(value.workspaces)) return null;
+  let workspaces = [];
+  for (let item of value.workspaces) {
+    if (typeof item != "object" || item === null) continue;
+    let row = item;
+    typeof row.workspaceId != "string" || typeof row.path != "string" || workspaces.push({
+      workspaceId: row.workspaceId,
+      title: typeof row.title == "string" ? row.title : row.path,
+      path: row.path,
+      ...typeof row.branch == "string" && row.branch !== "" ? { branch: row.branch } : {},
+      ...typeof row.projectKey == "string" && row.projectKey !== "" ? { projectKey: row.projectKey } : {},
+      ...typeof row.projectLabel == "string" && row.projectLabel !== "" ? { projectLabel: row.projectLabel } : {},
+      ...typeof row.remote == "string" && row.remote !== "" ? { remote: row.remote } : {},
+      ...typeof row.root == "string" && row.root !== "" ? { root: row.root } : {}
+    });
+  }
+  return { ok: !0, generatedAt: typeof value.generatedAt == "number" ? value.generatedAt : Date.now(), workspaces };
+}
+
+// src/client/workspace-meta.ts
+var TTL_MS = 12e4;
+function createWorkspaceMeta() {
+  let state = createStore({ status: "idle", byId: {}, at: 0 }), inflight = null;
+  return { store: state, load: async (force = !1) => {
+    let current = state.getSnapshot();
+    if (inflight !== null) return await inflight;
+    if (!(!force && current.at > 0 && Date.now() - current.at < TTL_MS) && current.status !== "loading")
+      return state.set({ ...current, status: "loading" }), inflight = (async () => {
+        try {
+          let response = await globalThis.fetch(WORKSPACE_META_PATH), payload = await response.json().catch(() => null), parsed = response.ok ? parseWorkspaceMetaResponse(payload) : null;
+          if (parsed === null) throw new Error("WORKSPACE_META_UNAVAILABLE");
+          let byId = {};
+          for (let workspace of parsed.workspaces) byId[workspace.workspaceId] = workspace;
+          state.set({ status: "ready", byId, at: parsed.generatedAt });
+        } catch {
+          state.set({ ...state.getSnapshot(), status: "error" });
+        } finally {
+          inflight = null;
+        }
+      })(), await inflight;
+  } };
+}
+
 // src/client/manager/ManagerDrawer.tsx
 var import_react10 = require("react");
 var import_jsx_runtime9 = require("react/jsx-runtime"), PHASE_LABEL = {
@@ -5516,11 +5627,12 @@ function useFilters(face, groups) {
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
 function DockRoot({ face }) {
-  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face);
+  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     BoardDock,
     {
       grouping: view.grouping,
+      workspaceMeta,
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",
       t,
@@ -5538,7 +5650,9 @@ function DockRoot({ face }) {
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
       toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
+          face.view.set((current) => ({ ...current, grouping })), grouping === "tree" && face.workspaceMeta.load(!0);
+        } }),
         /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
@@ -5549,12 +5663,13 @@ function DockRoot({ face }) {
 function OpenOverlayContent({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react11.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react11.useCallback)((id) => {
     face.openSession(id), setBoardOpen(!1);
-  }, [face, setBoardOpen]);
+  }, [face, setBoardOpen]), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     BoardOverlay,
     {
       open: !0,
       grouping: view.grouping,
+      workspaceMeta,
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",
       t,
@@ -5568,7 +5683,9 @@ function OpenOverlayContent({ face }) {
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
       toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
+          face.view.set((current) => ({ ...current, grouping })), grouping === "tree" && face.workspaceMeta.load(!0);
+        } }),
         /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
@@ -5703,8 +5820,8 @@ function apply(ctx) {
         }
       });
       cleanup.add(() => batch.dispose());
-      let manager = new ManagerController({ sessions, workspaces });
-      cleanup.add(() => manager.dispose()), feed.start();
+      let manager = new ManagerController({ sessions, workspaces }), workspaceMeta = createWorkspaceMeta();
+      workspaceMeta.load(), cleanup.add(() => manager.dispose()), feed.start();
       let resumePush = () => {
         doc.visibilityState === "visible" && feed.resume();
       };
@@ -5719,6 +5836,7 @@ function apply(ctx) {
         jobs,
         workspaces,
         manager,
+        workspaceMeta,
         openSession: (id) => {
           let nav = navigationOf();
           if (nav === void 0 || typeof nav.openSession != "function") {

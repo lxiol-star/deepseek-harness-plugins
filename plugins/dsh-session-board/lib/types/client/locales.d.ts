@@ -32,7 +32,7 @@ export declare const en: {
     readonly 'filter.grouping': "Group sessions";
     readonly 'filter.byStatus': "By status";
     readonly 'filter.byWorkspace': "By workspace";
-    readonly 'filter.byTree': "Workspace tree";
+    readonly 'filter.byTree': "Project tree";
     readonly 'card.archived': "Archived to Wiki";
     readonly 'workspace.unassigned': "Unassigned workspace";
     readonly 'batch.scopeMain': "Selected main session";

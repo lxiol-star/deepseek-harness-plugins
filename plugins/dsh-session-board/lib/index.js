@@ -3142,6 +3142,140 @@ function describeError2(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// src/host/workspace-meta.ts
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+
+// src/shared/workspace-meta.ts
+var WORKSPACE_META_PATH = "/api/session-board/workspace-meta";
+function normalizeRemote(raw) {
+  let value = raw.trim();
+  if (value === "") return "";
+  if (value.startsWith("git@") || /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/.test(value)) {
+    const at = value.indexOf("@");
+    const colon = value.indexOf(":", at);
+    if (colon !== -1) value = `${value.slice(at + 1, colon)}/${value.slice(colon + 1)}`;
+  } else if (value.includes("://")) {
+    try {
+      const url = new URL(value);
+      value = `${url.hostname}${url.pathname}`;
+    } catch {
+      return "";
+    }
+  }
+  value = value.replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+  const parts = value.split("/").filter(Boolean).map((part) => part.toLowerCase());
+  const host = parts.shift();
+  if (host === void 0 || parts.length === 0) return "";
+  return `${host}/${parts.join("/")}`;
+}
+function projectLabel(key) {
+  const parts = key.split("/");
+  return parts.length === 0 || parts[parts.length - 1] === "" ? null : parts[parts.length - 1];
+}
+
+// src/host/workspace-meta.ts
+var exec3 = promisify3(execFile3);
+var MAX_WORKSPACES = 400;
+var PROBE_CONCURRENCY = 6;
+var DEFAULT_TTL_MS = 12e4;
+async function probeWorkspaceGit(path) {
+  const run = async (args) => {
+    const result = await exec3("git", ["-C", path, ...args], { timeout: 2500, maxBuffer: 64 * 1024 });
+    return result.stdout.trim();
+  };
+  let root;
+  try {
+    root = await run(["rev-parse", "--show-toplevel"]);
+  } catch {
+    return {};
+  }
+  if (root === "") return {};
+  let branch;
+  let remote;
+  try {
+    const value = await run(["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (value !== "" && value !== "HEAD") branch = value;
+  } catch {
+  }
+  try {
+    const value = await run(["config", "--get", "remote.origin.url"]);
+    if (value !== "") remote = value;
+  } catch {
+  }
+  return { root, ...branch === void 0 ? {} : { branch }, ...remote === void 0 ? {} : { remote } };
+}
+function jsonResponse3(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+  });
+}
+function createWorkspaceMetaRoute(options) {
+  const ttl = options.ttlMs ?? DEFAULT_TTL_MS;
+  const probe = options.probe ?? probeWorkspaceGit;
+  const now = options.now ?? Date.now;
+  const cache = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Map();
+  const factsFor = async (workspaceId, path) => {
+    const cached = cache.get(workspaceId);
+    if (cached !== void 0 && now() - cached.at < ttl) return cached.facts;
+    const running = inflight.get(workspaceId);
+    if (running !== void 0) return await running;
+    const task = (async () => {
+      try {
+        const facts = await probe(path);
+        cache.set(workspaceId, { at: now(), facts });
+        return facts;
+      } catch (error) {
+        options.warn(`dsh-session-board: workspace probe failed for ${path}: ${String(error)}`);
+        return {};
+      } finally {
+        inflight.delete(workspaceId);
+      }
+    })();
+    inflight.set(workspaceId, task);
+    return await task;
+  };
+  const rowFor = (workspace, facts) => {
+    const projectKey = facts.remote === void 0 ? "" : normalizeRemote(facts.remote);
+    const label = projectKey === "" ? null : projectLabel(projectKey);
+    return {
+      workspaceId: workspace.id,
+      title: workspace.title,
+      path: workspace.path,
+      ...facts.branch === void 0 ? {} : { branch: facts.branch },
+      ...projectKey === "" ? {} : { projectKey },
+      ...label === null ? {} : { projectLabel: label },
+      ...facts.remote === void 0 ? {} : { remote: facts.remote },
+      ...facts.root === void 0 ? {} : { root: facts.root }
+    };
+  };
+  return {
+    path: WORKSPACE_META_PATH,
+    methods: ["GET"],
+    requestBody: "buffered",
+    fetch: async () => {
+      try {
+        const listed = options.registry.list().slice(0, MAX_WORKSPACES);
+        const rows = [];
+        for (let start = 0; start < listed.length; start += PROBE_CONCURRENCY) {
+          const chunk = listed.slice(start, start + PROBE_CONCURRENCY);
+          const facts = await Promise.all(chunk.map(async (workspace) => await factsFor(workspace.id, workspace.path)));
+          chunk.forEach((workspace, index) => {
+            rows.push(rowFor(workspace, facts[index] ?? {}));
+          });
+        }
+        const body = { ok: true, generatedAt: now(), workspaces: rows };
+        return jsonResponse3(200, body);
+      } catch (error) {
+        options.warn(`dsh-session-board: workspace meta failed: ${String(error)}`);
+        return jsonResponse3(500, { ok: false, error: "WORKSPACE_META_UNAVAILABLE" });
+      }
+    }
+  };
+}
+
 // src/host/plugin.ts
 var name = "dsh-session-board";
 var inject = ["storageDomain", "connection", "webServer", "llm"];
@@ -3328,6 +3462,16 @@ function apply(ctx, config) {
   }
   ctx.effect(() => webServer.register(routes.streamRoute), "dsh-session-board: SSE stream");
   subscribeBoardLedger(ctx, ledgerReady);
+  ctx.inject(["workspaceRegistry"], (metaCtx) => {
+    try {
+      const registry = Reflect.get(metaCtx, "workspaceRegistry");
+      if (registry === void 0 || typeof registry.list !== "function") return;
+      const route = createWorkspaceMetaRoute({ registry, warn });
+      ctx.effect(() => connection.fetch.register(route), "dsh-session-board: workspace meta route");
+    } catch (error) {
+      warn(`dsh-session-board: workspace meta route unavailable: ${String(error)}`);
+    }
+  });
   ctx.inject(
     ["storageDomain", "connection", "sessionController", "workspaceRegistry", "agents"],
     (managerCtx) => {

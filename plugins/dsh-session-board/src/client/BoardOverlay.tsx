@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom'
 import type { GroupingMode } from './workspace-tree.ts'
 import type { BoardGroup } from '../shared/types.ts'
 import { BoardScroll } from './BoardList.tsx'
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts'
 import { useDocumentHidden, type Translate } from './hooks.ts'
 import {
   focusableIn, inertBackground, isInsideMenu, isTopmostModal, modalLayers,
@@ -51,6 +52,8 @@ export interface BoardOverlayProps {
   selectionDisabled?: boolean
   collapsedGroups: Readonly<Record<string, boolean>>
   onToggleGroup: (group: string) => void
+  /** Workspace id → git facts, for the project tree. */
+  workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>
 }
 
 /**
@@ -72,7 +75,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   const {
     open, groups, grouping, t, density, online,
     onClose, onToggleDensity, onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled,
-    collapsedGroups, onToggleGroup,
+    collapsedGroups, onToggleGroup, workspaceMeta,
   } = props
 
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -147,7 +150,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   return createPortal(
     <div
       className="sb-overlay sb-root"
-      data-session-board-version="0.6.0"
+      data-session-board-version="0.7.0"
       data-density={density}
       data-quiet={hidden ? 'true' : undefined}
       role="dialog"
@@ -201,6 +204,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
           selected={selected}
           onToggleSelect={onToggleSelect}
           selectionDisabled={selectionDisabled}
+          workspaceMeta={workspaceMeta}
         />
       </div>
     </div>,

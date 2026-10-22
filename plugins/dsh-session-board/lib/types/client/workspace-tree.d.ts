@@ -1,5 +1,7 @@
 import type { BoardEntry, BoardGroup } from '../shared/types.ts';
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts';
 export type GroupingMode = 'status' | 'workspace' | 'tree';
+/** One node of the rendered workspace tree. */
 export interface WorkspaceNode {
     key: string;
     title: string;
@@ -7,7 +9,17 @@ export interface WorkspaceNode {
     entries: BoardEntry[];
     children: WorkspaceNode[];
     count: number;
+    /** Branch (workspace leaf) or remote (project node); rendered as muted text. */
+    subtitle?: string;
+    kind?: 'project' | 'workspace' | 'path';
 }
 export declare function workspaceKey(entry: BoardEntry): string;
-/** A flat workspace view keeps distinct workspaces with the same display name separate. */
-export declare function buildWorkspaceNodes(groups: readonly BoardGroup[], tree: boolean): WorkspaceNode[];
+/**
+ * Build the workspace view nodes.
+ * @param groups - board groups.
+ * @param tree - whether to build a hierarchy.
+ * @param meta - workspace id → git facts; the project tree uses it when
+ * present and falls back to the path tree for entries without git metadata.
+ * @returns root nodes.
+ */
+export declare function buildWorkspaceNodes(groups: readonly BoardGroup[], tree: boolean, meta?: Readonly<Record<string, WorkspaceGitInfo>>): WorkspaceNode[];

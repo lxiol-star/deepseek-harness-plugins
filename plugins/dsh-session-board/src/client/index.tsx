@@ -42,6 +42,7 @@ import { createSynthesisSettings, type SynthesisSettingsFace } from './synthesis
 import { createWikiSettings, type WikiSettingsFace } from './wiki-settings.ts'
 import { SessionBoardSettingsPage } from './SettingsPage.tsx'
 import { ManagerController } from './manager/controller.ts'
+import { createWorkspaceMeta, type WorkspaceMetaFace } from './workspace-meta.ts'
 import { ManagerDrawer, ManagerToggle } from './manager/ManagerDrawer.tsx'
 import { ManagerChatPanel } from './manager/ManagerChat.tsx'
 import type {
@@ -153,6 +154,8 @@ export interface BoardFace {
   batch: BatchController
   model: BoardModel
   manager: ManagerController
+  /** Workspace git metadata cache for the project tree. */
+  workspaceMeta: WorkspaceMetaFace
 }
 
 /** A store that never changes, used when an optional service is missing. */
@@ -229,9 +232,11 @@ function DockRoot({ face }: { face: BoardFace }): ReactElement {
   const selection = useSelection(face)
   const filtering = useFilters(face, groups)
   const t = useTranslation(face)
+  const workspaceMeta = useSnapshot(face.workspaceMeta.store, value => value.byId)
   return (
     <BoardDock
       grouping={view.grouping}
+      workspaceMeta={workspaceMeta}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}
@@ -248,7 +253,7 @@ function DockRoot({ face }: { face: BoardFace }): ReactElement {
       selected={selection.selected}
       onToggleSelect={selection.toggle}
       selectionDisabled={selection.busy}
-      toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => face.view.set(current => ({ ...current, grouping }))} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
+      toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => { face.view.set(current => ({ ...current, grouping })); if (grouping === 'tree') void face.workspaceMeta.load(true) }} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
       collapsedGroups={view.collapsedGroups}
       onToggleGroup={toggleGroup}
     />
@@ -265,10 +270,12 @@ function OpenOverlayContent({ face }: { face: BoardFace }): ReactElement {
   const t = useTranslation(face)
   const close = useCallback(() => setBoardOpen(false), [setBoardOpen])
   const open = useCallback((id: string) => { face.openSession(id); setBoardOpen(false) }, [face, setBoardOpen])
+  const workspaceMeta = useSnapshot(face.workspaceMeta.store, value => value.byId)
   return (
     <BoardOverlay
       open
       grouping={view.grouping}
+      workspaceMeta={workspaceMeta}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}
@@ -281,7 +288,7 @@ function OpenOverlayContent({ face }: { face: BoardFace }): ReactElement {
       selected={selection.selected}
       onToggleSelect={selection.toggle}
       selectionDisabled={selection.busy}
-      toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => face.view.set(current => ({ ...current, grouping }))} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
+      toolbar={<><BoardFilterBar groups={groups} filters={filtering.filters} onChange={filtering.change} shown={filtering.shown} t={t} grouping={view.grouping} onGrouping={grouping => { face.view.set(current => ({ ...current, grouping })); if (grouping === 'tree') void face.workspaceMeta.load(true) }} /><BatchToolbar controller={face.batch} groups={groups} visibleGroups={filtering.filtered} t={t} /></>}
       collapsedGroups={view.collapsedGroups}
       onToggleGroup={toggleGroup}
     />
@@ -498,6 +505,8 @@ export function apply(ctx: Context): void {
     cleanup.add(() => batch.dispose())
 
     const manager = new ManagerController({ sessions, workspaces })
+    const workspaceMeta = createWorkspaceMeta()
+    void workspaceMeta.load()
     cleanup.add(() => manager.dispose())
 
     feed.start()
@@ -519,6 +528,7 @@ export function apply(ctx: Context): void {
       jobs,
       workspaces,
       manager,
+      workspaceMeta,
       openSession: (id) => {
         const nav = navigationOf()
         if (nav === undefined || typeof nav.openSession !== 'function') {

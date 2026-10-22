@@ -38,7 +38,7 @@ export const en = {
   'filter.grouping': 'Group sessions',
   'filter.byStatus': 'By status',
   'filter.byWorkspace': 'By workspace',
-  'filter.byTree': 'Workspace tree',
+  'filter.byTree': 'Project tree',
   'card.archived': 'Archived to Wiki',
   'workspace.unassigned': 'Unassigned workspace',
 

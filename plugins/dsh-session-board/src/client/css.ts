@@ -705,6 +705,7 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-root .sb-card[data-expanded="true"] { height: 320px; min-height: 320px; max-height: 320px; flex-basis: 320px; }
 .sb-card-details { align-self: flex-start; font-size: 11px; }
 .sb-workspace-node { min-width: 0; margin-bottom: 8px; }
+.sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }

@@ -9,6 +9,7 @@
 import { type ReactElement } from 'react';
 import type { BoardGroup, BoardGroupId } from '../shared/types.ts';
 import { type GroupingMode } from './workspace-tree.ts';
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts';
 import type { Translate } from './hooks.ts';
 /** Props of {@link BoardList}. */
 export interface BoardListProps {
@@ -27,9 +28,11 @@ export interface BoardListProps {
     emptyKey: string;
     /** Render the back-to-top affordance. */
     backToTop?: boolean;
+    /** Workspace id → git facts; the project tree uses it, path fallback ignores it. */
+    workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>> | undefined;
 }
 /** The list itself, without its scroll container. */
-export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, grouping, }: BoardListProps): ReactElement;
+export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, grouping, workspaceMeta, }: BoardListProps): ReactElement;
 /** Props of {@link BoardScroll}. */
 export interface BoardScrollProps extends BoardListProps {
     /** Class applied to the scroll container. */

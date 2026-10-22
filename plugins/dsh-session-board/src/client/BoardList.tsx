@@ -9,6 +9,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { BoardGroup, BoardGroupId } from '../shared/types.ts'
 import { buildWorkspaceNodes, type GroupingMode, type WorkspaceNode } from './workspace-tree.ts'
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts'
 import { SessionCard } from './SessionCard.tsx'
 import type { Translate } from './hooks.ts'
 import { useAwayFromTop } from './hooks.ts'
@@ -30,6 +31,8 @@ export interface BoardListProps {
   emptyKey: string
   /** Render the back-to-top affordance. */
   backToTop?: boolean
+  /** Workspace id → git facts; the project tree uses it, path fallback ignores it. */
+  workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>> | undefined
 }
 
 /** One group heading. */
@@ -75,6 +78,7 @@ export function BoardList({
   selectionDisabled,
   emptyKey,
   grouping = 'status',
+  workspaceMeta,
 }: BoardListProps): ReactElement {
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
   if (total === 0) return <div className="sb-empty">{t(emptyKey)}</div>
@@ -85,15 +89,15 @@ export function BoardList({
       const title = node.title || t('workspace.unassigned')
       return <section className="sb-workspace-node" key={node.key} data-open={open ? 'true' : 'false'}>
         <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={t('a11y.groupCount', { group: title, count: node.count })}>
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span><span className="sb-group-count">{node.count}</span>
+          <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span>
         </button>
         {open ? <div className="sb-workspace-body">
-          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} /> : null}
+          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} workspaceMeta={workspaceMeta} /> : null}
           {node.children.map(renderNode)}
         </div> : null}
       </section>
     }
-    return <>{buildWorkspaceNodes(groups, grouping === 'tree').map(renderNode)}</>
+    return <>{buildWorkspaceNodes(groups, grouping === 'tree', workspaceMeta ?? {}).map(renderNode)}</>
   }
   return (
     <>

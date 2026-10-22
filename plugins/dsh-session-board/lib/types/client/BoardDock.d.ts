@@ -9,6 +9,7 @@
 import { type ReactElement } from 'react';
 import type { GroupingMode } from './workspace-tree.ts';
 import type { BoardGroup } from '../shared/types.ts';
+import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts';
 import type { Translate } from './hooks.ts';
 /** Narrowest and widest the column may be dragged, in pixels. */
 export declare const DOCK_MIN_WIDTH = 260;
@@ -40,6 +41,8 @@ export interface BoardDockProps {
     selectionDisabled?: boolean;
     collapsedGroups: Readonly<Record<string, boolean>>;
     onToggleGroup: (group: string) => void;
+    /** Workspace id → git facts, for the project tree. */
+    workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>;
 }
 /** The docked column. */
 export declare function BoardDock(props: BoardDockProps): ReactElement;

@@ -31,6 +31,7 @@ import { createWikiArchiver, resolveDshHome, resolveSynthesisProvider } from './
 import { WikiConfigError, buildWikiRuntime, mergeWikiConfig, probeWikiEnvironment, validateWikiWrite, wikiConfigResponse, type WikiRuntime, type WikiSettingsFace } from './wiki-config.ts'
 import { validateWikiConfig, type WikiConfig } from '../shared/wiki.ts'
 import { createBoardRoutes } from './routes.ts'
+import { createWorkspaceMetaRoute, type WorkspaceRegistryView } from './workspace-meta.ts'
 import type { BoardFetchRoute, BoardTrustRequest, BoardWebRoute } from './routes.ts'
 
 /** Cordis plugin name; mirrors the row id in `cordis.patch.yml`. */
@@ -345,6 +346,20 @@ export function apply(ctx: Context, config?: unknown): () => void {
 
   // `ctx.on` is already effect-scoped; wrapping it again would double-dispose.
   subscribeBoardLedger(ctx, ledgerReady)
+
+  // The project tree needs only the Workspace registry: probe registered
+  // paths for git remote/branch and register the read-only metadata route.
+  // A profile without the registry simply keeps the path-only tree.
+  ctx.inject(['workspaceRegistry'], (metaCtx: Context) => {
+    try {
+      const registry = Reflect.get(metaCtx, 'workspaceRegistry') as WorkspaceRegistryView | undefined
+      if (registry === undefined || typeof registry.list !== 'function') return
+      const route = createWorkspaceMetaRoute({ registry, warn })
+      ctx.effect(() => connection.fetch.register(route), 'dsh-session-board: workspace meta route')
+    } catch (error) {
+      warn(`dsh-session-board: workspace meta route unavailable: ${String(error)}`)
+    }
+  })
 
   // The manager panel needs the Session/Agent/Workspace services the board half
   // does not: wait for them in a nested injection so a profile without them

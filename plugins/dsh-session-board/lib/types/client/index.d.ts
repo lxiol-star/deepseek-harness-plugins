@@ -27,6 +27,7 @@ import { BoardModel } from './model.ts';
 import { type ReadonlyStore, type Store } from './store.ts';
 import { type Translate } from './hooks.ts';
 import { ManagerController } from './manager/controller.ts';
+import { type WorkspaceMetaFace } from './workspace-meta.ts';
 import type { JobsService, RetainSession, SessionListState, SessionStatusSnapshot, SubagentAddress, WorkspacesService } from './dsh.ts';
 /** Plugin name, shared by both halves. */
 export declare const name = "dsh-session-board";
@@ -83,6 +84,8 @@ export interface BoardFace {
     batch: BatchController;
     model: BoardModel;
     manager: ManagerController;
+    /** Workspace git metadata cache for the project tree. */
+    workspaceMeta: WorkspaceMetaFace;
 }
 /**
  * Activate the browser half.
