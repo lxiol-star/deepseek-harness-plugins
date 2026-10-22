@@ -11,6 +11,15 @@ import { EMPTY_FEED, type BoardAckRecord, type BoardFeed, type BoardTurnStats } 
 import type { ReadonlyStore } from './store.ts'
 import { WIKI_WORKFLOW_CAPABILITY, parseArchiveSummary, WIKI_ARCHIVE_PATH, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
 
+/** One archive-route failure: the stable code plus the host's diagnostic line. */
+export class ArchiveRequestError extends Error {
+  /**
+   * @param code - stable code the panel maps to localized copy.
+   * @param detail - host/bridge diagnostic, safe for the owner to see.
+   */
+  constructor(readonly code: string, readonly detail?: string) { super(code) }
+}
+
 /** Where the host half serves the stream. */
 export const STREAM_PATH = '/dsh-session-board/stream'
 
@@ -193,7 +202,7 @@ export class BoardFeedClient implements ReadonlyStore<BoardFeedState> {
     const payload = asRecord(await response.json().catch(() => null))
     if (!response.ok || payload?.ok !== true) {
       const code = typeof payload?.error === 'string' ? payload.error : response.status === 404 ? 'ARCHIVE_UNAVAILABLE' : 'REQUEST_FAILED'
-      throw new Error(code)
+      throw new ArchiveRequestError(code, typeof payload?.detail === 'string' ? payload.detail : undefined)
     }
     return payload
   }
@@ -226,7 +235,10 @@ export class BoardFeedClient implements ReadonlyStore<BoardFeedState> {
     while (!this.disposed) {
       const operation = asRecord(payload.operation)
       if (operation?.state === 'completed') return parseArchiveSummary(operation.result)
-      if (operation?.state === 'failed') throw new Error(typeof operation.error === 'string' ? operation.error : 'REQUEST_FAILED')
+      if (operation?.state === 'failed') {
+        throw new ArchiveRequestError(typeof operation.error === 'string' ? operation.error : 'REQUEST_FAILED',
+          typeof operation.detail === 'string' ? operation.detail : undefined)
+      }
       if (operation?.state !== 'running') throw new Error('INVALID_RESULT')
       await new Promise(resolve => globalThis.setTimeout(resolve, 1_000))
       if (this.disposed) break

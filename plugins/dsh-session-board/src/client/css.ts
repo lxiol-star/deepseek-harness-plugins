@@ -653,6 +653,7 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
 .sb-batch-dismiss:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
+.sb-batch-detail { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 10px; overflow-wrap: anywhere; }
 .sb-batch button:disabled { opacity: .45; cursor: not-allowed; }
 .sb-overlay > .sb-batch .sb-batch-preview { max-width: 640px; }
 .sb-overlay .sb-group-body { display: block; }
@@ -768,6 +769,32 @@ ${ACCENTS}
   cursor: pointer;
 }
 .sb-settings-retry:hover { background: var(--dsw-alias-bg-layer-2, transparent); }
+.sb-settings-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: inherit;
+  font: inherit;
+}
+.sb-settings-input:disabled { opacity: .6; }
+.sb-settings-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-settings-action {
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-settings-action:hover { background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2, transparent)); }
+.sb-settings-action:disabled { opacity: .6; cursor: default; }
+.sb-settings-details { display: flex; flex-direction: column; gap: 8px; max-width: 480px; }
+.sb-settings-details > summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
+.sb-settings-report { display: flex; flex-direction: column; gap: 3px; max-width: 640px; overflow-wrap: anywhere; }
+.sb-settings-issues { margin: 0; padding-inline-start: 18px; color: var(--dsw-alias-state-error-primary); }
 
 /* -------------------------------------------------------------- manager --- */
 

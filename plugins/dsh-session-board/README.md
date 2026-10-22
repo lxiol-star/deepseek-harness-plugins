@@ -11,7 +11,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - 支持“隐藏已归档 / 查看已归档 / 全部会话”，筛选栏还有「仅归档」按钮可一键切换。Wiki 完成标记与 DSH 原生归档是两种不同来源，分别显示。
 - 归档成功的 Wiki 标记记录当时观察到的内容版本；会话重新运行或出现新内容后重新显示。
 - 中英双语、键盘操作、独立滚动、触控板滚动传递和减少动态效果支持。
-- 设置 → 会话看板 →「归档提炼」可选择归档提炼使用的模型（选项来自宿主当前可用的模型列表），模型支持时还可单独选择思考等级；选择保存到宿主并在提炼时生效；不选择时沿用 Wiki provider。
+- 设置 → 会话看板提供两组配置：「归档提炼」选择提炼模型（选项来自宿主当前可用的模型列表，模型支持时可单独选择思考等级）；「Wiki 归档引擎」配置 Wiki 根目录、SCHEMA 规则、引擎来源、Python、超时与 provider，并可直接「检查环境」。
 
 ## 管理中心（0.4.0+）
 
@@ -28,10 +28,10 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.4.0.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.5.1.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.4.0.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.5.1.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。
@@ -42,26 +42,55 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.4.0.tgz
 
 ## 可选：归档并提炼到 Wiki
 
-基础看板不要求 Wiki 环境。使用“归档并提炼”需要自己提供：
+基础看板不要求 Wiki 环境。使用“归档并提炼”时需要一份本地 Wiki 数据（默认复用 `~/wiki`），归档引擎**随插件自带**，不再要求 `~/wiki/scripts` 里存在可用的 Python 脚本。
 
-- `~/wiki/SCHEMA.md`
-- `~/wiki/scripts/wiki-archive.py`
-- `~/wiki/scripts/wiki-synthesize.py`
-- `~/wiki/scripts/wiki-index.py`
-- WikiBar 中用于提炼的 provider 配置；默认使用 `stepx-terra`，可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖（例如指向公网网关的 `flash-auto`）。若在设置页选择了模型，则改用所选模型（连同其思考等级），不再使用该 provider 配置。
-- 运行中的 Harness 需提供 `llm` 模型服务与客户端模型目录（0.2.x 正式版均包含）；宿主版本旧于插件时设置页会提示重启，而不是静默保存。
-- `/usr/bin/python3`，以及 Python `zstandard` 或 `zstd` 可执行程序。
+### 引擎与规则
 
-这些脚本和配置属于外部集成，**没有包含在本仓库中**；插件不会下载它们或生成密钥。该工作流根据本地 `wiki-current-session` 技能约定实现，属于需要既有兼容 Wiki 环境的高级功能。
+- 引擎（`wiki-archive.py` / `wiki-synthesize.py` / `wiki-index.py`）打包在插件 `lib/wiki/` 中，升级插件即升级引擎；来源与不含外部依赖的约定见 [`src/host/wiki/UPSTREAM.md`](src/host/wiki/UPSTREAM.md)。
+- Wiki **数据**始终由你所有：页面、状态文件与锁都放在 wiki 根目录下，不会写进插件安装目录。
+- 默认配置复用当前本地 Wiki：`wiki 根目录 = ~/wiki`、`SCHEMA 规则 = <wiki 根目录>/SCHEMA.md`、`归档状态 = <wiki 根目录>/scripts/.archive-state.json`（与 CLI 归档流程共用，增量归档不会重复）。
+- 如果你想继续用自己维护的脚本，可在设置里把「引擎脚本来源」切到「本地 wiki scripts」并指定目录；这等价于旧行为。
+- `/usr/bin/python3`，以及 Python `zstandard` 或 `zstd` 可执行程序（引擎解压 DSH transcript 需要）。
 
-操作流程：
+### 设置项（设置 → 会话看板 → Wiki 归档引擎）
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| Wiki 根目录 | `~/wiki` | 归档页与知识层的数据根目录 |
+| SCHEMA 规则 | `<wiki 根目录>/SCHEMA.md` | 引擎校验与提炼提示所依据的规则文件 |
+| 引擎脚本来源 | 插件内置 | 或「本地 wiki scripts」复用你维护的脚本目录 |
+| 脚本目录 | `<wiki 根目录>/scripts` | 仅本地模式使用 |
+| Python | `/usr/bin/python3` | 运行引擎的解释器 |
+| 超时（秒） | 300 | 单次归档/提炼操作上限；0 表示默认 |
+| Wiki provider | 本地默认（`stepx-terra`） | 未选择提炼模型时使用的 Wiki 合成 provider |
+| 归档状态文件 | `<wiki 根目录>/scripts/.archive-state.json` | 高级项，与 CLI 归档共用 |
+| provider 配置文件 | `~/.wikibar/config.json` | 高级项，传给 `wiki-synthesize.py` |
+
+配置保存在宿主插件存储（非 localStorage），保存后下一次归档即生效，无需重启。设置页的「检查环境」会报告引擎目录、每个脚本是否存在、Python 版本、SCHEMA 是否可读与状态文件路径。也可以在 `cordis.patch.yml` 里给部署写默认值（用户保存过的配置优先）：
+
+```yaml
+- id: dsh-session-board
+  config:
+    wikiRoot: /Users/me/wiki
+    scriptsMode: bundled
+    timeoutSeconds: 600
+```
+
+### 提炼模型
+
+- 未选择模型时：逐条执行内置 `wiki-synthesize.py --provider <provider> --session <raw/.../完整页.md> --limit 1`，凭证配置来自 `~/.wikibar/config.json`（可用设置页高级项覆盖），provider 默认 `stepx-terra`，也可在 `~/.dsh-session-board.json` 写入 `{"synthesisProvider": "<provider id>"}` 覆盖。
+- 选择模型时：由插件宿主通过 DSH 的 `llm` 服务调用模型，模型输出交给 `wiki-synthesize.py` 的 `parse_pages` / `process_page` / 状态文件逻辑落盘（SKIP、slug 唯一、sources 与写入校验与脚本一致），不再使用 provider 配置。
+
+### 操作流程
 
 1. 勾选会话，点击“预览归档与提炼”。
 2. 预览核对精确会话 ID、源路径、明确的 `parentSession` 父子归属，以及缺失子会话和进行中快照。仅扫描当前实际 `DSH_HOME`，总范围最多 50 个。
-3. “确认归档并提炼”授权原文归档及向已配置的 `stepx-terra` 模型服务发送脱敏后的归档文本。取消不写原文、不调用模型。
-4. 每条会话单独执行 `wiki-archive.py --exact-session <完整ID> --full --json`，要求精确命中一个来源。
-5. 提炼使用「设置 → 会话看板 → 归档提炼」里选择的模型：由插件宿主通过 DSH 的 `llm` 服务调用模型，模型输出交给 `wiki-synthesize.py` 的 `parse_pages` / `process_page` / 状态文件逻辑落盘（SKIP、slug 唯一、sources 与写入校验与脚本一致）；未选择模型时逐条执行 `wiki-synthesize.py --provider stepx-terra --session <raw/.../完整页.md> --limit 1`，保持原有行为。提炼前再次检查可识别凭证；SKIP 视为正常结论。
+3. “确认归档并提炼”授权原文归档及向所选模型或 provider 发送脱敏后的归档文本。取消不写原文、不调用模型。
+4. 每条会话单独执行内置 `wiki-archive.py --exact-session <完整ID> --full --json`，要求精确命中一个来源。
+5. 提炼按上一节的两条路径之一执行；提炼前再次检查可识别凭证；SKIP 视为正常结论。
 6. 批次结束统一更新索引，面板显示原文路径、知识页路径、SKIP、失败和索引状态。模型报错、输出无法解析或写入被拒时保留原文归档并标记失败，不伪报成功。
+
+失败时面板会显示宿主/引擎返回的具体原因（如 `ENGINE_UNAVAILABLE`、`SCHEMA_UNAVAILABLE` 或超时），完整诊断追加在 `~/.dsh-session-board/wiki.log`；不再只给一句“请检查本地 Wiki 脚本”。
 
 脱敏采用启发式，无法保证识别任意秘密。归档会保留敏感的本地原文内容，不应直接公开。确认框会明确说明模型外发，不依赖模型自行隐去密钥。
 

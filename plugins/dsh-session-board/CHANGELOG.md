@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 — 2026-10-22
+
+- 内置 Wiki 引擎的注释/文档字符串做了脱敏：移除本机用户名、主机名与具体运行事故中的设备名，改为通用示例与描述（仅注释变化，行为不变）。
+- 移除测试 fixture 中带内部工具名的会话 ID。
+
+## 0.5.0 — 2026-10-22
+
+- **Wiki 归档引擎自包含**：`wiki-archive.py` / `wiki-synthesize.py` / `wiki-index.py` 随插件发布（`lib/wiki/`），不再依赖 `~/wiki/scripts` 里与插件契约匹配的本地脚本；本地脚本可在设置里切回「本地 wiki scripts」模式继续使用。
+- **默认复用当前本地 Wiki**：默认 wiki 根目录 `~/wiki`、SCHEMA 规则 `<wiki 根目录>/SCHEMA.md`、归档状态 `<wiki 根目录>/scripts/.archive-state.json`（与 CLI 归档共用，增量不重复）；页面、状态文件与锁始终写在 wiki 根目录内，不写进插件安装目录。
+- 设置页新增「Wiki 归档引擎」分组：Wiki 根目录、SCHEMA 路径、引擎来源（内置/本地）、脚本目录、Python、超时、provider、状态文件与 provider 配置文件均可编辑，保存到宿主插件存储，下一次归档生效；「检查环境」报告引擎脚本、Python、SCHEMA 与状态路径。
+- 宿主导出的配置可在 `cordis.patch.yml` 里写部署默认值；用户保存过的配置优先。
+- 归档失败不再只给兜底文案：宿主与 bridge 返回具体错误码和诊断详情，面板在错误下方显示原因，完整 traceback/stderr 追加到 `~/.dsh-session-board/wiki.log`；超时可配置（默认 300 秒），scope 只解压一次 transcript。
+- 宿主插件存储新增独立 wiki 配置域；旧布局（本地 scripts + `~/wiki` SCHEMA）在未保存任何配置时行为不变。
+
 ## 0.4.1 — 2026-10-21
 
 - 筛选栏新增「仅归档」按钮：一键在看板里只看已归档会话，再点一次回到默认（隐藏已归档）；与原有「归档显示」下拉等价，按钮带按下态。

@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { BoardFeed } from '../shared/types.ts';
 import { type SynthesisModelCatalogGroup, type SynthesisModelPref, type SynthesisModelSelection, type SynthesisModelVerdict } from '../shared/synthesis.ts';
 import { type WikiArchiver } from './wiki-archive.ts';
+import { type WikiSettingsFace } from './wiki-config.ts';
 /**
  * Physical request paths. `ConnectionFetchRoute.path` is matched against the
  * full request pathname and must start with `/api/`, so these are the exact
@@ -29,6 +30,8 @@ export declare const BOARD_ACK_PATH = "/api/session-board/ack";
 export declare const BOARD_WIKI_ARCHIVE_PATH = "/api/session-board/wiki-archive";
 /** POST { action } → read or write the saved synthesis-model preference. */
 export declare const BOARD_SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
+/** POST { action } → read, write, reset or probe the Wiki configuration. */
+export declare const BOARD_WIKI_CONFIG_PATH = "/api/session-board/wiki-config";
 /** Prefix owned by the raw SSE route. */
 export declare const BOARD_STREAM_PREFIX = "/dsh-session-board";
 /** `GET` → `text/event-stream`, one `state` frame per change. */
@@ -79,6 +82,8 @@ export interface BoardRoutesOptions {
     readonly wikiArchive: WikiArchiver;
     /** Synthesis-model preference; absent means the route answers 503. */
     readonly synthesisModel?: SynthesisModelStore;
+    /** Wiki configuration and environment probe; absent means the route answers 503. */
+    readonly wikiSettings?: WikiSettingsFace;
     /** Connection's Host/Origin + browser-session fence. */
     readonly requestRejection: (request: BoardTrustRequest) => 401 | 403 | undefined;
     /** Containment sink for request-time failures. */

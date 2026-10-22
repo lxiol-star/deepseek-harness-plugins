@@ -10,6 +10,16 @@
 import { type BoardFeed } from '../shared/types.ts';
 import type { ReadonlyStore } from './store.ts';
 import { type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
+/** One archive-route failure: the stable code plus the host's diagnostic line. */
+export declare class ArchiveRequestError extends Error {
+    readonly code: string;
+    readonly detail?: string | undefined;
+    /**
+     * @param code - stable code the panel maps to localized copy.
+     * @param detail - host/bridge diagnostic, safe for the owner to see.
+     */
+    constructor(code: string, detail?: string | undefined);
+}
 /** Where the host half serves the stream. */
 export declare const STREAM_PATH = "/dsh-session-board/stream";
 /** Where the host half accepts an acknowledgement. */

@@ -39,6 +39,7 @@ import { createStore, type ReadonlyStore, type Store } from './store.ts'
 import { en, NS, zh } from './locales.ts'
 import { useSnapshot, type Translate } from './hooks.ts'
 import { createSynthesisSettings, type SynthesisSettingsFace } from './synthesis-settings.ts'
+import { createWikiSettings, type WikiSettingsFace } from './wiki-settings.ts'
 import { SessionBoardSettingsPage } from './SettingsPage.tsx'
 import { ManagerController } from './manager/controller.ts'
 import { ManagerDrawer, ManagerToggle } from './manager/ManagerDrawer.tsx'
@@ -404,14 +405,15 @@ export function apply(ctx: Context): void {
   // outside the core-service injection so the page still appears in a
   // composition without the session services.
   const synthesis = createSynthesisSettings()
-  ctx.effect(() => () => synthesis.dispose(), 'dsh-session-board: settings controller')
+  const wiki = createWikiSettings()
+  ctx.effect(() => () => { synthesis.dispose(); wiki.dispose() }, 'dsh-session-board: settings controllers')
   ctx.effect(() => slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
     id: 'session-board',
     order: 60,
     label: () => t('settings.nav'),
     locale: NS,
-    inject: (): { settings: SynthesisSettingsFace } => ({ settings: synthesis }),
+    inject: (): { settings: SynthesisSettingsFace; wiki: WikiSettingsFace } => ({ settings: synthesis, wiki }),
   }, SessionBoardSettingsPage)), 'dsh-session-board: settings page')
 
   const warned = new Set<string>()

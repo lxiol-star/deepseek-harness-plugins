@@ -1,4 +1,18 @@
-"""Scoped bridge for the session-board Wiki workflow. Never runs a full archive."""
+"""Scoped bridge for the session board Wiki workflow.
+
+The board ships its own copy of the Wiki engine (`lib/wiki/wiki-archive.py`,
+`wiki-synthesize.py`, `wiki-index.py`) so archiving no longer depends on the
+user's `~/wiki/scripts` checkout staying compatible. The Wiki *data* (raw
+pages, knowledge layers, SCHEMA rules) stays user-owned and is addressed
+through `--wiki-root` / `--schema`; a local scripts directory can still be
+selected explicitly (`--scripts-dir <wiki>/scripts`).
+
+Every invocation prints exactly one JSON document on stdout. Diagnostics
+(traceback, captured helper output) go to `--log` and are summarised in the
+`detail` field so the host can show the real reason instead of a generic
+"check the local Wiki scripts" message.
+"""
+
 import argparse
 import contextlib
 import fcntl
@@ -6,53 +20,75 @@ import importlib.util
 import io
 import json
 import os
-import signal
 import re
+import signal
 import subprocess
+import sys
+import traceback
+from datetime import datetime
 from pathlib import Path
+
+REAL_STDOUT = sys.stdout
+LOG_PATH = ''
+
+
+def log_line(event, detail=''):
+    """Append one diagnostic line to the bridge log, never failing the run."""
+    if not LOG_PATH:
+        return
+    try:
+        with open(LOG_PATH, 'a', encoding='utf-8') as stream:
+            stamp = datetime.now().isoformat(timespec='seconds')
+            stream.write('%s\t%s\t%s\n' % (stamp, event, detail.replace('\n', ' ⏎ ')[:6000]))
+    except Exception:
+        pass
 
 
 def load_script(path, name):
-    spec = importlib.util.spec_from_file_location(name, str(path))
+    """Load one engine script by path, reporting a clear error when missing."""
+    target = Path(path)
+    if not target.is_file():
+        raise FileNotFoundError('engine script not found: %s' % target)
+    spec = importlib.util.spec_from_file_location(name, str(target))
+    if spec is None or spec.loader is None:
+        raise ImportError('cannot load engine script: %s' % target)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-@contextlib.contextmanager
-def quiet():
-    """Swallow helper logging so stdout stays one JSON document.
-
-    `wiki-synthesize.py`'s helpers log through `print` (state corruption
-    warnings, rejected pages, slug rewrites). The provider path captures those
-    in a child process, but the plugin path calls the helpers in-process, so
-    their text must not reach the JSON the host parses.
-    """
-    with contextlib.redirect_stdout(io.StringIO()):
-        yield
+def engine_file(args, name):
+    return Path(args.scripts_dir).resolve() / name
 
 
-def synthesize_module(root):
-    return load_script(root / 'scripts' / 'wiki-synthesize.py', 'board_synth')
+def schema_path(args):
+    return Path(args.schema).expanduser().resolve()
+
+
+def require_schema(args):
+    """The Wiki SCHEMA rules must exist and carry content before any write."""
+    target = schema_path(args)
+    try:
+        text = target.read_text(encoding='utf-8')
+    except OSError as error:
+        raise ValueError('SCHEMA_UNAVAILABLE') from error
+    if not text.strip():
+        raise ValueError('SCHEMA_UNAVAILABLE')
+    return text
 
 
 def state_path(root):
-    return root / 'scripts' / '.synthesize-state.json'
+    return Path(root) / 'scripts' / '.synthesize-state.json'
 
 
 def validate_raw_page(root, page):
+    root = Path(root).resolve()
     target = (root / page).resolve()
     if not page.startswith('raw/sessions/') or not page.endswith('.md') or not target.is_relative_to(root / 'raw' / 'sessions'):
         raise ValueError('INVALID_RESULT')
     if not target.is_file():
         raise ValueError('INVALID_RESULT')
     return target
-
-
-def require_schema(root):
-    schema = root / 'SCHEMA.md'
-    if not schema.is_file() or not schema.read_text(encoding='utf-8').strip():
-        raise ValueError('SCHEMA_UNAVAILABLE')
 
 
 def require_exact_page(root, synth, page):
@@ -62,10 +98,12 @@ def require_exact_page(root, synth, page):
 
 
 def relevant_pages(root, page):
-    """Knowledge pages whose frontmatter block mentions this raw page."""
     pages = []
     for directory in ('projects', 'concepts', 'experience', 'patterns', 'issues', 'tools', 'entities', 'digests', 'comparisons', 'decisions'):
-        for file in (root / directory).glob('*.md'):
+        folder = Path(root) / directory
+        if not folder.is_dir():
+            continue
+        for file in folder.glob('*.md'):
             content = file.read_text(encoding='utf-8')
             if page in content.split('\n---', 1)[0]:
                 pages.append(str(file.relative_to(root)))
@@ -92,14 +130,9 @@ def build_prompt(synth, page, text, candidates):
     )
 
 
-def acquire_write_lock(synth):
-    """Take `wiki-synthesize.py`'s own single-instance lock without exiting.
-
-    The provider path exits 3 when the lock is held; the plugin path returns a
-    per-session failure instead so the raw archive is kept and the batch
-    continues.
-    """
-    path = getattr(synth, 'LOCK_PATH', os.path.join(os.path.expanduser('~'), '.wiki-synthesize.lock'))
+def acquire_write_lock(root):
+    path = Path(root) / '.locks' / 'wiki-synthesize.lock'
+    path.parent.mkdir(parents=True, exist_ok=True)
     handle = open(path, 'w')
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -133,12 +166,23 @@ def header(path, archive):
     import zstandard
     with open(path, 'rb') as stream:
         with zstandard.ZstdDecompressor().stream_reader(stream) as reader:
-            import io
             return json.loads(io.TextIOWrapper(reader, encoding='utf-8').readline(1024 * 1024))
 
 
+def load_events(archive, source):
+    """Decode one transcript once per invocation (scope reads it once, not twice)."""
+    if str(source).endswith(('.zstd', '.zst')):
+        return archive.load_dsh_jsonl(source)
+    return archive.parse_jsonl_lines(Path(source).read_text().splitlines())
+
+
 def scope(args, archive):
-    requested = json.loads(args.value)
+    try:
+        requested = json.loads(args.value)
+    except ValueError as error:
+        raise ValueError('INVALID_RESULT') from error
+    if not isinstance(requested, list) or not requested or any(not isinstance(item, str) or not item for item in requested):
+        raise ValueError('INVALID_SELECTION')
     sources = {}
     for _, _, session, path in archive.discover_dsh_sources(args.dsh_home):
         sources.setdefault(session, []).append(path)
@@ -164,9 +208,9 @@ def scope(args, archive):
         selected |= children
         if len(selected) > 50:
             raise ValueError('INVALID_SELECTION')
-    # Parent-before-child order, including when the user selected a child directly.
     pending = list(dict.fromkeys(requested + sorted(selected - set(requested))))
     ordered = []
+    missing = []
     while pending:
         ready = [sid for sid in pending if records[sid]['parent'] not in pending]
         if not ready:
@@ -175,52 +219,47 @@ def scope(args, archive):
             pending.remove(sid)
             row = dict(records[sid])
             row['evidence'] = 'parentSession' if row['parent'] else 'selected session header'
-            events = archive.load_dsh_jsonl(row['source']) if row['source'].endswith(('.zstd', '.zst')) else archive.parse_jsonl_lines(Path(row['source']).read_text().splitlines())
+            events = load_events(archive, row['source'])
             last_start = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/start'), default=-1)
             last_end = max((event.get('seq', 0) for event in events if event.get('type') == 'turn/end'), default=-1)
             row['snapshot'] = last_start > last_end
-            ordered.append(row)
-    missing = []
-    for row in ordered:
-        events = archive.load_dsh_jsonl(row['source']) if row['source'].endswith(('.zstd', '.zst')) else archive.parse_jsonl_lines(Path(row['source']).read_text().splitlines())
+            ordered.append((row, events))
+    for row, events in ordered:
         for event in events:
             if event.get('type') != 'subagent/catalog':
                 continue
             child = event.get('data', {}).get('childId')
             if isinstance(child, str) and child not in selected:
                 missing.append({'session': child, 'parent': row['session']})
-    return {'entries': ordered, 'missing': missing}
+    return {'entries': [row for row, _events in ordered], 'missing': missing}
 
 
 def synthesize(args, archive):
     root = Path(args.wiki_root).resolve()
     page = args.value
-    target = (root / page).resolve()
-    if not page.startswith('raw/sessions/') or not page.endswith('.md') or not target.is_relative_to(root / 'raw' / 'sessions'):
-        raise ValueError('INVALID_RESULT')
-    synth = load_script(root / 'scripts' / 'wiki-synthesize.py', 'board_synth')
+    target = validate_raw_page(root, page)
+    synth = load_script(engine_file(args, 'wiki-synthesize.py'), 'board_synth')
     matches = [item for item in synth.collect_sessions(str(root)) if page in item]
     if matches != [page]:
         raise ValueError('SELECTION_MISMATCH')
     text = target.read_text(encoding='utf-8')
-    # Read the schema before this session is considered for external synthesis.
-    if not (root / 'SCHEMA.md').read_text(encoding='utf-8').strip():
-        raise ValueError('SCHEMA_UNAVAILABLE')
-    # A second pass checks the freshly rendered raw before any provider sees it.
+    require_schema(args)
     if archive.redact_credentials(text) != text:
         return {'status': 'sensitive', 'pages': [], 'error': 'SENSITIVE_CONTENT'}
+    config_arguments = ['--config', args.synth_config] if args.synth_config else []
     output = ''
     for attempt in range(2):
         try:
-            run = run_child(['/usr/bin/python3', str(root / 'scripts' / 'wiki-synthesize.py'),
-                                  '--wiki-root', str(root), '--provider', args.provider,
-                                  '--session', page, '--limit', '1'], capture_output=True, text=True, timeout=900)
+            run = run_child([args.python, str(engine_file(args, 'wiki-synthesize.py')),
+                             '--wiki-root', str(root), '--provider', args.provider,
+                             '--session', page, '--limit', '1'] + config_arguments,
+                            capture_output=True, text=True, timeout=900)
         except subprocess.TimeoutExpired:
             return {'status': 'failed', 'pages': [], 'error': 'SYNTHESIS_TIMEOUT'}
         output += run.stdout
         pages = list(dict.fromkeys(re.findall(r'已写入 ([a-z0-9/-]+\.md)', output)))
         try:
-            state = json.loads((root / 'scripts' / '.synthesize-state.json').read_text()).get(page, {})
+            state = json.loads(state_path(root).read_text()).get(page, {})
         except (OSError, ValueError):
             state = {}
         import hashlib
@@ -234,18 +273,11 @@ def synthesize(args, archive):
 
 
 def prepare(args, archive):
-    """Return the prompt for the plugin-selected model, or a terminal result.
-
-    Validation mirrors the provider path before any text leaves the machine:
-    exact page match, readable SCHEMA, and the same credential scan the
-    provider path performs (`sensitive`). A page whose content already has a
-    final conclusion is reported as `skipped` so no model call happens.
-    """
     root = Path(args.wiki_root).resolve()
     page = args.value
     target = validate_raw_page(root, page)
-    require_schema(root)
-    synth = synthesize_module(root)
+    require_schema(args)
+    synth = load_script(engine_file(args, 'wiki-synthesize.py'), 'board_synth')
     require_exact_page(root, synth, page)
     text = target.read_text(encoding='utf-8')
     if archive.redact_credentials(text) != text:
@@ -256,27 +288,17 @@ def prepare(args, archive):
     entry = state.get(page)
     if isinstance(entry, dict) and entry.get('sha256') == synth.sha256_text(text) and synth.is_final(entry):
         return {'status': 'skipped', 'pages': relevant_pages(root, page)}
-    # Bound the prompt the same way the provider path does when a session is
-    # longer than its configured context; the DSH route carries no
-    # longContextModel, so the safe truncation applies.
     if len(text) > synth.LONG_CONTEXT_THRESHOLD:
         text = synth.truncate_session_text(text)
     return {'page': page, 'prompt': {'system': synth.SYSTEM_PROMPT, 'user': build_prompt(synth, page, text, candidates)}}
 
 
 def write(args, archive):
-    """Validate model output and write its pages through `wiki-synthesize.py`.
-
-    The output is parsed by the script's own `parse_pages`, every page goes
-    through its `process_page` (SKIP, slug uniqueness, frontmatter validation,
-    wikilink sanitizing, sources), and the script's state file records the
-    conclusion exactly as a provider run would.
-    """
     root = Path(args.wiki_root).resolve()
     try:
         payload = json.loads(args.value)
-    except ValueError:
-        raise ValueError('INVALID_RESULT')
+    except ValueError as error:
+        raise ValueError('INVALID_RESULT') from error
     if not isinstance(payload, dict):
         raise ValueError('INVALID_RESULT')
     page = payload.get('page')
@@ -284,12 +306,12 @@ def write(args, archive):
     if not isinstance(page, str) or not isinstance(output, str) or not output.strip() or len(output) > 1_000_000:
         raise ValueError('INVALID_RESULT')
     target = validate_raw_page(root, page)
-    require_schema(root)
-    synth = synthesize_module(root)
+    require_schema(args)
+    synth = load_script(engine_file(args, 'wiki-synthesize.py'), 'board_synth')
     require_exact_page(root, synth, page)
     text = target.read_text(encoding='utf-8')
     sha = synth.sha256_text(text)
-    lock = acquire_write_lock(synth)
+    lock = acquire_write_lock(root)
     if lock is None:
         return {'status': 'failed', 'pages': [], 'error': 'STATE_UNAVAILABLE'}
     try:
@@ -307,8 +329,6 @@ def write(args, archive):
                 state[page] = {'sha256': sha, 'status': 'skipped', 'reason': 'parse-error', 'date': synth.today_str()}
                 synth.save_state(str(state_path(root)), state)
                 return {'status': 'failed', 'pages': [], 'error': 'PARSE_ERROR'}
-            # Pages created in this batch may link to each other, so the
-            # whitelist is collected before any page is written.
             batch_slugs = set()
             for fm, _body in parsed:
                 checked = synth.validate_file_field((fm or {}).get('file'))
@@ -339,8 +359,55 @@ def write(args, archive):
         release_write_lock(lock)
 
 
+def run_index(args):
+    root = Path(args.wiki_root).resolve()
+    require_schema(args)
+    (root / 'scripts').mkdir(parents=True, exist_ok=True)
+    run = run_child([args.python, str(engine_file(args, 'wiki-index.py')), '--wiki-root', str(root)],
+                    capture_output=True, timeout=300)
+    if run.returncode != 0:
+        stderr = run.stderr.decode('utf-8', 'replace') if isinstance(run.stderr, bytes) else str(run.stderr)
+        raise RuntimeError('wiki-index.py exited %s: %s' % (run.returncode, stderr[-400:]))
+    return {'status': 'updated'}
+
+
+def status(args):
+    """Report the resolved engine/schema/data paths without touching the Wiki."""
+    engine = Path(args.scripts_dir).resolve()
+    schema = schema_path(args)
+    root = Path(args.wiki_root).expanduser().resolve()
+    issues = []
+    scripts = []
+    for name in ('wiki-archive.py', 'wiki-synthesize.py', 'wiki-index.py'):
+        target = engine / name
+        entry = {'name': name, 'path': str(target), 'exists': target.is_file(), 'bytes': target.stat().st_size if target.is_file() else 0}
+        if not entry['exists']:
+            issues.append('missing engine script: %s' % name)
+        scripts.append(entry)
+    try:
+        schema_text = schema.read_text(encoding='utf-8')
+    except OSError:
+        schema_text = ''
+    if not schema_text.strip():
+        issues.append('SCHEMA.md is missing or empty: %s' % schema)
+    if not root.is_dir():
+        issues.append('wiki root does not exist: %s' % root)
+    return {
+        'ok': not issues,
+        'issues': issues,
+        'python': sys.version.split()[0],
+        'pythonExecutable': args.python,
+        'engine': {'dir': str(engine), 'scripts': scripts},
+        'schema': {'path': str(schema), 'bytes': len(schema_text.encode('utf-8'))},
+        'wikiRoot': {'path': str(root), 'exists': root.is_dir()},
+        'state': {'path': str(state_path(root))},
+        'operations': ['scope', 'synthesize', 'prompt', 'write', 'index'],
+    }
+
+
 def run_child(command, **kwargs):
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **{key: value for key, value in kwargs.items() if key != 'capture_output' and key != 'timeout'})
+
     def terminate(_signum, _frame):
         process.terminate()
         try:
@@ -349,6 +416,7 @@ def run_child(command, **kwargs):
             process.kill()
             process.wait()
         raise SystemExit(1)
+
     previous = signal.signal(signal.SIGTERM, terminate)
     try:
         stdout, stderr = process.communicate(timeout=kwargs.get('timeout'))
@@ -361,36 +429,69 @@ def run_child(command, **kwargs):
         signal.signal(signal.SIGTERM, previous)
 
 
+@contextlib.contextmanager
+def quiet():
+    """Swallow helper logging so stdout stays one JSON document."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['scope', 'synthesize', 'prompt', 'write', 'index'])
+    parser.add_argument('operation', choices=['scope', 'synthesize', 'prompt', 'write', 'index', 'status'])
     parser.add_argument('--wiki-root', required=True)
     parser.add_argument('--dsh-home', required=True)
+    parser.add_argument('--scripts-dir', required=True)
+    parser.add_argument('--schema', required=True)
     parser.add_argument('--value', default='')
     parser.add_argument('--provider', default='stepx-terra')
+    parser.add_argument('--synth-config', default='')
+    parser.add_argument('--python', default='/usr/bin/python3')
+    parser.add_argument('--log', default='')
     args = parser.parse_args()
-    root = Path(args.wiki_root)
-    if not (root / 'SCHEMA.md').is_file() or not (root / 'SCHEMA.md').read_text(encoding='utf-8').strip():
-        raise ValueError('SCHEMA_UNAVAILABLE')
-    archive = load_script(root / 'scripts' / 'wiki-archive.py', 'board_archive')
-    if args.operation == 'scope':
-        result = scope(args, archive)
-    elif args.operation == 'synthesize':
-        result = synthesize(args, archive)
-    elif args.operation == 'prompt':
-        result = prepare(args, archive)
-    elif args.operation == 'write':
-        result = write(args, archive)
-    else:
-        run = run_child(['/usr/bin/python3', str(root / 'scripts' / 'wiki-index.py'), '--wiki-root', str(root)], capture_output=True, timeout=120)
-        result = {'status': 'updated' if run.returncode == 0 else 'failed'}
-    print(json.dumps(result, ensure_ascii=False))
+    global LOG_PATH
+    LOG_PATH = args.log
+    log_line('start', ' '.join(sys.argv[1:3]))
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        if args.operation == 'status':
+            result = status(args)
+            log_line('done', 'status')
+            REAL_STDOUT.write(json.dumps(result, ensure_ascii=False) + '\n')
+            return 0
+        # Every write/preview workflow is gated on the rules file, as before.
+        require_schema(args)
+        archive = load_script(engine_file(args, 'wiki-archive.py'), 'board_archive')
+        if args.operation == 'scope':
+            result = scope(args, archive)
+        elif args.operation == 'synthesize':
+            result = synthesize(args, archive)
+        elif args.operation == 'prompt':
+            result = prepare(args, archive)
+        elif args.operation == 'write':
+            result = write(args, archive)
+        else:
+            require_schema(args)
+            result = run_index(args)
+    stray = captured.getvalue()
+    if stray.strip():
+        log_line('stdout-captured', stray)
+    log_line('done', args.operation)
+    REAL_STDOUT.write(json.dumps(result, ensure_ascii=False) + '\n')
+    return 0
 
 
 if __name__ == '__main__':
     try:
-        main()
-    except Exception as error:
-        # Do not forward provider stderr, transcript text or credentials into the UI.
-        print(json.dumps({'error': str(error) if str(error) in ('SELECTION_MISMATCH', 'INVALID_RESULT', 'INVALID_SELECTION', 'SCHEMA_UNAVAILABLE') else 'WORKFLOW_UNAVAILABLE'}))
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except BaseException as error:  # a helper's SystemExit is a failure too
+        detail = '%s: %s' % (type(error).__name__, str(error))
+        log_line('fatal', traceback.format_exc())
+        code = str(error) if str(error) in (
+            'SELECTION_MISMATCH', 'INVALID_RESULT', 'INVALID_SELECTION', 'SCHEMA_UNAVAILABLE',
+            'ENGINE_UNAVAILABLE', 'STATE_UNAVAILABLE',
+        ) else ('ENGINE_UNAVAILABLE' if isinstance(error, (ImportError, FileNotFoundError)) else 'WORKFLOW_UNAVAILABLE')
+        REAL_STDOUT.write(json.dumps({'error': code, 'detail': detail[:400]}, ensure_ascii=False) + '\n')
         raise SystemExit(1)

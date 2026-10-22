@@ -9,11 +9,13 @@ import { SessionCard } from '../src/client/SessionCard.tsx'
 import { BoardOverlay } from '../src/client/BoardOverlay.tsx'
 import { BatchToolbar } from '../src/client/BatchToolbar.tsx'
 import { BatchController } from '../src/client/batch.ts'
+import { SessionBoardSettingsPage } from '../src/client/SettingsPage.tsx'
 import { en } from '../src/client/locales.ts'
 import { buildEntry } from '../src/shared/board.ts'
+import { DEFAULT_WIKI_CONFIG, wikiDefaults } from '../src/shared/wiki.ts'
 
 const t = (key: string, args?: Record<string, string | number>) => {
   const template = (en as Record<string, string>)[key] ?? key
   return template.replace(/\{(\w+)\}/g, (match, name: string) => String(args?.[name] ?? match))
 }
-export { BoardList, BoardFilterBar, createRoot, SessionCard, BoardOverlay, BatchToolbar, BatchController, buildEntry, t }
+export { BoardList, BoardFilterBar, createRoot, SessionCard, BoardOverlay, BatchToolbar, BatchController, SessionBoardSettingsPage, buildEntry, DEFAULT_WIKI_CONFIG, wikiDefaults, t }

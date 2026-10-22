@@ -59,7 +59,12 @@ export function BatchToolbar({ controller, groups, visibleGroups = groups, t }: 
           </div> : null}
         </div>
       ) : null}
-      {state.error ? <div role="alert" className="sb-batch-error">{t('batch.error')} <span>{t((`batch.error.${state.error}` in en) ? `batch.error.${state.error}` : 'batch.error.UNKNOWN')}</span></div> : null}
+      {state.error ? (
+        <div role="alert" className="sb-batch-error">
+          {t('batch.error')} <span>{t((`batch.error.${state.error}` in en) ? `batch.error.${state.error}` : 'batch.error.UNKNOWN')}</span>
+          {state.errorDetail ? <small className="sb-batch-detail">{state.errorDetail}</small> : null}
+        </div>
+      ) : null}
     </section>
   )
 }

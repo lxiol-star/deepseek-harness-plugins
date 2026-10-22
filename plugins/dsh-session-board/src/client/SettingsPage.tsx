@@ -11,6 +11,8 @@ import { useSnapshot } from './hooks.ts'
 import type { Translate } from './hooks.ts'
 import { FALLBACK_OPTION_VALUE } from './synthesis-settings.ts'
 import type { SynthesisSettingsFace } from './synthesis-settings.ts'
+import { WikiSettingsSection } from './WikiSettingsSection.tsx'
+import type { WikiSettingsFace } from './wiki-settings.ts'
 import {
   formatContextWindow,
   optionByValue,
@@ -23,6 +25,7 @@ import {
 export interface SessionBoardSettingsPageProps {
   t: Translate
   settings: SynthesisSettingsFace
+  wiki: WikiSettingsFace
 }
 
 /**
@@ -63,7 +66,7 @@ function defaultEffortLabel(option: { reasoningEfforts: readonly { id: string; n
  * @param props - locale copy and the synthesis-settings controller face.
  * @returns the page content.
  */
-export function SessionBoardSettingsPage({ t, settings }: SessionBoardSettingsPageProps): ReactElement {
+export function SessionBoardSettingsPage({ t, settings, wiki }: SessionBoardSettingsPageProps): ReactElement {
   const state = useSnapshot(settings.store, value => value)
   useEffect(() => { settings.start() }, [settings])
 
@@ -82,70 +85,72 @@ export function SessionBoardSettingsPage({ t, settings }: SessionBoardSettingsPa
       ? t('settings.synthesisCatalogUnavailable')
       : null
   return (
-    <section className="sb-settings" aria-label={t('settings.nav')}>
-      <h3 className="sb-settings-title">{t('settings.synthesisGroup')}</h3>
-      <p className="sb-settings-hint">{t('settings.synthesisHint')}</p>
-      <div className="sb-settings-row">
-        <label className="sb-settings-label" htmlFor="sb-settings-synthesis-model">{t('settings.synthesisModel')}</label>
-        <select
-          id="sb-settings-synthesis-model"
-          className="sb-settings-select"
-          value={currentValue}
-          disabled={disabled}
-          onChange={(event) => { void settings.save(event.target.value) }}
-        >
-          <option value={FALLBACK_OPTION_VALUE}>{t('settings.synthesisFallback')}</option>
-          {state.options.map(option => (
-            <option key={option.value} value={option.value}>{optionLabel(option, t)}</option>
-          ))}
-          {knownValue === null && selectedValue !== null
-            ? (
-              <option value={selectionOptionValue(selectedValue)}>
-                {`${selectedValue.provider} · ${selectedValue.model} (${t('settings.synthesisUnavailable')})`}
-              </option>
-            )
-            : null}
-        </select>
-      </div>
-      {showEffort
-        ? (
-          <div className="sb-settings-row">
-            <label className="sb-settings-label" htmlFor="sb-settings-synthesis-effort">{t('settings.synthesisEffort')}</label>
-            <select
-              id="sb-settings-synthesis-effort"
-              className="sb-settings-select"
-              value={savedEffort ?? ''}
-              disabled={disabled}
-              onChange={(event) => { void settings.save(currentValue, event.target.value) }}
-            >
-              <option value="">{defaultEffortLabel(currentOption, t)}</option>
-              {efforts.map(effort => (
-                <option key={effort.id} value={effort.id}>{effort.name}</option>
-              ))}
-              {savedEffort !== null && !effortKnown
-                ? <option value={savedEffort}>{`${savedEffort} (${t('settings.synthesisUnavailable')})`}</option>
-                : null}
-            </select>
-            <p className="sb-settings-hint">{t('settings.synthesisEffortHint')}</p>
-          </div>
-        )
-        : null}
-      {catalogNote !== null && state.options.length === 0
-        ? (
-          <div className="sb-settings-meta">
-            <span className="sb-settings-note">{catalogNote}</span>
-            {state.catalogStatus === 'unavailable'
-              ? <button type="button" className="sb-settings-retry" onClick={() => { void settings.reloadCatalog() }}>{t('settings.retry')}</button>
+    <>
+      <section className="sb-settings" aria-label={t('settings.nav')}>
+        <h3 className="sb-settings-title">{t('settings.synthesisGroup')}</h3>
+        <p className="sb-settings-hint">{t('settings.synthesisHint')}</p>
+        <div className="sb-settings-row">
+          <label className="sb-settings-label" htmlFor="sb-settings-synthesis-model">{t('settings.synthesisModel')}</label>
+          <select
+            id="sb-settings-synthesis-model"
+            className="sb-settings-select"
+            value={currentValue}
+            disabled={disabled}
+            onChange={(event) => { void settings.save(event.target.value) }}
+          >
+            <option value={FALLBACK_OPTION_VALUE}>{t('settings.synthesisFallback')}</option>
+            {state.options.map(option => (
+              <option key={option.value} value={option.value}>{optionLabel(option, t)}</option>
+            ))}
+            {knownValue === null && selectedValue !== null
+              ? (
+                <option value={selectionOptionValue(selectedValue)}>
+                  {`${selectedValue.provider} · ${selectedValue.model} (${t('settings.synthesisUnavailable')})`}
+                </option>
+              )
               : null}
-          </div>
-        )
-        : null}
-      <div className="sb-settings-meta" role="status" aria-live="polite">
-        {state.saved && state.error === null ? <span className="sb-settings-saved">{t('settings.synthesisSaved')}</span> : null}
-        {state.error !== null ? <span className="sb-settings-error">{errorText(t, state.error)}</span> : null}
-        {state.saving ? <span className="sb-settings-note">{t('settings.synthesisSaving')}</span> : null}
-      </div>
-      <p className="sb-settings-hint">{t('settings.synthesisFallbackHint')}</p>
-    </section>
+          </select>
+        </div>
+        {showEffort
+          ? (
+            <div className="sb-settings-row">
+              <label className="sb-settings-label" htmlFor="sb-settings-synthesis-effort">{t('settings.synthesisEffort')}</label>
+              <select
+                id="sb-settings-synthesis-effort"
+                className="sb-settings-select"
+                value={savedEffort ?? ''}
+                disabled={disabled}
+                onChange={(event) => { void settings.save(currentValue, event.target.value) }}
+              >
+                <option value="">{defaultEffortLabel(currentOption, t)}</option>
+                {efforts.map(effort => (
+                  <option key={effort.id} value={effort.id}>{effort.name}</option>
+                ))}
+                {savedEffort !== null && !effortKnown
+                  ? <option value={savedEffort}>{`${savedEffort} (${t('settings.synthesisUnavailable')})`}</option>
+                  : null}
+              </select>
+              <p className="sb-settings-hint">{t('settings.synthesisEffortHint')}</p>
+            </div>
+          )
+          : null}
+        {catalogNote !== null && state.options.length === 0
+          ? (
+            <div className="sb-settings-meta">
+              <span className="sb-settings-note">{catalogNote}</span>
+              {state.catalogStatus === 'unavailable'
+                ? <button type="button" className="sb-settings-retry" onClick={() => { void settings.reloadCatalog() }}>{t('settings.retry')}</button>
+                : null}
+            </div>
+          )
+          : null}
+        <div className="sb-settings-meta" role="status" aria-live="polite">
+          {state.saved && state.error === null ? <span className="sb-settings-saved">{t('settings.synthesisSaved')}</span> : null}
+          {state.error !== null ? <span className="sb-settings-error">{errorText(t, state.error)}</span> : null}
+          {state.saving ? <span className="sb-settings-note">{t('settings.synthesisSaving')}</span> : null}
+        </div>
+      </section>
+      <WikiSettingsSection t={t} wiki={wiki} />
+    </>
   )
 }

@@ -1,3 +1,8 @@
+// src/host/plugin.ts
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname2, join as join3, resolve as resolve2 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+
 // src/shared/types.ts
 var EMPTY_FEED = { acks: {}, turns: {} };
 
@@ -28,6 +33,131 @@ function selectionOf(pref) {
   return { provider: pref.provider, model: pref.model, reasoningEffort: pref.reasoningEffort };
 }
 
+// src/shared/wiki.ts
+var WIKI_DEFAULT_TIMEOUT_SECONDS = 300;
+var WIKI_CONFIG_PATH = "/api/session-board/wiki-config";
+var WIKI_CONFIG_CAPABILITY = 1;
+var DEFAULT_WIKI_CONFIG = {
+  wikiRoot: "",
+  schemaPath: "",
+  scriptsMode: "bundled",
+  scriptsDir: "",
+  python: "",
+  stateFile: "",
+  timeoutSeconds: 0,
+  provider: "",
+  synthConfig: ""
+};
+var PATH_MAX = 4096;
+var PROVIDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function wikiDefaults(home) {
+  return {
+    wikiRoot: `${home}/wiki`,
+    schemaPath: `${home}/wiki/SCHEMA.md`,
+    scriptsDir: `${home}/wiki/scripts`,
+    stateFile: `${home}/wiki/scripts/.archive-state.json`,
+    python: "/usr/bin/python3",
+    provider: "stepx-terra",
+    synthConfig: `${home}/.wikibar/config.json`,
+    timeoutSeconds: WIKI_DEFAULT_TIMEOUT_SECONDS
+  };
+}
+function orDefault(value, fallback) {
+  return value === "" ? fallback : value;
+}
+function resolveWikiPaths(config, home, storedProvider) {
+  const defaults = wikiDefaults(home);
+  const wikiRoot = orDefault(config.wikiRoot, defaults.wikiRoot);
+  const schemaPath = orDefault(config.schemaPath, `${wikiRoot}/SCHEMA.md`);
+  const scriptsDir = config.scriptsMode === "local" ? orDefault(config.scriptsDir, `${wikiRoot}/scripts`) : "";
+  return {
+    wikiRoot,
+    schemaPath,
+    scriptsDir,
+    stateFile: orDefault(config.stateFile, `${wikiRoot}/scripts/.archive-state.json`),
+    python: orDefault(config.python, defaults.python),
+    timeoutSeconds: config.timeoutSeconds > 0 ? config.timeoutSeconds : defaults.timeoutSeconds,
+    provider: orDefault(config.provider, storedProvider ?? defaults.provider),
+    synthConfig: orDefault(config.synthConfig, defaults.synthConfig)
+  };
+}
+function isAbsolutePath(value) {
+  return value.length <= PATH_MAX && value.startsWith("/") && !value.includes("\0");
+}
+function validateWikiConfig(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { config: null, errors: ["INVALID_CONFIG"] };
+  }
+  const value = raw;
+  const errors = [];
+  const path = (key, label) => {
+    const entry = value[key];
+    if (entry === void 0) return "";
+    if (typeof entry !== "string" || entry !== "" && !isAbsolutePath(entry)) {
+      errors.push(`INVALID_${label}`);
+      return "";
+    }
+    return entry;
+  };
+  const wikiRoot = path("wikiRoot", "WIKI_ROOT");
+  const schemaPath = path("schemaPath", "SCHEMA_PATH");
+  const scriptsDir = path("scriptsDir", "SCRIPTS_DIR");
+  const python = path("python", "PYTHON");
+  const stateFile = path("stateFile", "STATE_FILE");
+  const synthConfig = path("synthConfig", "SYNTH_CONFIG");
+  const scriptsMode = value.scriptsMode === void 0 ? "bundled" : value.scriptsMode;
+  if (scriptsMode !== "bundled" && scriptsMode !== "local") errors.push("INVALID_SCRIPTS_MODE");
+  const timeout = value.timeoutSeconds === void 0 ? 0 : value.timeoutSeconds;
+  if (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 0 || timeout > 86400) errors.push("INVALID_TIMEOUT");
+  const provider = value.provider === void 0 ? "" : value.provider;
+  if (typeof provider !== "string" || provider !== "" && !PROVIDER_RE.test(provider)) errors.push("INVALID_PROVIDER");
+  if (errors.length > 0) return { config: null, errors };
+  return {
+    config: {
+      wikiRoot,
+      schemaPath,
+      scriptsMode,
+      scriptsDir,
+      python,
+      stateFile,
+      timeoutSeconds: timeout,
+      provider,
+      synthConfig
+    },
+    errors
+  };
+}
+function parseWikiConfig(raw) {
+  const parsed = validateWikiConfig(raw);
+  return parsed.config ?? { ...DEFAULT_WIKI_CONFIG };
+}
+function parseEnvironmentStatus(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const value = raw;
+  if (typeof value.ok !== "boolean" || typeof value.python !== "string" || typeof value.pythonExecutable !== "string") return null;
+  const engine = value.engine;
+  const schema = value.schema;
+  const wikiRoot = value.wikiRoot;
+  const state = value.state;
+  if (engine === null || typeof engine !== "object" || schema === null || typeof schema !== "object" || wikiRoot === null || typeof wikiRoot !== "object" || state === null || typeof state !== "object") return null;
+  const scripts = Array.isArray(engine.scripts) ? engine.scripts.filter((entry) => {
+    if (typeof entry !== "object" || entry === null) return false;
+    const script = entry;
+    return typeof script.name === "string" && typeof script.path === "string" && typeof script.exists === "boolean" && typeof script.bytes === "number";
+  }) : [];
+  return {
+    ok: value.ok,
+    issues: Array.isArray(value.issues) ? value.issues.filter((entry) => typeof entry === "string") : [],
+    python: value.python,
+    pythonExecutable: value.pythonExecutable,
+    engine: { dir: typeof engine.dir === "string" ? engine.dir : "", scripts },
+    schema: { path: typeof schema.path === "string" ? schema.path : "", bytes: typeof schema.bytes === "number" ? schema.bytes : 0 },
+    wikiRoot: { path: typeof wikiRoot.path === "string" ? wikiRoot.path : "", exists: wikiRoot.exists === true },
+    state: { path: typeof state.path === "string" ? state.path : "" },
+    operations: Array.isArray(value.operations) ? value.operations.filter((entry) => typeof entry === "string") : []
+  };
+}
+
 // src/host/domain.ts
 var UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/;
 function domainTable(schema) {
@@ -55,6 +185,8 @@ var PREFS_DOMAIN_NAME = "dsh_session_board_prefs";
 var ACK_TABLE_NAME = "acks";
 var TURN_TABLE_NAME = "turn_stats";
 var PREFS_TABLE_NAME = "prefs";
+var WIKI_DOMAIN_NAME = "dsh_session_board_wiki";
+var WIKI_TABLE_NAME = "config";
 var ERROR_NOTE_MAX = 160;
 var ELLIPSIS = "\u2026";
 function truncateErrorNote(text, max = ERROR_NOTE_MAX) {
@@ -141,6 +273,19 @@ var prefsDomainSpec = defineDomain({
   invalidRecords: "backup-and-skip",
   tables: {
     [PREFS_TABLE_NAME]: domainTable(prefsRecordSchema)
+  }
+});
+var wikiRecordSchema = {
+  parse(raw) {
+    return parseWikiConfig(raw);
+  }
+};
+var wikiDomainSpec = defineDomain({
+  name: WIKI_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: "backup-and-skip",
+  tables: {
+    [WIKI_TABLE_NAME]: domainTable(wikiRecordSchema)
   }
 });
 
@@ -1807,17 +1952,17 @@ async function runSynthesisModel(llm, request) {
 }
 
 // src/host/wiki-archive.ts
-import { execFile } from "node:child_process";
+import { execFile as execFile2 } from "node:child_process";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { homedir as homedir2 } from "node:os";
-import { join as join2, resolve } from "node:path";
+import { dirname, join as join2, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { promisify as promisify2 } from "node:util";
 
 // src/shared/archive.ts
 var MAX_ARCHIVE_SELECTION = 50;
-var WIKI_WORKFLOW_CAPABILITY = 1;
+var WIKI_WORKFLOW_CAPABILITY = 2;
 var WIKI_ARCHIVE_PATH = "/api/session-board/wiki-archive";
 function parseArchiveSummary(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("Invalid archive summary");
@@ -1880,16 +2025,127 @@ function parseWikiWorkflow(raw) {
   return { synthesis, index: value.index };
 }
 
-// src/host/wiki-archive.ts
+// src/host/wiki-config.ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 var exec = promisify(execFile);
+var WikiConfigError = class extends Error {
+  /**
+   * @param errors - stable codes such as `INVALID_WIKI_ROOT`.
+   */
+  constructor(errors) {
+    super(errors[0] ?? "INVALID_CONFIG");
+    this.errors = errors;
+  }
+  errors;
+};
+var ENGINE_SCRIPTS = ["wiki-archive.py", "wiki-synthesize.py", "wiki-index.py"];
+function mergeWikiConfig(pluginConfig, stored) {
+  return stored === null ? { ...pluginConfig } : { ...stored };
+}
+function buildWikiRuntime(input) {
+  const home = input.home ?? "";
+  const pluginConfig = input.pluginConfig ?? DEFAULT_WIKI_CONFIG;
+  const config = mergeWikiConfig(pluginConfig, input.stored ?? null);
+  const paths = resolveWikiPaths(config, home, input.storedProvider);
+  const engineDir = config.scriptsMode === "local" ? paths.scriptsDir : input.engineDir;
+  return {
+    home,
+    dshHome: input.dshHome ?? null,
+    paths,
+    engineDir,
+    bridgePath: input.bridgePath,
+    logPath: input.logPath ?? `${home}/.dsh-session-board/wiki.log`
+  };
+}
+function wikiConfigResponse(config, home, status, provider) {
+  const defaults = wikiDefaults(home);
+  return { config: { ...config }, defaults: provider === void 0 ? defaults : { ...defaults, provider }, status };
+}
+async function appendWikiLog(runtime, message) {
+  try {
+    const { appendFile, mkdir: mkdir2, stat, writeFile } = await import("node:fs/promises");
+    const { dirname: dirname3 } = await import("node:path");
+    await mkdir2(dirname3(runtime.logPath), { recursive: true });
+    const LOG_LIMIT = 2 * 1024 * 1024;
+    const info = await stat(runtime.logPath).catch(() => null);
+    if (info !== null && info.size > LOG_LIMIT) await writeFile(runtime.logPath, "", "utf8");
+    await appendFile(runtime.logPath, `${(/* @__PURE__ */ new Date()).toISOString()}	${message.replace(/\n+/g, " \u23CE ").slice(0, 6e3)}
+`, "utf8");
+  } catch {
+  }
+}
+function failedStatus(runtime, issues) {
+  return {
+    ok: false,
+    issues,
+    python: "",
+    pythonExecutable: runtime.paths.python,
+    engine: { dir: runtime.engineDir, scripts: ENGINE_SCRIPTS.map((name2) => ({ name: name2, path: `${runtime.engineDir}/${name2}`, exists: false, bytes: 0 })) },
+    schema: { path: runtime.paths.schemaPath, bytes: 0 },
+    wikiRoot: { path: runtime.paths.wikiRoot, exists: false },
+    state: { path: runtime.paths.stateFile },
+    operations: []
+  };
+}
+async function probeWikiEnvironment(runtime) {
+  const script = runtime.engineDir === "" ? "" : `${runtime.engineDir}/wiki-archive.py`;
+  if (script === "" || runtime.dshHome === null) {
+    return failedStatus(runtime, ["Wiki scripts directory is not configured", ...runtime.dshHome === null ? ["DSH_HOME is unknown"] : []]);
+  }
+  try {
+    const result = await exec(runtime.paths.python, [
+      runtime.bridgePath,
+      "status",
+      "--wiki-root",
+      runtime.paths.wikiRoot,
+      "--dsh-home",
+      runtime.dshHome,
+      "--scripts-dir",
+      runtime.engineDir,
+      "--schema",
+      runtime.paths.schemaPath,
+      "--python",
+      runtime.paths.python,
+      "--log",
+      runtime.logPath
+    ], { timeout: 3e4, maxBuffer: 1024 * 1024 });
+    const parsed = parseEnvironmentStatus(JSON.parse(result.stdout));
+    return parsed ?? failedStatus(runtime, ["Wiki bridge returned an unreadable status report"]);
+  } catch (error) {
+    const stdout = error.stdout;
+    if (typeof stdout === "string") {
+      try {
+        const parsed = parseEnvironmentStatus(JSON.parse(stdout));
+        if (parsed !== null) return parsed;
+      } catch {
+      }
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    void appendWikiLog(runtime, `probe failed: ${detail}`);
+    return failedStatus(runtime, [`Wiki bridge probe failed: ${detail.slice(0, 400)}`]);
+  }
+}
+function validateWikiWrite(raw) {
+  return validateWikiConfig(raw);
+}
+
+// src/host/wiki-archive.ts
+var exec2 = promisify2(execFile2);
 var SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 var PREVIEW_TTL_MS = 5 * 6e4;
 var WikiArchiveError = class extends Error {
-  constructor(code) {
+  /**
+   * @param code - stable machine code the client maps to localized copy.
+   * @param detail - optional one-line diagnostic for the panel (no transcript text).
+   */
+  constructor(code, detail) {
     super(code);
     this.code = code;
+    this.detail = detail;
   }
   code;
+  detail;
 };
 function resolveSynthesisProvider(home) {
   try {
@@ -1968,39 +2224,74 @@ function createWikiArchiver(options = {}) {
   const home = resolve(options.home ?? homedir2());
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME);
   const unavailableHome = dshHome === null;
-  const synthesisProvider = resolveSynthesisProvider(home);
   const now = options.now ?? Date.now;
-  const script = join2(home, "wiki", "scripts", "wiki-archive.py");
+  const packageDir = dirname(fileURLToPath(import.meta.url));
+  const runtimeOf = options.runtime ?? (() => buildWikiRuntime({
+    home,
+    dshHome,
+    pluginConfig: DEFAULT_WIKI_CONFIG,
+    stored: null,
+    engineDir: join2(packageDir, "wiki"),
+    bridgePath: join2(packageDir, "wiki-workflow.py"),
+    storedProvider: resolveSynthesisProvider(home)
+  }));
+  const failureDetail = (error) => {
+    const stderr = error.stderr;
+    const stdout = error.stdout;
+    const text = typeof stderr === "string" && stderr.trim() !== "" ? stderr : typeof stdout === "string" ? stdout : error instanceof Error ? error.message : String(error);
+    return text.replace(/\s+/gu, " ").trim().slice(-400);
+  };
   const execute = options.execute ?? (async (args, signal) => {
+    const runtime = runtimeOf();
+    const script = join2(runtime.engineDir, "wiki-archive.py");
     try {
-      return await exec("/usr/bin/python3", [script, ...args], { timeout: 12e4, maxBuffer: 4 * 1024 * 1024, signal, env: { ...process.env, WIKI_ARCHIVE_LOCK_TIMEOUT: "10" } });
+      return await exec2(runtime.paths.python, [script, ...args], {
+        timeout: runtime.paths.timeoutSeconds * 1e3,
+        maxBuffer: 4 * 1024 * 1024,
+        signal,
+        env: { ...process.env, WIKI_ARCHIVE_STATE_FILE: runtime.paths.stateFile, WIKI_ARCHIVE_LOCK_TIMEOUT: "10" }
+      });
     } catch (error) {
       const stdout = error.stdout;
       if (typeof stdout === "string" && stdout.trim().startsWith("{")) return { stdout };
-      throw new WikiArchiveError(signal.aborted ? "CANCELLED" : "ARCHIVE_UNAVAILABLE");
+      const detail = failureDetail(error);
+      void appendWikiLog(runtime, `archive batch failed: ${detail}`);
+      throw new WikiArchiveError(signal.aborted ? "CANCELLED" : "ARCHIVE_UNAVAILABLE", detail);
     }
   });
   const workflow = options.workflow ?? (async (operation, value, signal) => {
-    if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
+    const runtime = runtimeOf();
+    if (runtime.dshHome === null) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE", "DSH_HOME is unknown");
+    const providerArguments = operation === "synthesize" ? ["--provider", runtime.paths.provider, ...runtime.paths.synthConfig === "" ? [] : ["--synth-config", runtime.paths.synthConfig]] : [];
     try {
-      const providerArguments = operation === "synthesize" ? ["--provider", synthesisProvider] : [];
-      const result = await exec(
-        "/usr/bin/python3",
+      const result = await exec2(
+        runtime.paths.python,
         [
-          fileURLToPath(new URL("./wiki-workflow.py", import.meta.url)),
+          runtime.bridgePath,
           operation,
           "--wiki-root",
-          join2(home, "wiki"),
+          runtime.paths.wikiRoot,
           "--dsh-home",
-          dshHome,
+          runtime.dshHome,
+          "--scripts-dir",
+          runtime.engineDir,
+          "--schema",
+          runtime.paths.schemaPath,
           "--value",
           value,
+          "--python",
+          runtime.paths.python,
+          "--log",
+          runtime.logPath,
           ...providerArguments
         ],
-        { timeout: operation === "synthesize" ? 185e4 : 12e4, maxBuffer: 4 * 1024 * 1024, signal }
+        { timeout: operation === "synthesize" ? 185e4 : runtime.paths.timeoutSeconds * 1e3, maxBuffer: 4 * 1024 * 1024, signal }
       );
       const parsed = JSON.parse(result.stdout);
-      if (typeof parsed === "object" && parsed !== null && "error" in parsed && !("status" in parsed)) throw new WikiArchiveError(String(parsed.error));
+      if (typeof parsed === "object" && parsed !== null && "error" in parsed && !("status" in parsed)) {
+        const entry = parsed;
+        throw new WikiArchiveError(String(entry.error), typeof entry.detail === "string" ? entry.detail : void 0);
+      }
       return parsed;
     } catch (error) {
       if (error instanceof WikiArchiveError) throw error;
@@ -2009,12 +2300,17 @@ function createWikiArchiver(options = {}) {
       if (typeof stdout === "string") {
         try {
           const parsed = JSON.parse(stdout);
-          if (typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "string") throw new WikiArchiveError(parsed.error);
+          if (typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "string") {
+            const entry = parsed;
+            throw new WikiArchiveError(entry.error, typeof entry.detail === "string" ? entry.detail : void 0);
+          }
         } catch (inner) {
           if (inner instanceof WikiArchiveError) throw inner;
         }
       }
-      throw new WikiArchiveError(operation === "scope" ? "SCOPE_FAILED" : operation === "index" ? "INDEX_FAILED" : "SYNTHESIS_FAILED");
+      const detail = failureDetail(error);
+      void appendWikiLog(runtime, `${operation} failed: ${detail}`);
+      throw new WikiArchiveError(operation === "scope" ? "SCOPE_FAILED" : operation === "index" ? "INDEX_FAILED" : "SYNTHESIS_FAILED", detail);
     }
   });
   const models = options.models;
@@ -2024,13 +2320,14 @@ function createWikiArchiver(options = {}) {
   let closed = false;
   const perform = async (ids, dryRun) => {
     if (unavailableHome) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE");
+    const runtime = runtimeOf();
     const args = [
       "--wiki-root",
-      join2(home, "wiki"),
+      runtime.paths.wikiRoot,
       "--tool",
       "dsh",
       "--dsh-home",
-      dshHome,
+      runtime.dshHome ?? "",
       "--json",
       ...ids.flatMap((id) => ["--exact-session", id]),
       ...dryRun ? ["--dry-run"] : ["--full"]
@@ -2150,6 +2447,7 @@ var BOARD_SNAPSHOT_PATH = `${BOARD_API_PREFIX}/board`;
 var BOARD_ACK_PATH = `${BOARD_API_PREFIX}/ack`;
 var BOARD_WIKI_ARCHIVE_PATH = WIKI_ARCHIVE_PATH;
 var BOARD_SYNTHESIS_MODEL_PATH = SYNTHESIS_MODEL_PATH;
+var BOARD_WIKI_CONFIG_PATH = WIKI_CONFIG_PATH;
 var BOARD_STREAM_PREFIX = "/dsh-session-board";
 var BOARD_STREAM_PATH = `${BOARD_STREAM_PREFIX}/stream`;
 var SESSION_ID_MAX = 200;
@@ -2220,7 +2518,7 @@ data: ${JSON.stringify(feed)}
       if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       try {
-        if (value.action === "capabilities") return jsonResponse2(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } });
+        if (value.action === "capabilities") return jsonResponse2(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } });
         if (value.action === "preview") {
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds));
           return jsonResponse2(200, { ok: true, preview });
@@ -2237,7 +2535,8 @@ data: ${JSON.stringify(feed)}
                 archiveOperations.set(token, { state: "completed", result });
               },
               (error) => {
-                archiveOperations.set(token, { state: "failed", error: error instanceof WikiArchiveError ? error.code : "ARCHIVE_UNAVAILABLE" });
+                const detail = error instanceof WikiArchiveError ? error.detail : void 0;
+                archiveOperations.set(token, { state: "failed", error: error instanceof WikiArchiveError ? error.code : "ARCHIVE_UNAVAILABLE", ...detail === void 0 ? {} : { detail } });
               }
             );
             operation = archiveOperations.get(token);
@@ -2253,8 +2552,9 @@ data: ${JSON.stringify(feed)}
       } catch (error) {
         options.warn(`dsh-session-board: wiki archive failed: ${describeError2(error)}`);
         const code = error instanceof WikiArchiveError ? error.code : "ARCHIVE_UNAVAILABLE";
+        const detail = error instanceof WikiArchiveError ? error.detail : void 0;
         const status = code === "INVALID_SELECTION" ? 400 : code === "BUSY" ? 429 : 409;
-        return jsonResponse2(status, { ok: false, error: code });
+        return jsonResponse2(status, { ok: false, error: code, ...detail === void 0 || detail === "" ? {} : { detail } });
       }
     }
   };
@@ -2302,6 +2602,35 @@ data: ${JSON.stringify(feed)}
       return jsonResponse2(200, { ok: true, selection });
     }
   };
+  const wikiConfigRoute = {
+    path: BOARD_WIKI_CONFIG_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      const settings = options.wikiSettings;
+      if (settings === void 0) return jsonResponse2(503, { ok: false, error: "HOST_OUTDATED" });
+      const body = await readJsonBody2(request);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG" });
+      const value = body;
+      try {
+        if (value.action === "read") return jsonResponse2(200, { ok: true, ...await settings.read() });
+        if (value.action === "probe") return jsonResponse2(200, { ok: true, status: await settings.probe() });
+        if (value.action === "reset") return jsonResponse2(200, { ok: true, ...await settings.reset() });
+        if (value.action === "write") {
+          try {
+            return jsonResponse2(200, { ok: true, ...await settings.write(value.config) });
+          } catch (error) {
+            if (error instanceof WikiConfigError) return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG", errors: error.errors });
+            throw error;
+          }
+        }
+        return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG" });
+      } catch (error) {
+        options.warn(`dsh-session-board: wiki config failed: ${describeError2(error)}`);
+        return jsonResponse2(500, { ok: false, error: "STORE_UNAVAILABLE" });
+      }
+    }
+  };
   const streamRoute = {
     kind: "prefix",
     path: BOARD_STREAM_PREFIX,
@@ -2336,7 +2665,7 @@ data: ${JSON.stringify(feed)}
     }
   };
   return {
-    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute],
+    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute, wikiConfigRoute],
     streamRoute,
     broadcast,
     close: () => {
@@ -2399,6 +2728,51 @@ function describeError2(error) {
 // src/host/plugin.ts
 var name = "dsh-session-board";
 var inject = ["storageDomain", "connection", "webServer", "llm"];
+var KNOWN_WIKI_CONFIG_FIELDS = /* @__PURE__ */ new Set([
+  "wikiRoot",
+  "schemaPath",
+  "scriptsMode",
+  "scriptsDir",
+  "python",
+  "stateFile",
+  "timeoutSeconds",
+  "provider",
+  "synthConfig"
+]);
+var Config = {
+  "~standard": {
+    version: 1,
+    vendor: "dsh-session-board",
+    /**
+     * Validate one raw row config and fill deployment defaults.
+     * @param value - raw `config` value from the Loader row.
+     * @returns the complete config, or Standard Schema issues.
+     */
+    validate(value) {
+      const input = value ?? {};
+      if (typeof input !== "object" || Array.isArray(input)) {
+        return { issues: [{ message: "config must be an object", path: [] }] };
+      }
+      const unknown = Object.keys(input).filter((key) => !KNOWN_WIKI_CONFIG_FIELDS.has(key));
+      if (unknown.length > 0) {
+        return { issues: unknown.map((key) => ({ message: `unknown config field '${key}'`, path: [key] })) };
+      }
+      const parsed = validateWikiConfig(input);
+      if (parsed.config === null) {
+        return { issues: parsed.errors.map((message) => ({ message, path: [] })) };
+      }
+      return { value: parsed.config };
+    }
+  }
+};
+function resolvePluginConfig(raw) {
+  const result = Config["~standard"].validate(raw);
+  if (result.issues !== void 0) {
+    const detail = result.issues.map((issue) => issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`).join("; ");
+    throw new Error(`dsh-session-board: invalid config: ${detail}`);
+  }
+  return result.value;
+}
 function connectionOf(ctx) {
   return Reflect.get(ctx, "connection");
 }
@@ -2411,18 +2785,56 @@ function storageDomainOf(ctx) {
 function llmOf(ctx) {
   return Reflect.get(ctx, "llm");
 }
-function apply(ctx) {
+function apply(ctx, config) {
   const warn = (message) => {
     ctx.logger?.warn?.(message);
   };
+  const wikiPluginConfig = resolvePluginConfig(config);
   const storageDomain = storageDomainOf(ctx);
   const connection = connectionOf(ctx);
   const webServer = webServerOf(ctx);
   const llm = llmOf(ctx);
+  const home = resolve2(homedir3());
+  const packageDir = dirname2(fileURLToPath2(import.meta.url));
   let ledger = null;
   let prefs = null;
+  let wikiTable = null;
   const readSynthesisPref = () => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null, reasoningEffort: null };
+  const WIKI_RECORD_KEY = "config";
+  const readStoredWiki = () => {
+    try {
+      return wikiTable?.get(WIKI_RECORD_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const runtimeOf = () => buildWikiRuntime({
+    home,
+    dshHome: resolveDshHome(void 0, process.env.DSH_HOME),
+    pluginConfig: wikiPluginConfig,
+    stored: readStoredWiki(),
+    engineDir: join3(packageDir, "wiki"),
+    bridgePath: join3(packageDir, "wiki-workflow.py"),
+    storedProvider: resolveSynthesisProvider(home)
+  });
+  const wikiSettings = {
+    read: async () => wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, readStoredWiki()), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home)),
+    write: async (raw) => {
+      const validated = validateWikiWrite(raw);
+      if (validated.config === null) throw new WikiConfigError(validated.errors);
+      const table = wikiTable;
+      if (table === null) throw new Error("STORE_UNAVAILABLE");
+      await table.put(WIKI_RECORD_KEY, validated.config);
+      return wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, validated.config), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home));
+    },
+    reset: async () => {
+      if (wikiTable !== null) await wikiTable.delete(WIKI_RECORD_KEY);
+      return wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, null), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home));
+    },
+    probe: async () => probeWikiEnvironment(runtimeOf())
+  };
   const wikiArchive = createWikiArchiver({
+    runtime: runtimeOf,
     models: {
       read: () => selectionOf(readSynthesisPref()),
       complete: (request) => runSynthesisModel(llm, request)
@@ -2446,6 +2858,7 @@ function apply(ctx) {
       validate: (selection) => isKnownSynthesisModel(llm, selection),
       catalog: () => listSynthesisCatalog(llm)
     },
+    wikiSettings,
     warn
   });
   const ledgerReady = (async () => {
@@ -2482,6 +2895,15 @@ function apply(ctx) {
       prefs = domain.table(PREFS_TABLE_NAME);
     } catch (error) {
       warn(`dsh-session-board: synthesis preference store unavailable, using the Wiki provider: ${describeError(error)}`);
+    }
+  })();
+  void (async () => {
+    try {
+      const domain = await storageDomain.open(wikiDomainSpec);
+      ctx.effect(() => () => domain.close(), "dsh-session-board: wiki domain");
+      wikiTable = domain.table(WIKI_TABLE_NAME);
+    } catch (error) {
+      warn(`dsh-session-board: wiki configuration store unavailable, using ~/wiki defaults: ${describeError(error)}`);
     }
   })();
   for (const route of routes.fetchRoutes) {

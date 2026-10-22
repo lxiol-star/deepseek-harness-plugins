@@ -1,18 +1,24 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
 import type { SynthesisModelSelection } from '../shared/synthesis.ts'
+import { DEFAULT_WIKI_CONFIG } from '../shared/wiki.ts'
+import { appendWikiLog, buildWikiRuntime, type WikiRuntime } from './wiki-config.ts'
 
 const exec = promisify(execFile)
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const PREVIEW_TTL_MS = 5 * 60_000
 export class WikiArchiveError extends Error {
-  constructor(readonly code: string) { super(code) }
+  /**
+   * @param code - stable machine code the client maps to localized copy.
+   * @param detail - optional one-line diagnostic for the panel (no transcript text).
+   */
+  constructor(readonly code: string, readonly detail?: string) { super(code) }
 }
 export interface WikiArchiver {
   preview(ids: readonly string[]): Promise<ArchivePreview>
@@ -48,6 +54,8 @@ type WorkflowOperation = 'scope' | 'synthesize' | 'prompt' | 'write' | 'index'
 export interface WikiArchiverOptions {
   home?: string
   dshHome?: string
+  /** Resolve the current Wiki runtime per operation; absent keeps ~/wiki + the packaged engine. */
+  runtime?: () => WikiRuntime
   now?: () => number
   workflow?: (operation: WorkflowOperation, value: string, signal: AbortSignal) => Promise<unknown>
   execute?: (args: readonly string[], signal: AbortSignal) => Promise<{ stdout: string }>
@@ -174,29 +182,64 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   // DSH_HOME always wins, which keeps a Dev app pointed at its own home.
   const dshHome = resolveDshHome(options.dshHome, process.env.DSH_HOME)
   const unavailableHome = dshHome === null
-  const synthesisProvider = resolveSynthesisProvider(home)
   const now = options.now ?? Date.now
-  const script = join(home, 'wiki', 'scripts', 'wiki-archive.py')
+  /** The packaged bridge and engine are siblings of this build's lib directory. */
+  const packageDir = dirname(fileURLToPath(import.meta.url))
+  const runtimeOf = options.runtime ?? ((): WikiRuntime => buildWikiRuntime({
+    home,
+    dshHome,
+    pluginConfig: DEFAULT_WIKI_CONFIG,
+    stored: null,
+    engineDir: join(packageDir, 'wiki'),
+    bridgePath: join(packageDir, 'wiki-workflow.py'),
+    storedProvider: resolveSynthesisProvider(home),
+  }))
+  /** One-line reason for a failed subprocess, for the panel and the log. */
+  const failureDetail = (error: unknown): string => {
+    const stderr = (error as { stderr?: unknown }).stderr
+    const stdout = (error as { stdout?: unknown }).stdout
+    const text = typeof stderr === 'string' && stderr.trim() !== ''
+      ? stderr
+      : typeof stdout === 'string' ? stdout : error instanceof Error ? error.message : String(error)
+    return text.replace(/\s+/gu, ' ').trim().slice(-400)
+  }
   const execute = options.execute ?? (async (args, signal) => {
+    const runtime = runtimeOf()
+    const script = join(runtime.engineDir, 'wiki-archive.py')
     try {
-      return await exec('/usr/bin/python3', [script, ...args], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, signal, env: { ...process.env, WIKI_ARCHIVE_LOCK_TIMEOUT: '10' } })
+      return await exec(runtime.paths.python, [script, ...args], {
+        timeout: runtime.paths.timeoutSeconds * 1000,
+        maxBuffer: 4 * 1024 * 1024,
+        signal,
+        env: { ...process.env, WIKI_ARCHIVE_STATE_FILE: runtime.paths.stateFile, WIKI_ARCHIVE_LOCK_TIMEOUT: '10' },
+      })
     } catch (error) {
       // Script may have committed a partial batch. Return a valid summary so
       // the UI can keep failed IDs rather than claiming an all-or-nothing write.
       const stdout = (error as { stdout?: unknown }).stdout
       if (typeof stdout === 'string' && stdout.trim().startsWith('{')) return { stdout }
-      throw new WikiArchiveError(signal.aborted ? 'CANCELLED' : 'ARCHIVE_UNAVAILABLE')
+      const detail = failureDetail(error)
+      void appendWikiLog(runtime, `archive batch failed: ${detail}`)
+      throw new WikiArchiveError(signal.aborted ? 'CANCELLED' : 'ARCHIVE_UNAVAILABLE', detail)
     }
   })
   const workflow = options.workflow ?? (async (operation, value, signal) => {
-    if (unavailableHome) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
+    const runtime = runtimeOf()
+    if (runtime.dshHome === null) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE', 'DSH_HOME is unknown')
+    const providerArguments = operation === 'synthesize'
+      ? ['--provider', runtime.paths.provider, ...(runtime.paths.synthConfig === '' ? [] : ['--synth-config', runtime.paths.synthConfig])]
+      : []
     try {
-      const providerArguments = operation === 'synthesize' ? ['--provider', synthesisProvider] : []
-      const result = await exec('/usr/bin/python3', [fileURLToPath(new URL('./wiki-workflow.py', import.meta.url)), operation,
-        '--wiki-root', join(home, 'wiki'), '--dsh-home', dshHome, '--value', value, ...providerArguments],
-        { timeout: operation === 'synthesize' ? 1_850_000 : 120_000, maxBuffer: 4 * 1024 * 1024, signal })
+      const result = await exec(runtime.paths.python, [runtime.bridgePath, operation,
+        '--wiki-root', runtime.paths.wikiRoot, '--dsh-home', runtime.dshHome,
+        '--scripts-dir', runtime.engineDir, '--schema', runtime.paths.schemaPath,
+        '--value', value, '--python', runtime.paths.python, '--log', runtime.logPath, ...providerArguments],
+        { timeout: operation === 'synthesize' ? 1_850_000 : runtime.paths.timeoutSeconds * 1000, maxBuffer: 4 * 1024 * 1024, signal })
       const parsed: unknown = JSON.parse(result.stdout)
-      if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && !('status' in parsed)) throw new WikiArchiveError(String(parsed.error))
+      if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && !('status' in parsed)) {
+        const entry = parsed as { error: unknown; detail?: unknown }
+        throw new WikiArchiveError(String(entry.error), typeof entry.detail === 'string' ? entry.detail : undefined)
+      }
       return parsed
     } catch (error) {
       if (error instanceof WikiArchiveError) throw error
@@ -207,12 +250,17 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
       if (typeof stdout === 'string') {
         try {
           const parsed: unknown = JSON.parse(stdout)
-          if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && typeof parsed.error === 'string') throw new WikiArchiveError(parsed.error)
+          if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && typeof parsed.error === 'string') {
+            const entry = parsed as { error: string; detail?: unknown }
+            throw new WikiArchiveError(entry.error, typeof entry.detail === 'string' ? entry.detail : undefined)
+          }
         } catch (inner) {
           if (inner instanceof WikiArchiveError) throw inner
         }
       }
-      throw new WikiArchiveError(operation === 'scope' ? 'SCOPE_FAILED' : operation === 'index' ? 'INDEX_FAILED' : 'SYNTHESIS_FAILED')
+      const detail = failureDetail(error)
+      void appendWikiLog(runtime, `${operation} failed: ${detail}`)
+      throw new WikiArchiveError(operation === 'scope' ? 'SCOPE_FAILED' : operation === 'index' ? 'INDEX_FAILED' : 'SYNTHESIS_FAILED', detail)
     }
   })
   const models = options.models
@@ -222,7 +270,8 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   let closed = false
   const perform = async (ids: readonly string[], dryRun: boolean): Promise<ArchiveSummary> => {
     if (unavailableHome) throw new WikiArchiveError('ARCHIVE_UNAVAILABLE')
-    const args = ['--wiki-root', join(home, 'wiki'), '--tool', 'dsh', '--dsh-home', dshHome, '--json',
+    const runtime = runtimeOf()
+    const args = ['--wiki-root', runtime.paths.wikiRoot, '--tool', 'dsh', '--dsh-home', runtime.dshHome ?? '', '--json',
       ...ids.flatMap(id => ['--exact-session', id]), ...(dryRun ? ['--dry-run'] : ['--full'])]
     return validateResult((await execute(args, controller.signal)).stdout, ids, dryRun)
   }

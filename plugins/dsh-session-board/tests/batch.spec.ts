@@ -37,6 +37,14 @@ describe('batch archive state machine', () => {
     controller.toggle('a'); await controller.preview()
     expect(controller.getSnapshot()).toMatchObject({ phase: 'idle', selected: ['a'], error: 'REQUEST_FAILED' })
   })
+  it('keeps the host diagnostic next to the localized error code', async () => {
+    const failure = Object.assign(new Error('SCOPE_FAILED'), { detail: 'ValueError: SELECTION_MISMATCH' })
+    const controller = new BatchController({ preview: async () => { throw failure }, commit: vi.fn() })
+    controller.toggle('a'); await controller.preview()
+    expect(controller.getSnapshot()).toMatchObject({ error: 'SCOPE_FAILED', errorDetail: 'ValueError: SELECTION_MISMATCH' })
+    controller.dismissResult()
+    expect(controller.getSnapshot()).toMatchObject({ error: null, errorDetail: null })
+  })
   it('cancel invalidates preview; changing selection requires a new preview', async () => {
     const commit = vi.fn()
     const controller = new BatchController({ preview: async () => plan, commit })

@@ -14,7 +14,7 @@ function fixture() {
   mkdirSync(scripts, { recursive: true }); mkdirSync(dsh)
   writeFileSync(join(wiki, 'SCHEMA.md'), '# Synthetic Wiki schema')
   copyFileSync(wikiArchiveScript, join(scripts, 'wiki-archive.py'))
-  const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
+  const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--scripts-dir', scripts, '--schema', join(wiki, 'SCHEMA.md'), '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
   return { home, wiki, scripts, dsh, run }
 }
 
@@ -29,7 +29,7 @@ describe.skipIf(!wikiWriteIntegrationAvailable)('real wiki-synthesize.py write p
     writeFileSync(join(wiki, 'raw/sessions/host/dsh/one.md'), 'Synthetic decision: use a fixed port for tests.')
     copyFileSync(wikiArchiveScript, join(scripts, 'wiki-archive.py'))
     copyFileSync(wikiSynthesizeScript, join(scripts, 'wiki-synthesize.py'))
-    const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
+    const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--scripts-dir', scripts, '--schema', join(wiki, 'SCHEMA.md'), '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
     const page = 'raw/sessions/host/dsh/one.md'
     const prepared = run('prompt', page)
     expect(prepared.prompt.system.length).toBeGreaterThan(100)
@@ -176,7 +176,7 @@ describe.skipIf(!pythonAvailable)('Python workflow bridge write operation (synth
     writeFileSync(join(wiki, page), rawText)
     writeFileSync(join(scripts, 'wiki-archive.py'), SYNTHETIC_ARCHIVE)
     writeFileSync(join(scripts, 'wiki-synthesize.py'), SYNTHETIC_SYNTHESIZE)
-    const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
+    const run = (operation: string, value: string) => JSON.parse(execFileSync('/usr/bin/python3', [bridge, operation, '--wiki-root', wiki, '--dsh-home', dsh, '--scripts-dir', scripts, '--schema', join(wiki, 'SCHEMA.md'), '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: home } }))
     const state = () => JSON.parse(readFileSync(join(scripts, '.synthesize-state.json'), 'utf8')) as Record<string, Record<string, unknown>>
     return { home, wiki, scripts, run, state }
   }
@@ -236,12 +236,12 @@ describe.skipIf(!pythonAvailable)('Python workflow bridge write operation (synth
   it('rejects an invalid payload and a page outside raw/sessions', () => {
     const f = fixture()
     for (const value of ['not-json', JSON.stringify({ page, output: '   ' })]) {
-      const run = spawnSync('/usr/bin/python3', [bridge, 'write', '--wiki-root', f.wiki, '--dsh-home', join(f.home, 'dev'), '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: f.home } })
+      const run = spawnSync('/usr/bin/python3', [bridge, 'write', '--wiki-root', f.wiki, '--dsh-home', join(f.home, 'dev'), '--scripts-dir', f.scripts, '--schema', join(f.wiki, 'SCHEMA.md'), '--value', value], { encoding: 'utf8', env: { ...process.env, HOME: f.home } })
       expect(run.status).toBe(1)
-      expect(JSON.parse(run.stdout)).toEqual({ error: 'INVALID_RESULT' })
+      expect(JSON.parse(run.stdout)).toMatchObject({ error: 'INVALID_RESULT' })
     }
-    const outside = spawnSync('/usr/bin/python3', [bridge, 'write', '--wiki-root', f.wiki, '--dsh-home', join(f.home, 'dev'), '--value', write('../outside.md', 'projects/x.md\nBody')], { encoding: 'utf8', env: { ...process.env, HOME: f.home } })
+    const outside = spawnSync('/usr/bin/python3', [bridge, 'write', '--wiki-root', f.wiki, '--dsh-home', join(f.home, 'dev'), '--scripts-dir', f.scripts, '--schema', join(f.wiki, 'SCHEMA.md'), '--value', write('../outside.md', 'projects/x.md\nBody')], { encoding: 'utf8', env: { ...process.env, HOME: f.home } })
     expect(outside.status).toBe(1)
-    expect(JSON.parse(outside.stdout)).toEqual({ error: 'INVALID_RESULT' })
+    expect(JSON.parse(outside.stdout)).toMatchObject({ error: 'INVALID_RESULT' })
   })
 })

@@ -4,7 +4,10 @@ export interface BatchState {
     phase: 'idle' | 'previewing' | 'confirming' | 'archiving';
     preview: ArchivePreview | null;
     result: ArchiveSummary | null;
+    /** Stable error code for the localized message. */
     error: string | null;
+    /** Host/bridge diagnostic behind that code, when it sent one. */
+    errorDetail: string | null;
 }
 export interface ArchiveTransport {
     preview(ids: readonly string[]): Promise<ArchivePreview>;

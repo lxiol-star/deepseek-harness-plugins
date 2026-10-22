@@ -1,19 +1,5 @@
-/**
- * Host half of `dsh-session-board`.
- *
- * It does exactly the three things the browser half cannot: it persists the
- * acknowledged cursor, it registers turn-end facts (`lastTurnEnd`,
- * `lastTurnEndKind`, the truncated error note) and turn starts from
- * `session/event`, and it pushes the whole durable state to every client over
- * one SSE stream. Rendering, ordering, and classification all live in the
- * client half.
- *
- * @remarks
- * Everything here is additive: two private storage domains, two authenticated
- * `/api` routes, one raw route. Removing the bundle row is a complete
- * uninstall.
- */
 import type { Context } from '@deepseek-ai/cordis';
+import { type WikiConfig } from '../shared/wiki.ts';
 /** Cordis plugin name; mirrors the row id in `cordis.patch.yml`. */
 export declare const name = "dsh-session-board";
 /**
@@ -23,6 +9,31 @@ export declare const name = "dsh-session-board";
  * plugin if one disappears.
  */
 export declare const inject: string[];
+/** One config validation issue in Standard Schema form. */
+interface WikiConfigIssue {
+    message: string;
+    path: readonly (string | number)[];
+}
+/** Result of {@link Config} validation. */
+type WikiConfigValidation = {
+    value: WikiConfig;
+    issues?: undefined;
+} | {
+    issues: WikiConfigIssue[];
+    value?: undefined;
+};
+export declare const Config: {
+    '~standard': {
+        version: 1;
+        vendor: string;
+        /**
+         * Validate one raw row config and fill deployment defaults.
+         * @param value - raw `config` value from the Loader row.
+         * @returns the complete config, or Standard Schema issues.
+         */
+        validate(value?: unknown): WikiConfigValidation;
+    };
+};
 /**
  * Wire the ledger, the JSON routes, and the SSE stream.
  * @param ctx - Host plugin context; already carries the injected services.
@@ -30,4 +41,5 @@ export declare const inject: string[];
  * registrations, the `session/event` listener, and both domains close through
  * their own effects, in reverse registration order).
  */
-export declare function apply(ctx: Context): () => void;
+export declare function apply(ctx: Context, config?: unknown): () => void;
+export {};

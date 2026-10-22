@@ -9,14 +9,16 @@
 import { type ReactElement } from 'react';
 import type { Translate } from './hooks.ts';
 import type { SynthesisSettingsFace } from './synthesis-settings.ts';
+import type { WikiSettingsFace } from './wiki-settings.ts';
 /** Props the settings page receives from its slot registration. */
 export interface SessionBoardSettingsPageProps {
     t: Translate;
     settings: SynthesisSettingsFace;
+    wiki: WikiSettingsFace;
 }
 /**
  * Render the settings page.
  * @param props - locale copy and the synthesis-settings controller face.
  * @returns the page content.
  */
-export declare function SessionBoardSettingsPage({ t, settings }: SessionBoardSettingsPageProps): ReactElement;
+export declare function SessionBoardSettingsPage({ t, settings, wiki }: SessionBoardSettingsPageProps): ReactElement;

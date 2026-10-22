@@ -26,6 +26,8 @@ import {
   type SynthesisModelVerdict,
 } from '../shared/synthesis.ts'
 import { WikiArchiveError, validateWikiIds, type WikiArchiver } from './wiki-archive.ts'
+import { WIKI_CONFIG_CAPABILITY, WIKI_CONFIG_PATH } from '../shared/wiki.ts'
+import { WikiConfigError, type WikiSettingsFace } from './wiki-config.ts'
 
 /**
  * Physical request paths. `ConnectionFetchRoute.path` is matched against the
@@ -41,6 +43,8 @@ export const BOARD_ACK_PATH = `${BOARD_API_PREFIX}/ack`
 export const BOARD_WIKI_ARCHIVE_PATH = WIKI_ARCHIVE_PATH
 /** POST { action } → read or write the saved synthesis-model preference. */
 export const BOARD_SYNTHESIS_MODEL_PATH = SYNTHESIS_MODEL_PATH
+/** POST { action } → read, write, reset or probe the Wiki configuration. */
+export const BOARD_WIKI_CONFIG_PATH = WIKI_CONFIG_PATH
 /** Prefix owned by the raw SSE route. */
 export const BOARD_STREAM_PREFIX = '/dsh-session-board'
 /** `GET` → `text/event-stream`, one `state` frame per change. */
@@ -103,6 +107,8 @@ export interface BoardRoutesOptions {
   readonly wikiArchive: WikiArchiver
   /** Synthesis-model preference; absent means the route answers 503. */
   readonly synthesisModel?: SynthesisModelStore
+  /** Wiki configuration and environment probe; absent means the route answers 503. */
+  readonly wikiSettings?: WikiSettingsFace
   /** Connection's Host/Origin + browser-session fence. */
   readonly requestRejection: (request: BoardTrustRequest) => 401 | 403 | undefined
   /** Containment sink for request-time failures. */
@@ -203,7 +209,7 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
     },
   }
 
-  type ArchiveOperation = { state: 'running' } | { state: 'completed'; result: Awaited<ReturnType<WikiArchiver['commit']>> } | { state: 'failed'; error: string }
+  type ArchiveOperation = { state: 'running' } | { state: 'completed'; result: Awaited<ReturnType<WikiArchiver['commit']>> } | { state: 'failed'; error: string; detail?: string }
   const archiveOperations = new Map<string, ArchiveOperation>()
   const wikiArchiveRoute: BoardFetchRoute = {
     path: BOARD_WIKI_ARCHIVE_PATH,
@@ -214,7 +220,7 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       if (typeof body !== 'object' || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: 'INVALID_SELECTION' })
       const value = body as Record<string, unknown>
       try {
-        if (value.action === 'capabilities') return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY } })
+        if (value.action === 'capabilities') return jsonResponse(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } })
         if (value.action === 'preview') {
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds))
           return jsonResponse(200, { ok: true, preview })
@@ -229,7 +235,10 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
             archiveOperations.set(token, { state: 'running' })
             void options.wikiArchive.commit(token).then(
               result => { archiveOperations.set(token, { state: 'completed', result }) },
-              error => { archiveOperations.set(token, { state: 'failed', error: error instanceof WikiArchiveError ? error.code : 'ARCHIVE_UNAVAILABLE' }) },
+              error => {
+                const detail = error instanceof WikiArchiveError ? error.detail : undefined
+                archiveOperations.set(token, { state: 'failed', error: error instanceof WikiArchiveError ? error.code : 'ARCHIVE_UNAVAILABLE', ...(detail === undefined ? {} : { detail }) })
+              },
             )
             operation = archiveOperations.get(token)
           }
@@ -244,8 +253,9 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
       } catch (error) {
         options.warn(`dsh-session-board: wiki archive failed: ${describeError(error)}`)
         const code = error instanceof WikiArchiveError ? error.code : 'ARCHIVE_UNAVAILABLE'
+        const detail = error instanceof WikiArchiveError ? error.detail : undefined
         const status = code === 'INVALID_SELECTION' ? 400 : code === 'BUSY' ? 429 : 409
-        return jsonResponse(status, { ok: false, error: code })
+        return jsonResponse(status, { ok: false, error: code, ...(detail === undefined || detail === '' ? {} : { detail }) })
       }
     },
   }
@@ -295,6 +305,36 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
     },
   }
 
+  const wikiConfigRoute: BoardFetchRoute = {
+    path: BOARD_WIKI_CONFIG_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      const settings = options.wikiSettings
+      if (settings === undefined) return jsonResponse(503, { ok: false, error: 'HOST_OUTDATED' })
+      const body = await readJsonBody(request)
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) return jsonResponse(400, { ok: false, error: 'INVALID_CONFIG' })
+      const value = body as Record<string, unknown>
+      try {
+        if (value.action === 'read') return jsonResponse(200, { ok: true, ...(await settings.read()) })
+        if (value.action === 'probe') return jsonResponse(200, { ok: true, status: await settings.probe() })
+        if (value.action === 'reset') return jsonResponse(200, { ok: true, ...(await settings.reset()) })
+        if (value.action === 'write') {
+          try {
+            return jsonResponse(200, { ok: true, ...(await settings.write(value.config)) })
+          } catch (error) {
+            if (error instanceof WikiConfigError) return jsonResponse(400, { ok: false, error: 'INVALID_CONFIG', errors: error.errors })
+            throw error
+          }
+        }
+        return jsonResponse(400, { ok: false, error: 'INVALID_CONFIG' })
+      } catch (error) {
+        options.warn(`dsh-session-board: wiki config failed: ${describeError(error)}`)
+        return jsonResponse(500, { ok: false, error: 'STORE_UNAVAILABLE' })
+      }
+    },
+  }
+
   const streamRoute: BoardWebRoute = {
     kind: 'prefix',
     path: BOARD_STREAM_PREFIX,
@@ -335,7 +375,7 @@ export function createBoardRoutes(options: BoardRoutesOptions): BoardRoutes {
   }
 
   return {
-    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute],
+    fetchRoutes: [snapshotRoute, ackRoute, wikiArchiveRoute, synthesisModelRoute, wikiConfigRoute],
     streamRoute,
     broadcast,
     close: () => {

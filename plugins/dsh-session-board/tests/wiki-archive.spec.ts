@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createWikiArchiver, validateWikiIds, resolveDshHome, resolveSynthesisProvider } from '../src/host/wiki-archive.ts'
+import { buildWikiRuntime } from '../src/host/wiki-config.ts'
+import { DEFAULT_WIKI_CONFIG } from '../src/shared/wiki.ts'
 import { createBoardRoutes, BOARD_WIKI_ARCHIVE_PATH } from '../src/host/routes.ts'
 import { EMPTY_FEED } from '../src/shared/types.ts'
 import type { WikiArchiver } from '../src/host/wiki-archive.ts'
@@ -43,7 +45,7 @@ describe('Wiki home resolution', () => {
 
 describe('Wiki archival safety', () => {
   it('accepts real non-UUID identifiers but not selector delimiters or traversal', () => {
-    expect(validateWikiIds(['session-feishu-watch-lead-0930', 'session-feishu-watch-lead-0930'])).toEqual(['session-feishu-watch-lead-0930'])
+    expect(validateWikiIds(['session-watch-lead-0930', 'session-watch-lead-0930'])).toEqual(['session-watch-lead-0930'])
     for (const id of ['a,b', 'a b', '../x', '-x', '', '.','..']) expect(() => validateWikiIds([id])).toThrow('INVALID_SELECTION')
     expect(() => validateWikiIds([])).toThrow()
     expect(() => validateWikiIds(Array(51).fill('id'))).toThrow()
@@ -300,13 +302,25 @@ describe('plugin-selected synthesis model', () => {
 
 describe.skipIf(!pythonAvailable)('workflow failure classification', () => {
   /** One synthetic wiki root with an optional archive stub. */
-  function fixture(schema: string, archive?: string) {
+  function fixture(schema: string, options: { archive?: string; silentBridge?: boolean } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'board-workflow-failure-'))
     const wiki = join(home, 'wiki'), scripts = join(wiki, 'scripts')
     mkdirSync(scripts, { recursive: true })
     writeFileSync(join(wiki, 'SCHEMA.md'), schema)
-    if (archive !== undefined) writeFileSync(join(scripts, 'wiki-archive.py'), archive)
-    return createWikiArchiver({ home, dshHome: join(home, 'dev') })
+    if (options.archive !== undefined) writeFileSync(join(scripts, 'wiki-archive.py'), options.archive)
+    const bridgePath = join(home, 'bridge.py')
+    writeFileSync(bridgePath, options.silentBridge === true ? 'import sys\nsys.exit(2)\n' : '')
+    const dshHome = join(home, 'dev')
+    const runtime = () => buildWikiRuntime({
+      home,
+      dshHome,
+      pluginConfig: DEFAULT_WIKI_CONFIG,
+      stored: null,
+      engineDir: scripts,
+      bridgePath: options.silentBridge === true ? bridgePath : resolve('src/host/wiki-workflow.py'),
+      storedProvider: 'stepx-terra',
+    })
+    return createWikiArchiver({ home, dshHome, runtime })
   }
 
   it('passes the bridge structured error through instead of a generic code', async () => {
@@ -314,6 +328,26 @@ describe.skipIf(!pythonAvailable)('workflow failure classification', () => {
   })
 
   it('names the failed step when the bridge dies without a structured error', async () => {
-    await expect(fixture('# schema', 'raise SystemExit(2)\n').preview(['id'])).rejects.toThrow('SCOPE_FAILED')
+    await expect(fixture('# schema', { silentBridge: true }).preview(['id'])).rejects.toThrow('SCOPE_FAILED')
+  })
+
+  it('surfaces a missing engine as ENGINE_UNAVAILABLE with its log path', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'board-workflow-missing-engine-'))
+    const wiki = join(home, 'wiki')
+    mkdirSync(wiki, { recursive: true })
+    writeFileSync(join(wiki, 'SCHEMA.md'), '# schema')
+    const dshHome = join(home, 'dev')
+    const runtime = () => buildWikiRuntime({
+      home,
+      dshHome,
+      pluginConfig: DEFAULT_WIKI_CONFIG,
+      stored: null,
+      engineDir: join(home, 'missing-engine'),
+      bridgePath: resolve('src/host/wiki-workflow.py'),
+      logPath: join(home, 'wiki.log'),
+      storedProvider: 'stepx-terra',
+    })
+    const service = createWikiArchiver({ home, dshHome, runtime })
+    await expect(service.preview(['id'])).rejects.toThrow('ENGINE_UNAVAILABLE')
   })
 })

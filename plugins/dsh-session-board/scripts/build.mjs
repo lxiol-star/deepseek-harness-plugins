@@ -126,5 +126,10 @@ buildHost(binary)
 writeFileSync(join(lib, 'index.d.ts'), "/** Generated facade. */\nexport * from './types/index.js'\n")
 buildClient(binary)
 copyFileSync(join(root, 'src/host/wiki-workflow.py'), join(lib, 'wiki-workflow.py'))
+// The Wiki engine is vendored source, not a build output: copy it byte for byte.
+mkdirSync(join(lib, 'wiki'), { recursive: true })
+for (const script of ['wiki-archive.py', 'wiki-synthesize.py', 'wiki-index.py', 'UPSTREAM.md']) {
+  copyFileSync(join(root, 'src/host/wiki', script), join(lib, 'wiki', script))
+}
 renameSync(join(lib, 'index.js.tmp'), join(lib, 'index.js'))
 process.stdout.write(`dsh-session-board: built lib/index.js and lib/client.js with ${binary}\n`)

@@ -1,3 +1,4 @@
+import { parseWikiConfig, type WikiConfig } from '../shared/wiki.ts'
 /**
  * Durable declarations of the board's two fact stores, plus the one text rule
  * that belongs to the storage boundary.
@@ -101,6 +102,10 @@ export const ACK_TABLE_NAME = 'acks'
 export const TURN_TABLE_NAME = 'turn_stats'
 /** Table of {@link PREFS_DOMAIN_NAME}: preference key → stored value. */
 export const PREFS_TABLE_NAME = 'prefs'
+/** Domain holding the saved Wiki configuration (one record). */
+export const WIKI_DOMAIN_NAME = 'dsh_session_board_wiki'
+/** Table of {@link WIKI_DOMAIN_NAME}: the single wiki config record. */
+export const WIKI_TABLE_NAME = 'config'
 
 /**
  * Truncation budget for a stored error note, counted in Unicode code points.
@@ -302,6 +307,27 @@ export const prefsDomainSpec = defineDomain({
   },
 })
 
+/**
+ * Wiki configuration validator. A corrupt record falls back to the defaults
+ * (the board still works against `~/wiki`) instead of locking the plugin out
+ * of its own settings page.
+ */
+const wikiRecordSchema: RecordSchema<WikiConfig> = {
+  parse(raw: unknown): WikiConfig {
+    return parseWikiConfig(raw)
+  },
+}
+
+/** Durable home of the saved Wiki configuration. */
+export const wikiDomainSpec = defineDomain({
+  name: WIKI_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: 'backup-and-skip',
+  tables: {
+    [WIKI_TABLE_NAME]: domainTable(wikiRecordSchema),
+  },
+})
+
 /** One table handle as the storage layer exposes it (only the members used here). */
 export interface KvTableLike<V> {
   get(key: string): V | undefined
@@ -316,3 +342,5 @@ export type BoardAckTable = KvTableLike<StoredAckRecord>
 export type BoardTurnTable = KvTableLike<StoredTurnRecord>
 /** Handle on the `prefs` table; keys are preference names. */
 export type BoardPrefsTable = KvTableLike<StoredSynthesisPrefRecord>
+/** Handle on the `config` table; one {@link WikiConfig} record. */
+export type BoardWikiTable = KvTableLike<WikiConfig>

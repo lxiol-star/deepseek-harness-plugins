@@ -49,8 +49,13 @@ export interface ArchivePreview {
 }
 
 export const MAX_ARCHIVE_SELECTION = 50
-/** Capability level the browser half requires from the running host half. */
-export const WIKI_WORKFLOW_CAPABILITY = 1
+/**
+ * Capability level the browser half requires from the running host half.
+ *
+ * 2 adds the configurable self-contained Wiki engine, the `wiki-config` route
+ * and the diagnostic `detail` field on archive errors.
+ */
+export const WIKI_WORKFLOW_CAPABILITY = 2
 export const WIKI_ARCHIVE_PATH = '/api/session-board/wiki-archive'
 
 /** Do not trust a subprocess or HTTP response to satisfy a TypeScript cast. */

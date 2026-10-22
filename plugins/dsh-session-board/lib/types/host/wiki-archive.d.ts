@@ -1,8 +1,14 @@
 import { type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts';
 import type { SynthesisModelSelection } from '../shared/synthesis.ts';
+import { type WikiRuntime } from './wiki-config.ts';
 export declare class WikiArchiveError extends Error {
     readonly code: string;
-    constructor(code: string);
+    readonly detail?: string | undefined;
+    /**
+     * @param code - stable machine code the client maps to localized copy.
+     * @param detail - optional one-line diagnostic for the panel (no transcript text).
+     */
+    constructor(code: string, detail?: string | undefined);
 }
 export interface WikiArchiver {
     preview(ids: readonly string[]): Promise<ArchivePreview>;
@@ -36,6 +42,8 @@ type WorkflowOperation = 'scope' | 'synthesize' | 'prompt' | 'write' | 'index';
 export interface WikiArchiverOptions {
     home?: string;
     dshHome?: string;
+    /** Resolve the current Wiki runtime per operation; absent keeps ~/wiki + the packaged engine. */
+    runtime?: () => WikiRuntime;
     now?: () => number;
     workflow?: (operation: WorkflowOperation, value: string, signal: AbortSignal) => Promise<unknown>;
     execute?: (args: readonly string[], signal: AbortSignal) => Promise<{

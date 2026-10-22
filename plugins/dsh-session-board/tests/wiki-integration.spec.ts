@@ -21,7 +21,7 @@ describe.skipIf(!wikiIntegrationAvailable)('Wiki Python/Node integration', () =>
       const plain = join(root, `${id}.jsonl`); writeFileSync(plain, content.map(row => JSON.stringify(row)).join('\n'))
       execFileSync(zstd, ['-q', '-f', plain, '-o', join(directory, 'session.v4.jsonl.zstd')])
     }
-    const service = createWikiArchiver({ home: root, dshHome, workflow: async (operation, value) => operation === 'scope' ? JSON.parse(execFileSync('/usr/bin/python3', ['src/host/wiki-workflow.py', 'scope', '--wiki-root', wiki, '--dsh-home', dshHome, '--value', value], { encoding: 'utf8' })) : { status: 'skipped', pages: [] }, execute: async (args) => {
+    const service = createWikiArchiver({ home: root, dshHome, workflow: async (operation, value) => operation === 'scope' ? JSON.parse(execFileSync('/usr/bin/python3', ['src/host/wiki-workflow.py', 'scope', '--wiki-root', wiki, '--dsh-home', dshHome, '--scripts-dir', join(wiki, 'scripts'), '--schema', join(wiki, 'SCHEMA.md'), '--value', value], { encoding: 'utf8' })) : { status: 'skipped', pages: [] }, execute: async (args) => {
       try {
         return { stdout: execFileSync('/usr/bin/python3', [script, ...args], { encoding: 'utf8', env: { ...process.env, HOME: root, WIKI_ARCHIVE_STATE_FILE: state, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: ['ignore', 'pipe', 'pipe'] }) }
       } catch (error) {

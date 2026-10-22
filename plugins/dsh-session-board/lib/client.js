@@ -27,7 +27,7 @@ __export(index_exports, {
   name: () => name
 });
 module.exports = __toCommonJS(index_exports);
-var import_react10 = require("react"), import_client = require("react-dom/client");
+var import_react11 = require("react"), import_client = require("react-dom/client");
 
 // src/client/archive-marks.ts
 function isArchivedInClient(entry) {
@@ -675,7 +675,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.4.1",
+      "data-session-board-version": "0.5.1",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -699,7 +699,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.4.1",
+      "data-session-board-version": "0.5.1",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1195,7 +1195,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.4.1",
+        "data-session-board-version": "0.5.1",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1894,6 +1894,7 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
 .sb-batch-dismiss:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
+.sb-batch-detail { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 10px; overflow-wrap: anywhere; }
 .sb-batch button:disabled { opacity: .45; cursor: not-allowed; }
 .sb-overlay > .sb-batch .sb-batch-preview { max-width: 640px; }
 .sb-overlay .sb-group-body { display: block; }
@@ -2009,6 +2010,32 @@ ${ACCENTS}
   cursor: pointer;
 }
 .sb-settings-retry:hover { background: var(--dsw-alias-bg-layer-2, transparent); }
+.sb-settings-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: inherit;
+  font: inherit;
+}
+.sb-settings-input:disabled { opacity: .6; }
+.sb-settings-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-settings-action {
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sb-settings-action:hover { background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2, transparent)); }
+.sb-settings-action:disabled { opacity: .6; cursor: default; }
+.sb-settings-details { display: flex; flex-direction: column; gap: 8px; max-width: 480px; }
+.sb-settings-details > summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
+.sb-settings-report { display: flex; flex-direction: column; gap: 3px; max-width: 640px; overflow-wrap: anywhere; }
+.sb-settings-issues { margin: 0; padding-inline-start: 18px; color: var(--dsw-alias-state-error-primary); }
 
 /* -------------------------------------------------------------- manager --- */
 
@@ -2360,7 +2387,19 @@ function parseWikiWorkflow(raw) {
 }
 
 // src/client/feed.ts
-var STREAM_PATH = "/dsh-session-board/stream", ACK_PATH = "/api/session-board/ack", RETRY_MAX_MS = 3e4;
+var ArchiveRequestError = class extends Error {
+  /**
+   * @param code - stable code the panel maps to localized copy.
+   * @param detail - host/bridge diagnostic, safe for the owner to see.
+   */
+  constructor(code, detail) {
+    super(code);
+    this.code = code;
+    this.detail = detail;
+  }
+  code;
+  detail;
+}, STREAM_PATH = "/dsh-session-board/stream", ACK_PATH = "/api/session-board/ack", RETRY_MAX_MS = 3e4;
 function asRecord(value) {
   return typeof value == "object" && value !== null && !Array.isArray(value) ? value : null;
 }
@@ -2471,7 +2510,7 @@ var BoardFeedClient = class {
     }), payload = asRecord(await response.json().catch(() => null));
     if (!response.ok || payload?.ok !== !0) {
       let code = typeof payload?.error == "string" ? payload.error : response.status === 404 ? "ARCHIVE_UNAVAILABLE" : "REQUEST_FAILED";
-      throw new Error(code);
+      throw new ArchiveRequestError(code, typeof payload?.detail == "string" ? payload.detail : void 0);
     }
     return payload;
   }
@@ -2486,7 +2525,7 @@ var BoardFeedClient = class {
     } catch (error) {
       throw error instanceof Error && error.message === "ARCHIVE_UNAVAILABLE" ? error : new Error("HOST_OUTDATED");
     }
-    if (asRecord(payload.capabilities)?.workflow !== 1) throw new Error("HOST_OUTDATED");
+    if (asRecord(payload.capabilities)?.workflow !== 2) throw new Error("HOST_OUTDATED");
   }
   async previewArchive(sessionIds) {
     await this.requireWorkflow();
@@ -2500,7 +2539,11 @@ var BoardFeedClient = class {
     for (; !this.disposed; ) {
       let operation = asRecord(payload.operation);
       if (operation?.state === "completed") return parseArchiveSummary(operation.result);
-      if (operation?.state === "failed") throw new Error(typeof operation.error == "string" ? operation.error : "REQUEST_FAILED");
+      if (operation?.state === "failed")
+        throw new ArchiveRequestError(
+          typeof operation.error == "string" ? operation.error : "REQUEST_FAILED",
+          typeof operation.detail == "string" ? operation.detail : void 0
+        );
       if (operation?.state !== "running") throw new Error("INVALID_RESULT");
       if (await new Promise((resolve) => globalThis.setTimeout(resolve, 1e3)), this.disposed) break;
       payload = await this.archiveRequest({ action: "status", token });
@@ -2580,12 +2623,19 @@ function createStore(initial, options = {}) {
 }
 
 // src/client/batch.ts
+function codeOf(error) {
+  return error instanceof Error && error.message !== "" ? error.message : String(error);
+}
+function detailOf(error) {
+  let detail = error?.detail;
+  return typeof detail == "string" && detail.trim() !== "" ? detail : null;
+}
 var BatchController = class {
   constructor(transport) {
     this.transport = transport;
   }
   transport;
-  state = createStore({ selected: [], phase: "idle", preview: null, result: null, error: null });
+  state = createStore({ selected: [], phase: "idle", preview: null, result: null, error: null, errorDetail: null });
   disposed = !1;
   getSnapshot = this.state.getSnapshot;
   subscribe = this.state.subscribe;
@@ -2593,10 +2643,10 @@ var BatchController = class {
     let s = this.getSnapshot();
     if (s.phase !== "idle" && s.phase !== "confirming") return;
     let selected = s.selected.includes(id) ? s.selected.filter((x) => x !== id) : [...s.selected, id].slice(0, 50);
-    this.state.set({ ...s, selected, phase: "idle", preview: null, error: null, result: null });
+    this.state.set({ ...s, selected, phase: "idle", preview: null, error: null, errorDetail: null, result: null });
   };
   selectAll = (ids) => {
-    this.isBusy() || this.state.set({ ...this.getSnapshot(), selected: [...new Set(ids)].slice(0, 50), phase: "idle", preview: null, error: null, result: null });
+    this.isBusy() || this.state.set({ ...this.getSnapshot(), selected: [...new Set(ids)].slice(0, 50), phase: "idle", preview: null, error: null, errorDetail: null, result: null });
   };
   reconcile = (ids) => {
     if (this.isBusy()) return;
@@ -2616,7 +2666,7 @@ var BatchController = class {
   dismissResult = () => {
     if (this.isBusy()) return;
     let s = this.getSnapshot();
-    s.result === null && s.error === null || this.state.set({ ...s, result: null, error: null });
+    s.result === null && s.error === null || this.state.set({ ...s, result: null, error: null, errorDetail: null });
   };
   preview = async () => {
     let s = this.getSnapshot();
@@ -2626,21 +2676,21 @@ var BatchController = class {
         let preview = await this.transport.preview(s.selected);
         this.disposed || this.state.set({ ...this.getSnapshot(), phase: "confirming", preview });
       } catch (error) {
-        this.disposed || this.state.set({ ...this.getSnapshot(), phase: "idle", error: error instanceof Error ? error.message : String(error) });
+        this.disposed || this.state.set({ ...this.getSnapshot(), phase: "idle", error: codeOf(error), errorDetail: detailOf(error) });
       }
     }
   };
   confirm = async () => {
     let s = this.getSnapshot();
     if (!(this.disposed || s.phase !== "confirming" || s.preview === null)) {
-      this.state.set({ ...s, phase: "archiving", error: null });
+      this.state.set({ ...s, phase: "archiving", error: null, errorDetail: null });
       try {
         let result = await this.transport.commit(s.preview.token);
         if (this.disposed) return;
         let incomplete = new Set(result.workflow?.synthesis.filter((row) => row.status === "failed" || row.status === "sensitive").map((row) => row.session) ?? []), succeeded = new Set(result.nativeArchive ? result.nativeArchive.filter((row) => ["archived", "already-archived", "empty-archived"].includes(row.status)).map((row) => row.session) : result.results.filter((row) => (row.action === "archived" || row.action === "skipped") && !incomplete.has(row.session)).map((row) => row.session));
-        this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", preview: null, result, error: null });
+        this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", preview: null, result, error: null, errorDetail: null });
       } catch (error) {
-        this.disposed || this.state.set({ ...s, phase: "idle", preview: null, error: error instanceof Error ? error.message : String(error) });
+        this.disposed || this.state.set({ ...s, phase: "idle", preview: null, error: codeOf(error), errorDetail: detailOf(error) });
       }
     }
   };
@@ -2847,6 +2897,46 @@ var NS = "session-board", en = {
   "settings.synthesisUnavailable": "not currently available",
   "settings.contextWindow": "context {value}",
   "settings.retry": "Retry",
+  "settings.wikiGroup": "Wiki engine",
+  "settings.wikiHint": "Archive selected Sessions into this Wiki. Pages, SCHEMA rules, state files and locks stay under the wiki root; the engine itself ships with the plugin, so a local scripts checkout is optional.",
+  "settings.wikiRoot": "Wiki root",
+  "settings.wikiRootHint": "Data root for raw pages and knowledge layers. Empty reuses the local default (~/wiki).",
+  "settings.wikiSchema": "SCHEMA rules",
+  "settings.wikiSchemaHint": "Rules file the engine validates against. Empty reuses <wiki root>/SCHEMA.md.",
+  "settings.wikiScripts": "Engine scripts",
+  "settings.wikiScriptsHint": "Bundled uses the engine shipped with this plugin; local follows a wiki scripts directory you maintain yourself.",
+  "settings.wikiScriptsBundled": "Bundled with the plugin",
+  "settings.wikiScriptsLocal": "Local wiki scripts",
+  "settings.wikiScriptsDir": "Scripts directory",
+  "settings.wikiPython": "Python",
+  "settings.wikiPythonHint": "Interpreter used for the engine. Empty keeps /usr/bin/python3.",
+  "settings.wikiAdvanced": "Advanced",
+  "settings.wikiStateFile": "Archive state file",
+  "settings.wikiStateFileHint": "Shared with the CLI archive flow so incremental runs stay incremental. Empty keeps <wiki root>/scripts/.archive-state.json.",
+  "settings.wikiTimeout": "Timeout (seconds)",
+  "settings.wikiTimeoutHint": "Per archive/synthesis operation. 0 keeps the default ({value}s).",
+  "settings.wikiProvider": "Wiki provider",
+  "settings.wikiProviderHint": "Provider for the Wiki synthesis path when no model route is selected. Empty keeps the local default.",
+  "settings.wikiSynthConfig": "Provider config file",
+  "settings.wikiSynthConfigHint": "Credentials/config passed to wiki-synthesize.py. Empty keeps ~/.wikibar/config.json.",
+  "settings.wikiSave": "Save",
+  "settings.wikiReset": "Reset to defaults",
+  "settings.wikiProbe": "Check environment",
+  "settings.wikiSaved": "Saved",
+  "settings.wikiSaving": "Saving\u2026",
+  "settings.wikiLoading": "Checking the Wiki environment\u2026",
+  "settings.wikiNoReport": "No environment report yet.",
+  "settings.wikiReady": "Engine and SCHEMA are reachable.",
+  "settings.wikiIssues": "The engine cannot run with this configuration:",
+  "settings.wikiReportEngine": "Engine: {mode} \xB7 {dir}",
+  "settings.wikiReportPython": "Python: {value}",
+  "settings.wikiReportSchema": "SCHEMA: {path} ({bytes} bytes)",
+  "settings.wikiReportState": "Archive state: {path}",
+  "settings.wikiInvalidPath": "Path fields must be absolute paths (or empty to use the default).",
+  "settings.wikiInvalidMode": "Unknown engine source.",
+  "settings.wikiInvalidTimeout": "Timeout must be a whole number of seconds between 0 and 86400.",
+  "settings.wikiInvalidProvider": "Provider must be one safe token, or empty for the default.",
+  "settings.wikiInvalidConfig": "The configuration was rejected.",
   "settings.errorUnknownModel": "That model route is no longer available. Pick another model.",
   "settings.errorUnknownEffort": "That model no longer offers the saved reasoning effort. Pick another one.",
   "settings.errorHostOutdated": "The running Harness host is older than this plugin. Quit and reopen Harness, then try again.",
@@ -3044,6 +3134,46 @@ var NS = "session-board", en = {
   "settings.synthesisUnavailable": "\u5F53\u524D\u4E0D\u53EF\u7528",
   "settings.contextWindow": "\u4E0A\u4E0B\u6587 {value}",
   "settings.retry": "\u91CD\u8BD5",
+  "settings.wikiGroup": "Wiki \u5F52\u6863\u5F15\u64CE",
+  "settings.wikiHint": "\u628A\u9009\u4E2D\u7684\u4F1A\u8BDD\u5F52\u6863\u8FDB\u672C\u5730 Wiki\u3002\u9875\u9762\u3001SCHEMA \u89C4\u5219\u3001\u72B6\u6001\u6587\u4EF6\u548C\u9501\u90FD\u7559\u5728 wiki \u6839\u76EE\u5F55\u4E0B\uFF1B\u5F15\u64CE\u968F\u63D2\u4EF6\u81EA\u5E26\uFF0C\u4E0D\u518D\u4F9D\u8D56\u672C\u5730 scripts \u76EE\u5F55\u3002",
+  "settings.wikiRoot": "Wiki \u6839\u76EE\u5F55",
+  "settings.wikiRootHint": "\u5F52\u6863\u9875\u4E0E\u77E5\u8BC6\u5C42\u7684\u5B58\u653E\u76EE\u5F55\uFF1B\u7559\u7A7A\u590D\u7528\u672C\u5730\u9ED8\u8BA4 ~/wiki\u3002",
+  "settings.wikiSchema": "SCHEMA \u89C4\u5219",
+  "settings.wikiSchemaHint": "\u5F15\u64CE\u6821\u9A8C\u7528\u7684\u89C4\u5219\u6587\u4EF6\uFF1B\u7559\u7A7A\u590D\u7528 <wiki \u6839\u76EE\u5F55>/SCHEMA.md\u3002",
+  "settings.wikiScripts": "\u5F15\u64CE\u811A\u672C\u6765\u6E90",
+  "settings.wikiScriptsHint": "\u300C\u63D2\u4EF6\u5185\u7F6E\u300D\u4F7F\u7528\u968F\u63D2\u4EF6\u53D1\u5E03\u7684\u5F15\u64CE\uFF1B\u300C\u672C\u5730 wiki scripts\u300D\u6539\u7528\u4F60\u81EA\u5DF1\u7EF4\u62A4\u7684\u811A\u672C\u76EE\u5F55\uFF08\u517C\u5BB9\u65E7\u884C\u4E3A\uFF09\u3002",
+  "settings.wikiScriptsBundled": "\u63D2\u4EF6\u5185\u7F6E\uFF08\u63A8\u8350\uFF09",
+  "settings.wikiScriptsLocal": "\u672C\u5730 wiki scripts",
+  "settings.wikiScriptsDir": "\u811A\u672C\u76EE\u5F55",
+  "settings.wikiPython": "Python \u89E3\u91CA\u5668",
+  "settings.wikiPythonHint": "\u8FD0\u884C\u5F15\u64CE\u7684\u89E3\u91CA\u5668\uFF1B\u7559\u7A7A\u4F7F\u7528 /usr/bin/python3\u3002",
+  "settings.wikiAdvanced": "\u9AD8\u7EA7",
+  "settings.wikiStateFile": "\u5F52\u6863\u72B6\u6001\u6587\u4EF6",
+  "settings.wikiStateFileHint": "\u4E0E CLI \u5F52\u6863\u6D41\u7A0B\u5171\u7528\uFF0C\u4FDD\u8BC1\u589E\u91CF\u5F52\u6863\u4E0D\u91CD\u590D\u3002\u7559\u7A7A\u4F7F\u7528 <wiki \u6839\u76EE\u5F55>/scripts/.archive-state.json\u3002",
+  "settings.wikiTimeout": "\u8D85\u65F6\uFF08\u79D2\uFF09",
+  "settings.wikiTimeoutHint": "\u5355\u6B21\u5F52\u6863/\u63D0\u70BC\u64CD\u4F5C\u7684\u8D85\u65F6\uFF1B0 \u8868\u793A\u4F7F\u7528\u9ED8\u8BA4 {value} \u79D2\u3002",
+  "settings.wikiProvider": "Wiki \u5408\u6210 provider",
+  "settings.wikiProviderHint": "\u6CA1\u6709\u9009\u62E9\u6A21\u578B\u8DEF\u7531\u65F6\uFF0CWiki \u63D0\u70BC\u4F7F\u7528\u7684 provider\uFF1B\u7559\u7A7A\u4F7F\u7528\u672C\u5730\u9ED8\u8BA4\u3002",
+  "settings.wikiSynthConfig": "provider \u914D\u7F6E\u6587\u4EF6",
+  "settings.wikiSynthConfigHint": "\u4F20\u7ED9 wiki-synthesize.py \u7684\u51ED\u8BC1/\u914D\u7F6E\u6587\u4EF6\uFF1B\u7559\u7A7A\u4F7F\u7528 ~/.wikibar/config.json\u3002",
+  "settings.wikiSave": "\u4FDD\u5B58",
+  "settings.wikiReset": "\u6062\u590D\u9ED8\u8BA4",
+  "settings.wikiProbe": "\u68C0\u67E5\u73AF\u5883",
+  "settings.wikiSaved": "\u5DF2\u4FDD\u5B58",
+  "settings.wikiSaving": "\u6B63\u5728\u4FDD\u5B58\u2026",
+  "settings.wikiLoading": "\u6B63\u5728\u68C0\u67E5 Wiki \u73AF\u5883\u2026",
+  "settings.wikiNoReport": "\u8FD8\u6CA1\u6709\u73AF\u5883\u62A5\u544A\u3002",
+  "settings.wikiReady": "\u5F15\u64CE\u4E0E SCHEMA \u53EF\u7528\u3002",
+  "settings.wikiIssues": "\u5F53\u524D\u914D\u7F6E\u4E0B\u5F15\u64CE\u65E0\u6CD5\u8FD0\u884C\uFF1A",
+  "settings.wikiReportEngine": "\u5F15\u64CE\uFF1A{mode} \xB7 {dir}",
+  "settings.wikiReportPython": "Python\uFF1A{value}",
+  "settings.wikiReportSchema": "SCHEMA\uFF1A{path}\uFF08{bytes} \u5B57\u8282\uFF09",
+  "settings.wikiReportState": "\u5F52\u6863\u72B6\u6001\uFF1A{path}",
+  "settings.wikiInvalidPath": "\u8DEF\u5F84\u5B57\u6BB5\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF08\u7559\u7A7A\u8868\u793A\u4F7F\u7528\u9ED8\u8BA4\u503C\uFF09\u3002",
+  "settings.wikiInvalidMode": "\u672A\u77E5\u7684\u5F15\u64CE\u6765\u6E90\u3002",
+  "settings.wikiInvalidTimeout": "\u8D85\u65F6\u5FC5\u987B\u662F 0\u201386400 \u4E4B\u95F4\u7684\u6574\u6570\u79D2\u3002",
+  "settings.wikiInvalidProvider": "provider \u5FC5\u987B\u662F\u5355\u4E2A\u5B89\u5168\u6807\u8BC6\uFF0C\u7559\u7A7A\u8868\u793A\u9ED8\u8BA4\u3002",
+  "settings.wikiInvalidConfig": "\u914D\u7F6E\u672A\u901A\u8FC7\u6821\u9A8C\u3002",
   "settings.errorUnknownModel": "\u8BE5\u6A21\u578B\u8DEF\u7531\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u53E6\u9009\u4E00\u4E2A\u6A21\u578B\u3002",
   "settings.errorUnknownEffort": "\u8BE5\u6A21\u578B\u5DF2\u4E0D\u652F\u6301\u4E4B\u524D\u4FDD\u5B58\u7684\u601D\u8003\u7B49\u7EA7\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002",
   "settings.errorHostOutdated": "\u6B63\u5728\u8FD0\u884C\u7684 Harness \u5BBF\u4E3B\u6BD4\u63D2\u4EF6\u65E7\u3002\u8BF7\u5B8C\u5168\u9000\u51FA\u5E76\u91CD\u65B0\u6253\u5F00 Harness \u540E\u518D\u8BD5\u3002",
@@ -3125,7 +3255,8 @@ function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
     state.error ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { role: "alert", className: "sb-batch-error", children: [
       t("batch.error"),
       " ",
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t(`batch.error.${state.error}` in en ? `batch.error.${state.error}` : "batch.error.UNKNOWN") })
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t(`batch.error.${state.error}` in en ? `batch.error.${state.error}` : "batch.error.UNKNOWN") }),
+      state.errorDetail ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("small", { className: "sb-batch-detail", children: state.errorDetail }) : null
     ] }) : null
   ] });
 }
@@ -3911,9 +4042,448 @@ function createSynthesisSettings(options = {}) {
 }
 var FALLBACK_OPTION_VALUE = "";
 
+// src/shared/wiki.ts
+var WIKI_CONFIG_PATH = "/api/session-board/wiki-config";
+var DEFAULT_WIKI_CONFIG = {
+  wikiRoot: "",
+  schemaPath: "",
+  scriptsMode: "bundled",
+  scriptsDir: "",
+  python: "",
+  stateFile: "",
+  timeoutSeconds: 0,
+  provider: "",
+  synthConfig: ""
+}, PATH_MAX = 4096, PROVIDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function wikiDefaults(home) {
+  return {
+    wikiRoot: `${home}/wiki`,
+    schemaPath: `${home}/wiki/SCHEMA.md`,
+    scriptsDir: `${home}/wiki/scripts`,
+    stateFile: `${home}/wiki/scripts/.archive-state.json`,
+    python: "/usr/bin/python3",
+    provider: "stepx-terra",
+    synthConfig: `${home}/.wikibar/config.json`,
+    timeoutSeconds: 300
+  };
+}
+function isAbsolutePath(value) {
+  return value.length <= PATH_MAX && value.startsWith("/") && !value.includes("\0");
+}
+function validateWikiConfig(raw) {
+  if (typeof raw != "object" || raw === null || Array.isArray(raw))
+    return { config: null, errors: ["INVALID_CONFIG"] };
+  let value = raw, errors = [], path = (key, label) => {
+    let entry = value[key];
+    return entry === void 0 ? "" : typeof entry != "string" || entry !== "" && !isAbsolutePath(entry) ? (errors.push(`INVALID_${label}`), "") : entry;
+  }, wikiRoot = path("wikiRoot", "WIKI_ROOT"), schemaPath = path("schemaPath", "SCHEMA_PATH"), scriptsDir = path("scriptsDir", "SCRIPTS_DIR"), python = path("python", "PYTHON"), stateFile = path("stateFile", "STATE_FILE"), synthConfig = path("synthConfig", "SYNTH_CONFIG"), scriptsMode = value.scriptsMode === void 0 ? "bundled" : value.scriptsMode;
+  scriptsMode !== "bundled" && scriptsMode !== "local" && errors.push("INVALID_SCRIPTS_MODE");
+  let timeout = value.timeoutSeconds === void 0 ? 0 : value.timeoutSeconds;
+  (typeof timeout != "number" || !Number.isInteger(timeout) || timeout < 0 || timeout > 86400) && errors.push("INVALID_TIMEOUT");
+  let provider = value.provider === void 0 ? "" : value.provider;
+  return (typeof provider != "string" || provider !== "" && !PROVIDER_RE.test(provider)) && errors.push("INVALID_PROVIDER"), errors.length > 0 ? { config: null, errors } : {
+    config: {
+      wikiRoot,
+      schemaPath,
+      scriptsMode,
+      scriptsDir,
+      python,
+      stateFile,
+      timeoutSeconds: timeout,
+      provider,
+      synthConfig
+    },
+    errors
+  };
+}
+function parseWikiConfig(raw) {
+  return validateWikiConfig(raw).config ?? { ...DEFAULT_WIKI_CONFIG };
+}
+function parseWikiConfigResponse(raw) {
+  if (typeof raw != "object" || raw === null || Array.isArray(raw)) return null;
+  let value = raw;
+  if (value.config === void 0 || value.defaults === void 0) return null;
+  let config = parseWikiConfig(value.config), defaults = value.defaults;
+  if (typeof defaults.wikiRoot != "string" || typeof defaults.schemaPath != "string" || typeof defaults.scriptsDir != "string" || typeof defaults.stateFile != "string" || typeof defaults.python != "string" || typeof defaults.provider != "string" || typeof defaults.synthConfig != "string" || typeof defaults.timeoutSeconds != "number") return null;
+  let status = parseEnvironmentStatus(value.status), errors = Array.isArray(value.errors) ? value.errors.filter((entry) => typeof entry == "string") : [];
+  return {
+    config,
+    defaults: {
+      wikiRoot: defaults.wikiRoot,
+      schemaPath: defaults.schemaPath,
+      scriptsDir: defaults.scriptsDir,
+      stateFile: defaults.stateFile,
+      python: defaults.python,
+      provider: defaults.provider,
+      synthConfig: defaults.synthConfig,
+      timeoutSeconds: defaults.timeoutSeconds
+    },
+    status,
+    errors
+  };
+}
+function parseEnvironmentStatus(raw) {
+  if (typeof raw != "object" || raw === null || Array.isArray(raw)) return null;
+  let value = raw;
+  if (typeof value.ok != "boolean" || typeof value.python != "string" || typeof value.pythonExecutable != "string") return null;
+  let engine = value.engine, schema = value.schema, wikiRoot = value.wikiRoot, state = value.state;
+  if (engine === null || typeof engine != "object" || schema === null || typeof schema != "object" || wikiRoot === null || typeof wikiRoot != "object" || state === null || typeof state != "object") return null;
+  let scripts = Array.isArray(engine.scripts) ? engine.scripts.filter((entry) => {
+    if (typeof entry != "object" || entry === null) return !1;
+    let script = entry;
+    return typeof script.name == "string" && typeof script.path == "string" && typeof script.exists == "boolean" && typeof script.bytes == "number";
+  }) : [];
+  return {
+    ok: value.ok,
+    issues: Array.isArray(value.issues) ? value.issues.filter((entry) => typeof entry == "string") : [],
+    python: value.python,
+    pythonExecutable: value.pythonExecutable,
+    engine: { dir: typeof engine.dir == "string" ? engine.dir : "", scripts },
+    schema: { path: typeof schema.path == "string" ? schema.path : "", bytes: typeof schema.bytes == "number" ? schema.bytes : 0 },
+    wikiRoot: { path: typeof wikiRoot.path == "string" ? wikiRoot.path : "", exists: wikiRoot.exists === !0 },
+    state: { path: typeof state.path == "string" ? state.path : "" },
+    operations: Array.isArray(value.operations) ? value.operations.filter((entry) => typeof entry == "string") : []
+  };
+}
+
+// src/client/wiki-settings.ts
+function emptyDefaults() {
+  return wikiDefaults("");
+}
+async function postWikiConfig(body) {
+  let response;
+  try {
+    response = await globalThis.fetch(WIKI_CONFIG_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error("REQUEST_FAILED");
+  }
+  let payload = await response.json().catch(() => null);
+  if (response.status === 404 || response.status === 503) throw new Error("HOST_OUTDATED");
+  if (!response.ok) {
+    let code = typeof payload == "object" && payload !== null && typeof payload.error == "string" ? payload.error : "REQUEST_FAILED";
+    throw new Error(code);
+  }
+  return payload;
+}
+async function postParsedWikiConfig(body) {
+  let parsed = parseWikiConfigResponse(await postWikiConfig(body));
+  if (parsed === null) throw new Error("REQUEST_FAILED");
+  return parsed;
+}
+function createWikiSettings() {
+  let state = createStore({
+    status: "idle",
+    config: { ...DEFAULT_WIKI_CONFIG },
+    defaults: emptyDefaults(),
+    report: null,
+    saving: !1,
+    saved: !1,
+    error: null,
+    fieldErrors: [],
+    probing: !1
+  }), disposed = !1, publish = (patch) => {
+    disposed || state.set({ ...state.getSnapshot(), ...patch });
+  }, applyResponse = (response, saved) => {
+    publish({
+      status: "ready",
+      config: response.config,
+      defaults: response.defaults,
+      report: response.status,
+      saving: !1,
+      saved,
+      error: null,
+      fieldErrors: []
+    });
+  };
+  return {
+    store: state,
+    start() {
+      disposed || state.getSnapshot().status === "loading" || (publish({ status: "loading", error: null }), (async () => {
+        try {
+          applyResponse(await postParsedWikiConfig({ action: "read" }), !1);
+        } catch (error) {
+          publish({ status: "error", saving: !1, saved: !1, error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+        }
+      })());
+    },
+    async save(config) {
+      if (disposed) return;
+      let validated = validateWikiConfig(config);
+      if (validated.config === null) {
+        publish({ saving: !1, saved: !1, error: "INVALID_CONFIG", fieldErrors: validated.errors });
+        return;
+      }
+      publish({ saving: !0, saved: !1, error: null, fieldErrors: [] });
+      try {
+        applyResponse(await postParsedWikiConfig({ action: "write", config: validated.config }), !0);
+      } catch (error) {
+        publish({ saving: !1, saved: !1, error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+      }
+    },
+    async reset() {
+      if (!disposed) {
+        publish({ saving: !0, saved: !1, error: null, fieldErrors: [] });
+        try {
+          applyResponse(await postParsedWikiConfig({ action: "reset" }), !0);
+        } catch (error) {
+          publish({ saving: !1, saved: !1, error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+        }
+      }
+    },
+    async probe() {
+      if (!(disposed || state.getSnapshot().probing)) {
+        publish({ probing: !0, error: null });
+        try {
+          let response = await postWikiConfig({ action: "probe" }), report = response !== null && typeof response == "object" ? parseEnvironmentStatus(response.status) : null;
+          publish({ probing: !1, report: report ?? state.getSnapshot().report });
+        } catch (error) {
+          publish({ probing: !1, error: error instanceof Error ? error.message : "REQUEST_FAILED" });
+        }
+      }
+    },
+    dispose() {
+      disposed = !0;
+    }
+  };
+}
+
 // src/client/SettingsPage.tsx
+var import_react9 = require("react");
+
+// src/client/WikiSettingsSection.tsx
 var import_react8 = require("react");
 var import_jsx_runtime7 = require("react/jsx-runtime");
+function validationText(t, code) {
+  switch (code) {
+    case "INVALID_SCRIPTS_MODE":
+      return t("settings.wikiInvalidMode");
+    case "INVALID_TIMEOUT":
+      return t("settings.wikiInvalidTimeout");
+    case "INVALID_PROVIDER":
+      return t("settings.wikiInvalidProvider");
+    case "INVALID_CONFIG":
+      return t("settings.wikiInvalidConfig");
+    case "HOST_OUTDATED":
+      return t("settings.errorHostOutdated");
+    case "STORE_UNAVAILABLE":
+      return t("settings.errorStoreUnavailable");
+    case "REQUEST_FAILED":
+      return t("settings.errorRequestFailed");
+    default:
+      return t("settings.wikiInvalidPath");
+  }
+}
+function WikiSettingsSection({ t, wiki }) {
+  let state = useSnapshot(wiki.store, (value) => value), [draft, setDraft] = (0, import_react8.useState)(state.config);
+  (0, import_react8.useEffect)(() => {
+    wiki.start();
+  }, [wiki]), (0, import_react8.useEffect)(() => {
+    setDraft(state.config);
+  }, [state.config]);
+  let update = (patch) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  }, busy = state.saving || state.status === "loading", error = state.error === null ? state.fieldErrors.length > 0 ? validationText(t, state.fieldErrors[0]) : null : validationText(t, state.error), report = state.report, issues = report?.issues ?? [], modeLabel = draft.scriptsMode === "local" ? t("settings.wikiScriptsLocal") : t("settings.wikiScriptsBundled");
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "sb-settings", "aria-label": t("settings.wikiGroup"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { className: "sb-settings-title", children: t("settings.wikiGroup") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-root", children: t("settings.wikiRoot") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          id: "sb-wiki-root",
+          className: "sb-settings-input",
+          value: draft.wikiRoot,
+          placeholder: state.defaults.wikiRoot,
+          disabled: busy,
+          spellCheck: !1,
+          onChange: (event) => {
+            update({ wikiRoot: event.target.value });
+          }
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiRootHint") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-schema", children: t("settings.wikiSchema") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          id: "sb-wiki-schema",
+          className: "sb-settings-input",
+          value: draft.schemaPath,
+          placeholder: state.defaults.schemaPath,
+          disabled: busy,
+          spellCheck: !1,
+          onChange: (event) => {
+            update({ schemaPath: event.target.value });
+          }
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiSchemaHint") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-scripts", children: t("settings.wikiScripts") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "select",
+        {
+          id: "sb-wiki-scripts",
+          className: "sb-settings-select",
+          value: draft.scriptsMode,
+          disabled: busy,
+          onChange: (event) => {
+            update({ scriptsMode: event.target.value === "local" ? "local" : "bundled" });
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "bundled", children: t("settings.wikiScriptsBundled") }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "local", children: t("settings.wikiScriptsLocal") })
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiScriptsHint") })
+    ] }),
+    draft.scriptsMode === "local" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-scripts-dir", children: t("settings.wikiScriptsDir") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          id: "sb-wiki-scripts-dir",
+          className: "sb-settings-input",
+          value: draft.scriptsDir,
+          placeholder: state.defaults.scriptsDir,
+          disabled: busy,
+          spellCheck: !1,
+          onChange: (event) => {
+            update({ scriptsDir: event.target.value });
+          }
+        }
+      )
+    ] }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-python", children: t("settings.wikiPython") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          id: "sb-wiki-python",
+          className: "sb-settings-input",
+          value: draft.python,
+          placeholder: state.defaults.python,
+          disabled: busy,
+          spellCheck: !1,
+          onChange: (event) => {
+            update({ python: event.target.value });
+          }
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiPythonHint") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("details", { className: "sb-settings-details", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("summary", { children: t("settings.wikiAdvanced") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-state", children: t("settings.wikiStateFile") }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "input",
+          {
+            id: "sb-wiki-state",
+            className: "sb-settings-input",
+            value: draft.stateFile,
+            placeholder: state.defaults.stateFile,
+            disabled: busy,
+            spellCheck: !1,
+            onChange: (event) => {
+              update({ stateFile: event.target.value });
+            }
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiStateFileHint") })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-timeout", children: t("settings.wikiTimeout") }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "input",
+          {
+            id: "sb-wiki-timeout",
+            className: "sb-settings-input",
+            type: "number",
+            min: 0,
+            max: 86400,
+            value: draft.timeoutSeconds,
+            placeholder: String(state.defaults.timeoutSeconds),
+            disabled: busy,
+            onChange: (event) => {
+              update({ timeoutSeconds: Number.isFinite(Number(event.target.value)) ? Math.max(0, Math.floor(Number(event.target.value))) : 0 });
+            }
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiTimeoutHint", { value: state.defaults.timeoutSeconds }) })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-provider", children: t("settings.wikiProvider") }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "input",
+          {
+            id: "sb-wiki-provider",
+            className: "sb-settings-input",
+            value: draft.provider,
+            placeholder: state.defaults.provider,
+            disabled: busy,
+            spellCheck: !1,
+            onChange: (event) => {
+              update({ provider: event.target.value });
+            }
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.wikiProviderHint") })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-wiki-synth-config", children: t("settings.wikiSynthConfig") }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "input",
+          {
+            id: "sb-wiki-synth-config",
+            className: "sb-settings-input",
+            value: draft.synthConfig,
+            placeholder: state.defaults.synthConfig,
+            disabled: busy,
+            spellCheck: !1,
+            onChange: (event) => {
+              update({ synthConfig: event.target.value });
+            }
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-action", disabled: busy, onClick: () => {
+        wiki.save(draft);
+      }, children: t("settings.wikiSave") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-retry", disabled: busy, onClick: () => {
+        wiki.reset();
+      }, children: t("settings.wikiReset") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-retry", disabled: state.probing, onClick: () => {
+        wiki.probe();
+      }, children: t("settings.wikiProbe") }),
+      state.saved && error === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-saved", children: t("settings.wikiSaved") }) : null,
+      state.saving ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: t("settings.wikiSaving") }) : null,
+      error !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-error", role: "alert", children: error }) : null
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sb-settings-report", children: report === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: state.status === "loading" ? t("settings.wikiLoading") : t("settings.wikiNoReport") }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: report.ok ? "sb-settings-saved" : "sb-settings-error", role: "status", children: report.ok ? t("settings.wikiReady") : t("settings.wikiIssues") }),
+      issues.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "sb-settings-issues", children: issues.map((issue) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("li", { children: issue }, issue)) }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sb-settings-note", children: t("settings.wikiReportEngine", { mode: modeLabel, dir: report.engine.dir }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sb-settings-note", children: t("settings.wikiReportPython", { value: report.python === "" ? report.pythonExecutable : report.python }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sb-settings-note", children: t("settings.wikiReportSchema", { path: report.schema.path, bytes: String(report.schema.bytes) }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sb-settings-note", children: t("settings.wikiReportState", { path: report.state.path }) })
+    ] }) })
+  ] });
+}
+
+// src/client/SettingsPage.tsx
+var import_jsx_runtime8 = require("react/jsx-runtime");
 function errorText(t, error) {
   switch (error) {
     case "UNKNOWN_MODEL":
@@ -3938,68 +4508,70 @@ function defaultEffortLabel(option, t) {
   let known = option === null || option.defaultEffort === null ? null : option.reasoningEfforts.find((effort) => effort.id === option.defaultEffort);
   return known == null ? t("settings.synthesisEffortDefault") : t("settings.synthesisEffortDefaultNamed", { value: known.name });
 }
-function SessionBoardSettingsPage({ t, settings }) {
+function SessionBoardSettingsPage({ t, settings, wiki }) {
   let state = useSnapshot(settings.store, (value) => value);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     settings.start();
   }, [settings]);
   let selectedValue = state.selection, knownValue = selectedValue === null ? FALLBACK_OPTION_VALUE : optionValueOf(state.options, selectedValue), currentValue = knownValue ?? (selectedValue === null ? FALLBACK_OPTION_VALUE : selectionOptionValue(selectedValue)), disabled = state.saving || state.status === "loading", currentOption = currentValue === FALLBACK_OPTION_VALUE ? null : optionByValue(state.options, currentValue), savedEffort = selectedValue?.reasoningEffort ?? null, efforts = currentOption?.reasoningEfforts ?? [], effortKnown = savedEffort !== null && efforts.some((effort) => effort.id === savedEffort), showEffort = knownValue !== null && (efforts.length > 0 || savedEffort !== null), catalogNote = state.catalogStatus === "loading" ? t("settings.synthesisLoading") : state.catalogStatus === "unavailable" ? t("settings.synthesisCatalogUnavailable") : null;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "sb-settings", "aria-label": t("settings.nav"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h3", { className: "sb-settings-title", children: t("settings.synthesisGroup") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisHint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-model", children: t("settings.synthesisModel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
-        "select",
-        {
-          id: "sb-settings-synthesis-model",
-          className: "sb-settings-select",
-          value: currentValue,
-          disabled,
-          onChange: (event) => {
-            settings.save(event.target.value);
-          },
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: FALLBACK_OPTION_VALUE, children: t("settings.synthesisFallback") }),
-            state.options.map((option) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: option.value, children: optionLabel(option, t) }, option.value)),
-            knownValue === null && selectedValue !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: selectionOptionValue(selectedValue), children: `${selectedValue.provider} \xB7 ${selectedValue.model} (${t("settings.synthesisUnavailable")})` }) : null
-          ]
-        }
-      )
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-settings", "aria-label": t("settings.nav"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "sb-settings-title", children: t("settings.synthesisGroup") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-model", children: t("settings.synthesisModel") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+          "select",
+          {
+            id: "sb-settings-synthesis-model",
+            className: "sb-settings-select",
+            value: currentValue,
+            disabled,
+            onChange: (event) => {
+              settings.save(event.target.value);
+            },
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: FALLBACK_OPTION_VALUE, children: t("settings.synthesisFallback") }),
+              state.options.map((option) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: option.value, children: optionLabel(option, t) }, option.value)),
+              knownValue === null && selectedValue !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: selectionOptionValue(selectedValue), children: `${selectedValue.provider} \xB7 ${selectedValue.model} (${t("settings.synthesisUnavailable")})` }) : null
+            ]
+          }
+        )
+      ] }),
+      showEffort ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-settings-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-effort", children: t("settings.synthesisEffort") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+          "select",
+          {
+            id: "sb-settings-synthesis-effort",
+            className: "sb-settings-select",
+            value: savedEffort ?? "",
+            disabled,
+            onChange: (event) => {
+              settings.save(currentValue, event.target.value);
+            },
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "", children: defaultEffortLabel(currentOption, t) }),
+              efforts.map((effort) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: effort.id, children: effort.name }, effort.id)),
+              savedEffort !== null && !effortKnown ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: savedEffort, children: `${savedEffort} (${t("settings.synthesisUnavailable")})` }) : null
+            ]
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisEffortHint") })
+      ] }) : null,
+      catalogNote !== null && state.options.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-settings-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-settings-note", children: catalogNote }),
+        state.catalogStatus === "unavailable" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "sb-settings-retry", onClick: () => {
+          settings.reloadCatalog();
+        }, children: t("settings.retry") }) : null
+      ] }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-settings-meta", role: "status", "aria-live": "polite", children: [
+        state.saved && state.error === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-settings-saved", children: t("settings.synthesisSaved") }) : null,
+        state.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-settings-error", children: errorText(t, state.error) }) : null,
+        state.saving ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-settings-note", children: t("settings.synthesisSaving") }) : null
+      ] })
     ] }),
-    showEffort ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "sb-settings-label", htmlFor: "sb-settings-synthesis-effort", children: t("settings.synthesisEffort") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
-        "select",
-        {
-          id: "sb-settings-synthesis-effort",
-          className: "sb-settings-select",
-          value: savedEffort ?? "",
-          disabled,
-          onChange: (event) => {
-            settings.save(currentValue, event.target.value);
-          },
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: defaultEffortLabel(currentOption, t) }),
-            efforts.map((effort) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: effort.id, children: effort.name }, effort.id)),
-            savedEffort !== null && !effortKnown ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: savedEffort, children: `${savedEffort} (${t("settings.synthesisUnavailable")})` }) : null
-          ]
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisEffortHint") })
-    ] }) : null,
-    catalogNote !== null && state.options.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: catalogNote }),
-      state.catalogStatus === "unavailable" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "sb-settings-retry", onClick: () => {
-        settings.reloadCatalog();
-      }, children: t("settings.retry") }) : null
-    ] }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "sb-settings-meta", role: "status", "aria-live": "polite", children: [
-      state.saved && state.error === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-saved", children: t("settings.synthesisSaved") }) : null,
-      state.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-error", children: errorText(t, state.error) }) : null,
-      state.saving ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "sb-settings-note", children: t("settings.synthesisSaving") }) : null
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "sb-settings-hint", children: t("settings.synthesisFallbackHint") })
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(WikiSettingsSection, { t, wiki })
   ] });
 }
 
@@ -4481,8 +5053,8 @@ var ManagerController = class {
 };
 
 // src/client/manager/ManagerDrawer.tsx
-var import_react9 = require("react");
-var import_jsx_runtime8 = require("react/jsx-runtime"), PHASE_LABEL = {
+var import_react10 = require("react");
+var import_jsx_runtime9 = require("react/jsx-runtime"), PHASE_LABEL = {
   idle: "manager.phase.idle",
   running: "manager.phase.running",
   waiting: "manager.phase.waiting"
@@ -4534,8 +5106,8 @@ function activityText(at) {
 }
 function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
   let running = runningCount(row);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "sb-manager-item", "data-focused": focused, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("li", { className: "sb-manager-item", "data-focused": focused, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       "input",
       {
         type: "checkbox",
@@ -4545,7 +5117,7 @@ function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
         "aria-label": t("manager.selectWorkspace", { title: row.title })
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
       "button",
       {
         type: "button",
@@ -4554,8 +5126,8 @@ function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
         title: row.path,
         onClick: () => onFocus(row.id),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-workspace-title", children: row.title }),
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: row.entries.length, running }) })
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-workspace-title", children: row.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: row.entries.length, running }) })
         ]
       }
     )
@@ -4565,8 +5137,8 @@ function SessionRowView({ entry, selected, t, onToggle }) {
   let statusKey = entry.pendingKey ?? entry.noteKey, parts = [];
   statusKey !== null && parts.push(t(statusKey));
   let activity = activityText(entry.lastActivityAt);
-  return activity !== "" && parts.push(activity), /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "sb-manager-item", "data-state": entry.state, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return activity !== "" && parts.push(activity), /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("li", { className: "sb-manager-item", "data-state": entry.state, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       "input",
       {
         type: "checkbox",
@@ -4576,41 +5148,41 @@ function SessionRowView({ entry, selected, t, onToggle }) {
         "aria-label": t("manager.selectSession", { title: entry.title })
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-dot", "data-state": entry.state, "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "sb-manager-session-main", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-session-title", title: entry.title, children: entry.title }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: parts.join(" \xB7 ") })
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-dot", "data-state": entry.state, "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "sb-manager-session-main", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-session-title", title: entry.title, children: entry.title }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: parts.join(" \xB7 ") })
     ] })
   ] });
 }
 function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
-  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react9.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), selectedWorkspaces = (0, import_react9.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react9.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react9.useMemo)(
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react10.useMemo)(
     () => rows.find((row) => row.id === snapshot.focusedWorkspaceId) ?? null,
     [rows, snapshot.focusedWorkspaceId]
-  ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react9.useCallback)((id) => {
+  ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react10.useCallback)((id) => {
     manager.toggleWorkspaceId(id);
-  }, [manager]), focusWorkspace = (0, import_react9.useCallback)((id) => {
+  }, [manager]), focusWorkspace = (0, import_react10.useCallback)((id) => {
     manager.setFocused(id);
-  }, [manager]), toggleSession = (0, import_react9.useCallback)((id) => {
+  }, [manager]), toggleSession = (0, import_react10.useCallback)((id) => {
     manager.toggleSessionId(id);
-  }, [manager]), clearSelection = (0, import_react9.useCallback)(() => {
+  }, [manager]), clearSelection = (0, import_react10.useCallback)(() => {
     manager.clearSelection();
-  }, [manager]), sendSelection = (0, import_react9.useCallback)(() => {
+  }, [manager]), sendSelection = (0, import_react10.useCallback)(() => {
     manager.sendSelection();
-  }, [manager]), refresh = (0, import_react9.useCallback)(() => {
+  }, [manager]), refresh = (0, import_react10.useCallback)(() => {
     manager.retry();
-  }, [manager]), close = (0, import_react9.useCallback)(() => {
+  }, [manager]), close = (0, import_react10.useCallback)(() => {
     manager.close();
-  }, [manager]), openInMain = (0, import_react9.useCallback)(() => {
+  }, [manager]), openInMain = (0, import_react10.useCallback)(() => {
     snapshot.managerSessionId !== null && face.openSession(snapshot.managerSessionId);
-  }, [face, snapshot.managerSessionId]), openTask = (0, import_react9.useCallback)((sessionId) => {
+  }, [face, snapshot.managerSessionId]), openTask = (0, import_react10.useCallback)((sessionId) => {
     face.openSession(sessionId);
   }, [face]);
   if (!snapshot.open) return null;
   let chatReady = snapshot.reference !== null && typeof SessionProvider == "function" && typeof renderSlot == "function", chatFailed = snapshot.phase === "error" || snapshot.chat === "error" || snapshot.phase === "ready" && snapshot.managerSessionId === null;
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-root sb-manager", role: "complementary", "aria-label": t("manager.ariaDrawer"), "data-open": "true", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("header", { className: "sb-manager-head", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-root sb-manager", role: "complementary", "aria-label": t("manager.ariaDrawer"), "data-open": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("header", { className: "sb-manager-head", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "span",
         {
           className: "sb-manager-phase",
@@ -4620,8 +5192,8 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           title: t(PHASE_LABEL[phase])
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-title", children: t("manager.title") }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-title", children: t("manager.title") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "button",
         {
           type: "button",
@@ -4629,10 +5201,10 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           "aria-label": t("manager.refresh"),
           title: t("manager.refresh"),
           onClick: refresh,
-          children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinecap: "round", strokeLinejoin: "round" }) })
+          children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinecap: "round", strokeLinejoin: "round" }) })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "button",
         {
           type: "button",
@@ -4642,7 +5214,7 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           children: t("manager.openInMain")
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "button",
         {
           type: "button",
@@ -4650,15 +5222,15 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           "aria-label": t("manager.close"),
           title: t("manager.close"),
           onClick: close,
-          children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M2.5 2.5l7 7m0-7l-7 7", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
+          children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M2.5 2.5l7 7m0-7l-7 7", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("aside", { className: "sb-manager-left", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.workspaces") }),
-          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: rows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-body", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("aside", { className: "sb-manager-left", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.workspaces") }),
+          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: rows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             WorkspaceRowView,
             {
               row,
@@ -4671,9 +5243,9 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
             row.id
           )) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
-          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focused.entries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.sessionEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: focused.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
+          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focused.entries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.sessionEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focused.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             SessionRowView,
             {
               entry,
@@ -4684,9 +5256,9 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
             entry.id
           )) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "sb-manager-section sb-manager-tasks", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.tasks") }),
-          snapshot.tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-empty", children: t("manager.taskEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "sb-manager-list", children: snapshot.tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("li", { className: "sb-manager-item", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-tasks", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.tasks") }),
+          snapshot.tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.taskEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: snapshot.tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("li", { className: "sb-manager-item", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
             "button",
             {
               type: "button",
@@ -4697,19 +5269,19 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
                 task.sessionId !== void 0 && openTask(task.sessionId);
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-chip", "data-status": task.status, children: t(TASK_STATUS_KEYS[task.status]) }),
-                /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "sb-manager-task-main", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-task-title", children: task.title }),
-                  task.note === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-meta", children: task.note })
+                /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-chip", "data-status": task.status, children: t(TASK_STATUS_KEYS[task.status]) }),
+                /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "sb-manager-task-main", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-task-title", children: task.title }),
+                  task.note === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: task.note })
                 ] })
               ]
             }
           ) }, task.id)) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("footer", { className: "sb-manager-selection", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-selection-row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-count", children: t("manager.selectionCount", { count: selectedCount }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("footer", { className: "sb-manager-selection", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-selection-row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-count", children: t("manager.selectionCount", { count: selectedCount }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
               "button",
               {
                 type: "button",
@@ -4719,7 +5291,7 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
                 children: t("manager.selectionClear")
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
               "button",
               {
                 type: "button",
@@ -4730,21 +5302,21 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
               }
             )
           ] }),
-          snapshot.sent ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-ok", children: t("manager.selectionSent") }) : null,
-          snapshot.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-error", title: snapshot.errorDetail ?? snapshot.stateError ?? void 0, children: t(snapshot.error) }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "sb-manager-hint", children: t("manager.selectionHint") })
+          snapshot.sent ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-ok", children: t("manager.selectionSent") }) : null,
+          snapshot.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-error", title: snapshot.errorDetail ?? snapshot.stateError ?? void 0, children: t(snapshot.error) }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-hint", children: t("manager.selectionHint") })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("section", { className: "sb-manager-chat", children: chatReady && snapshot.reference !== null && SessionProvider !== void 0 && renderSlot !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "sb-manager-chat-body", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(SessionProvider, { session: snapshot.reference, children: renderSlot("session-board.manager.chat", {}) }) }) : chatFailed ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "sb-manager-notice", role: "alert", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { title: snapshot.stateError ?? void 0, children: snapshot.phase === "error" ? t("manager.errorState") : t("manager.chatUnavailable") }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: refresh, children: t("manager.chatRetry") })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.loading") }) })
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("section", { className: "sb-manager-chat", children: chatReady && snapshot.reference !== null && SessionProvider !== void 0 && renderSlot !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-chat-body", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(SessionProvider, { session: snapshot.reference, children: renderSlot("session-board.manager.chat", {}) }) }) : chatFailed ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-notice", role: "alert", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { title: snapshot.stateError ?? void 0, children: snapshot.phase === "error" ? t("manager.errorState") : t("manager.chatUnavailable") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: refresh, children: t("manager.chatRetry") })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.loading") }) })
     ] })
   ] });
 }
 function ManagerToggle({ manager, t, wide }) {
   let open = useSnapshot(manager, (value) => value.open), label = t(open ? "manager.close" : "manager.open"), inSidebar = wide !== void 0;
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
     "button",
     {
       type: "button",
@@ -4756,32 +5328,32 @@ function ManagerToggle({ manager, t, wide }) {
       "data-session-board-manager-toggle": "",
       onClick: () => manager.toggle(),
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("svg", { width: inSidebar ? 16 : 14, height: inSidebar ? 16 : 14, viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("path", { d: "M4.2 2.4h5.6v9.2H4.2zM6.6 4.2h1.2M6.6 6.6h1.2M6.6 9h1.2", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinejoin: "round" }) }),
-        inSidebar && wide === !0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "sb-manager-entry-label", children: t("manager.entry") }) : null
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: inSidebar ? 16 : 14, height: inSidebar ? 16 : 14, viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M4.2 2.4h5.6v9.2H4.2zM6.6 4.2h1.2M6.6 6.6h1.2M6.6 9h1.2", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinejoin: "round" }) }),
+        inSidebar && wide === !0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-entry-label", children: t("manager.entry") }) : null
       ]
     }
   );
 }
 
 // src/client/manager/ManagerChat.tsx
-var import_jsx_runtime9 = require("react/jsx-runtime");
+var import_jsx_runtime10 = require("react/jsx-runtime");
 function ManagerFixedChatView({ renderSlot }) {
-  return typeof renderSlot != "function" ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_jsx_runtime9.Fragment, { children: renderSlot("conversation.session", { view: "chat" }) });
+  return typeof renderSlot != "function" ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_jsx_runtime10.Fragment, { children: renderSlot("conversation.session", { view: "chat" }) });
 }
 function ManagerChatPanel(props) {
   let { sessionId, useSession, useConversation, useSessions, renderFactorySlot, t } = props, session = useSession((value) => value), conversation = useConversation((value) => value), summary = useSessions((state) => state.byId[sessionId]), hero = !(conversation.activeTargets.size > 0 || session.blank !== !0 && session.awaitingFirstTurn !== !0 || session.running === !0 || summary?.blank === !1);
-  return typeof renderFactorySlot != "function" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_jsx_runtime9.Fragment, { children: renderFactorySlot(
+  return typeof renderFactorySlot != "function" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_jsx_runtime10.Fragment, { children: renderFactorySlot(
     "conversation.content",
     { variant: "embedded", phase: hero ? "hero" : "active", hero },
     {
       slots: { views: ManagerFixedChatView },
-      fallback: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") })
+      fallback: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") })
     }
   ) });
 }
 
 // src/client/index.tsx
-var import_jsx_runtime10 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
+var import_jsx_runtime11 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -4799,15 +5371,15 @@ function emptyStore(value) {
 }
 var EMPTY_LIST = { ids: [], byId: {} }, EMPTY_STATUS = /* @__PURE__ */ new Map(), EMPTY_LIST_SOURCE = emptyStore(EMPTY_LIST), EMPTY_STATUS_SOURCE = emptyStore(EMPTY_STATUS);
 function useViewActions(face) {
-  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react10.useCallback)(() => {
+  let view = useSnapshot(face.view, (value) => value), toggleCollapse = (0, import_react11.useCallback)(() => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, collapsed: !current.dock.collapsed } }));
-  }, [face]), setWidth = (0, import_react10.useCallback)((width) => {
+  }, [face]), setWidth = (0, import_react11.useCallback)((width) => {
     face.view.set((current) => ({ ...current, dock: { ...current.dock, width: clampDockWidth(width) } }));
-  }, [face]), toggleDensity = (0, import_react10.useCallback)(() => {
+  }, [face]), toggleDensity = (0, import_react11.useCallback)(() => {
     face.view.set((current) => ({ ...current, density: current.density === "compact" ? "full" : "compact" }));
-  }, [face]), setBoardOpen = (0, import_react10.useCallback)((open) => {
+  }, [face]), setBoardOpen = (0, import_react11.useCallback)((open) => {
     face.view.set((current) => ({ ...current, board: { open } }));
-  }, [face]), toggleGroup = (0, import_react10.useCallback)((group) => {
+  }, [face]), toggleGroup = (0, import_react11.useCallback)((group) => {
     face.view.set((current) => ({
       ...current,
       collapsedGroups: { ...current.collapsedGroups, [group]: current.collapsedGroups[group] !== !0 }
@@ -4817,21 +5389,21 @@ function useViewActions(face) {
 }
 function useTranslation(face) {
   let revision = useSnapshot(face.locale, (value) => value.revision);
-  return (0, import_react10.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
+  return (0, import_react11.useMemo)(() => (key, params) => face.t(key, params), [face, revision]);
 }
 function useSelection(face) {
   let state = useSnapshot(face.batch, (value) => value);
-  return { selected: (0, import_react10.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
+  return { selected: (0, import_react11.useMemo)(() => new Set(state.selected), [state.selected]), toggle: face.batch.toggle, busy: state.phase === "previewing" || state.phase === "archiving" };
 }
 function useFilters(face, groups) {
-  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react10.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react10.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react10.useCallback)((next) => {
+  let filters = useSnapshot(face.view, (value) => value.filters), marks = useSnapshot(face.view, (value) => value.archiveMarks), annotated = (0, import_react11.useMemo)(() => groups.map((group) => ({ ...group, entries: group.entries.map((entry) => isArchivedInClient(entry) ? entry : isArchived(entry, marks) ? { ...entry, archivedAt: marks[entry.id].archivedAt } : entry) })), [groups, marks]), filtered = (0, import_react11.useMemo)(() => filterGroups(annotated, filters), [annotated, filters]), change = (0, import_react11.useCallback)((next) => {
     face.view.set((current) => ({ ...current, filters: next }));
   }, [face]);
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face);
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     BoardDock,
     {
       grouping: view.grouping,
@@ -4851,9 +5423,9 @@ function DockRoot({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -4861,10 +5433,10 @@ function DockRoot({ face }) {
   );
 }
 function OpenOverlayContent({ face }) {
-  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react10.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react10.useCallback)((id) => {
+  let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react11.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react11.useCallback)((id) => {
     face.openSession(id), setBoardOpen(!1);
   }, [face, setBoardOpen]);
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     BoardOverlay,
     {
       open: !0,
@@ -4881,9 +5453,9 @@ function OpenOverlayContent({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => face.view.set((current) => ({ ...current, grouping })) }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -4892,11 +5464,11 @@ function OpenOverlayContent({ face }) {
 }
 function BoardOverlaySlot({ face }) {
   let { view } = useViewActions(face);
-  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(OpenOverlayContent, { face }) : null;
+  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(OpenOverlayContent, { face }) : null;
 }
 function HeaderToggle({ face }) {
   let { view, setBoardOpen } = useViewActions(face), label = view.board.open ? face.t("action.closeBoard") : face.t("action.openBoard");
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     "button",
     {
       type: "button",
@@ -4906,7 +5478,7 @@ function HeaderToggle({ face }) {
       "aria-pressed": view.board.open,
       "data-session-board-toggle": "",
       onClick: () => setBoardOpen(!view.board.open),
-      children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
+      children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
     }
   );
 }
@@ -4950,14 +5522,16 @@ function apply(ctx) {
   ctx.effect(() => locale.register(NS, { zh, en }), "dsh-session-board: dictionaries"), ctx.effect(() => installStylesheet(globalThis.document), "dsh-session-board: stylesheet");
   let doc = globalThis.document;
   if (doc == null) return;
-  let t = locale.bind(NS), synthesis = createSynthesisSettings();
-  ctx.effect(() => () => synthesis.dispose(), "dsh-session-board: settings controller"), ctx.effect(() => slots.inject("settings.section", () => slots.register({
+  let t = locale.bind(NS), synthesis = createSynthesisSettings(), wiki = createWikiSettings();
+  ctx.effect(() => () => {
+    synthesis.dispose(), wiki.dispose();
+  }, "dsh-session-board: settings controllers"), ctx.effect(() => slots.inject("settings.section", () => slots.register({
     name: "settings.section",
     id: "session-board",
     order: 60,
     label: () => t("settings.nav"),
     locale: NS,
-    inject: () => ({ settings: synthesis })
+    inject: () => ({ settings: synthesis, wiki })
   }, SessionBoardSettingsPage)), "dsh-session-board: settings page");
   let warned = /* @__PURE__ */ new Set(), warn = (reason) => {
     warned.has(reason) || (warned.add(reason), ctx.logger?.warn?.(`dsh-session-board: ${reason}`));
@@ -5140,7 +5714,7 @@ function apply(ctx) {
       host.setAttribute("data-dsh-session-board-host", "");
       let disposeDock = mountDock(host, (element) => {
         let root = (0, import_client.createRoot)(element);
-        return root.render(/* @__PURE__ */ (0, import_jsx_runtime10.jsx)(DockRoot, { face })), () => {
+        return root.render(/* @__PURE__ */ (0, import_jsx_runtime11.jsx)(DockRoot, { face })), () => {
           root.unmount();
         };
       }, warn);

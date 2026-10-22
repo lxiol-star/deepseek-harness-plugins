@@ -13,18 +13,23 @@
  * `/api` routes, one raw route. Removing the bundle row is a complete
  * uninstall.
  */
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only import that completes the ambient surface used below: the
 // `session/event` declaration. Erased at build time.
 import type {} from '@deepseek-ai/dsh-session'
 import { EMPTY_FEED } from '../shared/types.ts'
 import { SYNTHESIS_PREFS_KEY, selectionOf, type SynthesisModelPref, type SynthesisModelSelection } from '../shared/synthesis.ts'
-import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec } from './domain.ts'
-import type { BoardPrefsTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
+import { ACK_TABLE_NAME, PREFS_TABLE_NAME, TURN_TABLE_NAME, WIKI_TABLE_NAME, ackDomainSpec, prefsDomainSpec, turnDomainSpec, wikiDomainSpec } from './domain.ts'
+import type { BoardPrefsTable, BoardWikiTable, DomainSpec, DomainTableSpec, KvTableLike } from './domain.ts'
 import { BoardLedger, describeError, subscribeBoardLedger } from './ledger.ts'
 import { startManager } from './manager/wiring.ts'
 import { isKnownSynthesisModel, listSynthesisCatalog, runSynthesisModel, type HostLlmService } from './model-service.ts'
-import { createWikiArchiver } from './wiki-archive.ts'
+import { createWikiArchiver, resolveDshHome, resolveSynthesisProvider } from './wiki-archive.ts'
+import { WikiConfigError, buildWikiRuntime, mergeWikiConfig, probeWikiEnvironment, validateWikiWrite, wikiConfigResponse, type WikiRuntime, type WikiSettingsFace } from './wiki-config.ts'
+import { validateWikiConfig, type WikiConfig } from '../shared/wiki.ts'
 import { createBoardRoutes } from './routes.ts'
 import type { BoardFetchRoute, BoardTrustRequest, BoardWebRoute } from './routes.ts'
 
@@ -38,6 +43,71 @@ export const name = 'dsh-session-board'
  * plugin if one disappears.
  */
 export const inject = ['storageDomain', 'connection', 'webServer', 'llm']
+
+/**
+ * Deployment-varying Wiki defaults settable from `cordis.patch.yml`.
+ *
+ * The settings page stores a complete record once the user saves; this config
+ * only seeds a profile that never opened that page. Empty paths mean "use the
+ * local Wiki": `~/wiki`, `<wikiRoot>/SCHEMA.md`, `<wikiRoot>/scripts`.
+ *
+ * A Cordis `Config` schema in Standard Schema form keeps this package free of
+ * runtime dependencies while validating rows at activation.
+ */
+/** Fields a deployment may set on the plugin row. */
+const KNOWN_WIKI_CONFIG_FIELDS = new Set([
+  'wikiRoot', 'schemaPath', 'scriptsMode', 'scriptsDir', 'python', 'stateFile', 'timeoutSeconds', 'provider', 'synthConfig',
+])
+
+/** One config validation issue in Standard Schema form. */
+interface WikiConfigIssue {
+  message: string
+  path: readonly (string | number)[]
+}
+
+/** Result of {@link Config} validation. */
+type WikiConfigValidation = { value: WikiConfig; issues?: undefined } | { issues: WikiConfigIssue[]; value?: undefined }
+
+export const Config = {
+  '~standard': {
+    version: 1 as const,
+    vendor: 'dsh-session-board',
+    /**
+     * Validate one raw row config and fill deployment defaults.
+     * @param value - raw `config` value from the Loader row.
+     * @returns the complete config, or Standard Schema issues.
+     */
+    validate(value?: unknown): WikiConfigValidation {
+      const input = value ?? {}
+      if (typeof input !== 'object' || Array.isArray(input)) {
+        return { issues: [{ message: 'config must be an object', path: [] }] }
+      }
+      const unknown = Object.keys(input).filter(key => !KNOWN_WIKI_CONFIG_FIELDS.has(key))
+      if (unknown.length > 0) {
+        return { issues: unknown.map(key => ({ message: `unknown config field '${key}'`, path: [key] })) }
+      }
+      const parsed = validateWikiConfig(input)
+      if (parsed.config === null) {
+        return { issues: parsed.errors.map((message): WikiConfigIssue => ({ message, path: [] })) }
+      }
+      return { value: parsed.config }
+    },
+  },
+}
+
+/**
+ * Read the validated plugin config, failing activation loudly on a bad row.
+ * @param raw - second `apply` argument supplied by the Loader.
+ * @returns the Wiki configuration seeded by the deployment.
+ */
+function resolvePluginConfig(raw: unknown): WikiConfig {
+  const result = Config['~standard'].validate(raw)
+  if (result.issues !== undefined) {
+    const detail = result.issues.map(issue => (issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`)).join('; ')
+    throw new Error(`dsh-session-board: invalid config: ${detail}`)
+  }
+  return result.value
+}
 
 /**
  * Structural views of the three host services consumed here.
@@ -102,8 +172,9 @@ function llmOf(ctx: Context): HostLlmService {
  * registrations, the `session/event` listener, and both domains close through
  * their own effects, in reverse registration order).
  */
-export function apply(ctx: Context): () => void {
+export function apply(ctx: Context, config?: unknown): () => void {
   const warn = (message: string): void => { ctx.logger?.warn?.(message) }
+  const wikiPluginConfig = resolvePluginConfig(config)
 
   // `inject` above guarantees all three services for this plugin's whole life,
   // so the structural views are resolved once here.
@@ -111,6 +182,9 @@ export function apply(ctx: Context): () => void {
   const connection = connectionOf(ctx)
   const webServer = webServerOf(ctx)
   const llm = llmOf(ctx)
+  /** User home and this build's `lib` directory (bridge and engine siblings). */
+  const home = resolve(homedir())
+  const packageDir = dirname(fileURLToPath(import.meta.url))
 
   /**
    * The ledger exists only once both domains are open, but the routes register
@@ -121,10 +195,53 @@ export function apply(ctx: Context): () => void {
   let ledger: BoardLedger | null = null
   /** Open only once the preference domain is available; null keeps the fallback. */
   let prefs: BoardPrefsTable | null = null
+  /** Saved Wiki configuration; null keeps the deployment defaults + `~/wiki`. */
+  let wikiTable: BoardWikiTable | null = null
 
   const readSynthesisPref = (): SynthesisModelPref => prefs?.get(SYNTHESIS_PREFS_KEY) ?? { model: null, provider: null, reasoningEffort: null }
 
+  /** Key of the single Wiki config record in its own table. */
+  const WIKI_RECORD_KEY = 'config'
+  const readStoredWiki = (): WikiConfig | null => {
+    try {
+      return wikiTable?.get(WIKI_RECORD_KEY) ?? null
+    } catch {
+      return null
+    }
+  }
+  /**
+   * Resolve the Wiki runtime per operation, so a config saved in the settings
+   * page applies to the next archive without a host restart.
+   */
+  const runtimeOf = (): WikiRuntime => buildWikiRuntime({
+    home,
+    dshHome: resolveDshHome(undefined, process.env.DSH_HOME),
+    pluginConfig: wikiPluginConfig,
+    stored: readStoredWiki(),
+    engineDir: join(packageDir, 'wiki'),
+    bridgePath: join(packageDir, 'wiki-workflow.py'),
+    storedProvider: resolveSynthesisProvider(home),
+  })
+
+  const wikiSettings: WikiSettingsFace = {
+    read: async () => wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, readStoredWiki()), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home)),
+    write: async (raw) => {
+      const validated = validateWikiWrite(raw)
+      if (validated.config === null) throw new WikiConfigError(validated.errors)
+      const table = wikiTable
+      if (table === null) throw new Error('STORE_UNAVAILABLE')
+      await table.put(WIKI_RECORD_KEY, validated.config)
+      return wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, validated.config), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home))
+    },
+    reset: async () => {
+      if (wikiTable !== null) await wikiTable.delete(WIKI_RECORD_KEY)
+      return wikiConfigResponse(mergeWikiConfig(wikiPluginConfig, null), home, await probeWikiEnvironment(runtimeOf()), resolveSynthesisProvider(home))
+    },
+    probe: async () => probeWikiEnvironment(runtimeOf()),
+  }
+
   const wikiArchive = createWikiArchiver({
+    runtime: runtimeOf,
     models: {
       read: (): SynthesisModelSelection | null => selectionOf(readSynthesisPref()),
       complete: request => runSynthesisModel(llm, request),
@@ -148,6 +265,7 @@ export function apply(ctx: Context): () => void {
       validate: selection => isKnownSynthesisModel(llm, selection),
       catalog: () => listSynthesisCatalog(llm),
     },
+    wikiSettings,
     warn,
   })
 
@@ -198,6 +316,21 @@ export function apply(ctx: Context): () => void {
       prefs = domain.table(PREFS_TABLE_NAME)
     } catch (error) {
       warn(`dsh-session-board: synthesis preference store unavailable, using the Wiki provider: ${describeError(error)}`)
+    }
+  })()
+
+  /**
+   * The Wiki configuration domain opens independently of both the ledger and
+   * the synthesis preference: a broken Wiki store must never disable cards,
+   * acks or synthesis. Failure leaves `~/wiki` defaults in effect.
+   */
+  void (async (): Promise<void> => {
+    try {
+      const domain = await storageDomain.open(wikiDomainSpec)
+      ctx.effect(() => () => domain.close(), 'dsh-session-board: wiki domain')
+      wikiTable = domain.table(WIKI_TABLE_NAME)
+    } catch (error) {
+      warn(`dsh-session-board: wiki configuration store unavailable, using ~/wiki defaults: ${describeError(error)}`)
     }
   })()
 

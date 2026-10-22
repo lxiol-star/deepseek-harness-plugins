@@ -28,6 +28,9 @@ const components = require(output) as {
   BoardOverlay: unknown
   BoardList: unknown
   BoardFilterBar: unknown
+  SessionBoardSettingsPage: unknown
+  DEFAULT_WIKI_CONFIG: Record<string, unknown>
+  wikiDefaults: (home: string) => Record<string, unknown>
   BatchController: new (transport: object) => {
     toggle(id: string): void
     preview(): Promise<void>
@@ -137,6 +140,46 @@ describe('actual React components', () => {
     await React.act(async () => { (view.container.querySelector('button') as HTMLElement).click() })
     expect(change).toHaveBeenLastCalledWith({ query: '', status: 'all', workspace: '', archive: 'active' })
     expect(view.container.querySelector('[role=status]')?.textContent).toBe('1 of 1 sessions')
+  })
+  it('settings page edits the self-contained Wiki configuration and saves the draft', async () => {
+    const saveWiki = vi.fn(async (_config: unknown) => {})
+    const stub = <T,>(value: T) => ({ getSnapshot: () => value, subscribe: () => () => {} })
+    const settings = {
+      store: stub({
+        status: 'ready', selection: null, options: [], catalogStatus: 'ready',
+        saving: false, saved: false, error: null,
+      }),
+      start: vi.fn(), save: vi.fn(async () => {}), reloadCatalog: vi.fn(async () => {}), dispose: vi.fn(),
+    }
+    const defaults = components.wikiDefaults('/home/test')
+    const wiki = {
+      store: stub({
+        status: 'ready', config: { ...components.DEFAULT_WIKI_CONFIG }, defaults,
+        report: null, saving: false, saved: false, error: null, fieldErrors: [], probing: false,
+      }),
+      start: vi.fn(), save: saveWiki, reset: vi.fn(async () => {}), probe: vi.fn(async () => {}), dispose: vi.fn(),
+    }
+    const props = { t: components.t, settings, wiki }
+    const view = mount(components.SessionBoardSettingsPage, props); await view.render(props)
+    expect(view.container.textContent).toContain('Wiki engine')
+    expect(view.container.textContent).toContain('Archive synthesis')
+    const root = view.container.querySelector<HTMLInputElement>('#sb-wiki-root')!
+    expect(root.placeholder).toBe('/home/test/wiki')
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await React.act(async () => {
+      setValue?.call(root, '/tmp/other-wiki')
+      root.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const save = [...view.container.querySelectorAll('button')].find(button => button.textContent === 'Save')!
+    await React.act(async () => { save.click() })
+    expect(saveWiki).toHaveBeenCalledTimes(1)
+    expect(saveWiki.mock.calls[0]?.[0]).toMatchObject({ wikiRoot: '/tmp/other-wiki', scriptsMode: 'bundled' })
+    const mode = view.container.querySelector<HTMLSelectElement>('#sb-wiki-scripts')!
+    await React.act(async () => {
+      mode.value = 'local'
+      mode.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(view.container.querySelector('#sb-wiki-scripts-dir')).not.toBeNull()
   })
   it('archived-only button toggles the archive filter', async () => {
     const change = vi.fn()

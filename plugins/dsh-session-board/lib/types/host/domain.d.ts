@@ -1,36 +1,4 @@
-/**
- * Durable declarations of the board's two fact stores, plus the one text rule
- * that belongs to the storage boundary.
- *
- * ## Why this file declares its own spec vocabulary
- *
- * A plugin installed into a profile is loaded from its own directory, and Node
- * resolves its bare imports from there. The `@deepseek-ai/*` packages are not
- * installed into the profile — that is deliberate, since a second copy would be
- * a version-skew hazard — so a runtime
- * `import { defineDomain } from '@deepseek-ai/dsh-storage-domain'` fails to
- * resolve and the whole plugin never loads. That failure is not hypothetical:
- * it is exactly what the first install of this plugin hit.
- *
- * The storage-domain contract is small and stable enough to satisfy directly.
- * `open()` reads `name`, `version`, `layout`, `compatibleVersions`,
- * `invalidRecords` and `tables`, and the only thing it ever asks of a table is
- * `valueSchema.parse(record)`. So a domain spec is a plain object and a
- * "schema" is anything with a `parse` method. Declaring them here keeps the
- * host half free of runtime imports, which is what makes a `link:` install
- * work at all.
- *
- * The peer range on `@deepseek-ai/dsh-storage-domain` in `package.json` is a
- * *contract* gate — it records which host shape this package is written
- * against — not a runtime import.
- *
- * ## Versioning
- *
- * `dsh-storage-domain` has no migration: a stored `version` that does not match
- * the descriptor makes `open()` reject. Both domains therefore start at
- * `version: 1`, and any later shape change must arrive as a new domain rather
- * than a bump on these.
- */
+import { type WikiConfig } from '../shared/wiki.ts';
 /**
  * The slice of a schema object the storage layer actually uses.
  *
@@ -75,6 +43,10 @@ export declare const ACK_TABLE_NAME = "acks";
 export declare const TURN_TABLE_NAME = "turn_stats";
 /** Table of {@link PREFS_DOMAIN_NAME}: preference key → stored value. */
 export declare const PREFS_TABLE_NAME = "prefs";
+/** Domain holding the saved Wiki configuration (one record). */
+export declare const WIKI_DOMAIN_NAME = "dsh_session_board_wiki";
+/** Table of {@link WIKI_DOMAIN_NAME}: the single wiki config record. */
+export declare const WIKI_TABLE_NAME = "config";
 /**
  * Truncation budget for a stored error note, counted in Unicode code points.
  * A provider error can be thousands of characters of stack-adjacent prose; the
@@ -177,6 +149,15 @@ export declare const prefsDomainSpec: {
         prefs: DomainTableSpec<StoredSynthesisPrefRecord>;
     };
 };
+/** Durable home of the saved Wiki configuration. */
+export declare const wikiDomainSpec: {
+    name: string;
+    version: number;
+    invalidRecords: "backup-and-skip";
+    tables: {
+        config: DomainTableSpec<WikiConfig>;
+    };
+};
 /** One table handle as the storage layer exposes it (only the members used here). */
 export interface KvTableLike<V> {
     get(key: string): V | undefined;
@@ -190,3 +171,5 @@ export type BoardAckTable = KvTableLike<StoredAckRecord>;
 export type BoardTurnTable = KvTableLike<StoredTurnRecord>;
 /** Handle on the `prefs` table; keys are preference names. */
 export type BoardPrefsTable = KvTableLike<StoredSynthesisPrefRecord>;
+/** Handle on the `config` table; one {@link WikiConfig} record. */
+export type BoardWikiTable = KvTableLike<WikiConfig>;

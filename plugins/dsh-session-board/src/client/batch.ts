@@ -7,16 +7,30 @@ export interface BatchState {
   phase: 'idle' | 'previewing' | 'confirming' | 'archiving'
   preview: ArchivePreview | null
   result: ArchiveSummary | null
+  /** Stable error code for the localized message. */
   error: string | null
+  /** Host/bridge diagnostic behind that code, when it sent one. */
+  errorDetail: string | null
 }
 export interface ArchiveTransport {
   preview(ids: readonly string[]): Promise<ArchivePreview>
   commit(token: string): Promise<ArchiveSummary>
 }
 
+/** Stable code of one transport failure. */
+function codeOf(error: unknown): string {
+  return error instanceof Error && error.message !== '' ? error.message : String(error)
+}
+
+/** Host/bridge diagnostic carried by a transport failure, when present. */
+function detailOf(error: unknown): string | null {
+  const detail = (error as { detail?: unknown } | null)?.detail
+  return typeof detail === 'string' && detail.trim() !== '' ? detail : null
+}
+
 /** One shared, explicit preview/confirm/write state machine for both views. */
 export class BatchController {
-  private readonly state = createStore<BatchState>({ selected: [], phase: 'idle', preview: null, result: null, error: null })
+  private readonly state = createStore<BatchState>({ selected: [], phase: 'idle', preview: null, result: null, error: null, errorDetail: null })
   private disposed = false
   constructor(private readonly transport: ArchiveTransport) {}
   readonly getSnapshot = this.state.getSnapshot
@@ -25,11 +39,11 @@ export class BatchController {
     const s = this.getSnapshot()
     if (s.phase !== 'idle' && s.phase !== 'confirming') return
     const selected = s.selected.includes(id) ? s.selected.filter(x => x !== id) : [...s.selected, id].slice(0, MAX_ARCHIVE_SELECTION)
-    this.state.set({ ...s, selected, phase: 'idle', preview: null, error: null, result: null })
+    this.state.set({ ...s, selected, phase: 'idle', preview: null, error: null, errorDetail: null, result: null })
   }
   readonly selectAll = (ids: readonly string[]): void => {
     if (this.isBusy()) return
-    this.state.set({ ...this.getSnapshot(), selected: [...new Set(ids)].slice(0, MAX_ARCHIVE_SELECTION), phase: 'idle', preview: null, error: null, result: null })
+    this.state.set({ ...this.getSnapshot(), selected: [...new Set(ids)].slice(0, MAX_ARCHIVE_SELECTION), phase: 'idle', preview: null, error: null, errorDetail: null, result: null })
   }
   readonly reconcile = (ids: readonly string[]): void => {
     if (this.isBusy()) return
@@ -50,7 +64,7 @@ export class BatchController {
     if (this.isBusy()) return
     const s = this.getSnapshot()
     if (s.result === null && s.error === null) return
-    this.state.set({ ...s, result: null, error: null })
+    this.state.set({ ...s, result: null, error: null, errorDetail: null })
   }
   readonly preview = async (): Promise<void> => {
     const s = this.getSnapshot()
@@ -60,13 +74,13 @@ export class BatchController {
       const preview = await this.transport.preview(s.selected)
       if (!this.disposed) this.state.set({ ...this.getSnapshot(), phase: 'confirming', preview })
     } catch (error) {
-      if (!this.disposed) this.state.set({ ...this.getSnapshot(), phase: 'idle', error: error instanceof Error ? error.message : String(error) })
+      if (!this.disposed) this.state.set({ ...this.getSnapshot(), phase: 'idle', error: codeOf(error), errorDetail: detailOf(error) })
     }
   }
   readonly confirm = async (): Promise<void> => {
     const s = this.getSnapshot()
     if (this.disposed || s.phase !== 'confirming' || s.preview === null) return
-    this.state.set({ ...s, phase: 'archiving', error: null })
+    this.state.set({ ...s, phase: 'archiving', error: null, errorDetail: null })
     try {
       const result = await this.transport.commit(s.preview.token)
       if (this.disposed) return
@@ -74,9 +88,9 @@ export class BatchController {
       const succeeded = new Set(result.nativeArchive
         ? result.nativeArchive.filter(row => ['archived', 'already-archived', 'empty-archived'].includes(row.status)).map(row => row.session)
         : result.results.filter(row => (row.action === 'archived' || row.action === 'skipped') && !incomplete.has(row.session)).map(row => row.session))
-      this.state.set({ selected: s.selected.filter(id => !succeeded.has(id)), phase: 'idle', preview: null, result, error: null })
+      this.state.set({ selected: s.selected.filter(id => !succeeded.has(id)), phase: 'idle', preview: null, result, error: null, errorDetail: null })
     } catch (error) {
-      if (!this.disposed) this.state.set({ ...s, phase: 'idle', preview: null, error: error instanceof Error ? error.message : String(error) })
+      if (!this.disposed) this.state.set({ ...s, phase: 'idle', preview: null, error: codeOf(error), errorDetail: detailOf(error) })
     }
   }
   isBusy(): boolean { return ['previewing', 'archiving'].includes(this.getSnapshot().phase) }
