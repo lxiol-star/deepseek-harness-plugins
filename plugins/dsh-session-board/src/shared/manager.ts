@@ -172,8 +172,35 @@ export const MANAGER_ID_MAX = 200
 export const MANAGER_TITLE_MAX = 160
 /** Longest task note stored. */
 export const MANAGER_NOTE_MAX = 2_000
+/** Longest model-authored text forwarded as one prompt or task brief. */
+export const MANAGER_PROMPT_MAX = 8_000
 /** Most ids accepted in one selection mirror write. */
 export const MANAGER_SELECTION_MAX = 500
+
+/**
+ * Failure a `/project/coordinator` handler may surface with a wire status.
+ *
+ * The coordinator route maps this to its HTTP status and error code; a plain
+ * `Error` stays the generic 400. Project provisioning failures are server
+ * faults, so a client retry should not look like a malformed request.
+ */
+export class ProjectCoordinatorError extends Error {
+  /**
+   * @param status - wire status: 400 for an unusable request, 500 for a server failure.
+   * @param code - stable error code returned to the caller.
+   * @param message - actionable description for logs and tools.
+   * @param options - standard `Error` options, typically `cause`.
+   */
+  constructor(
+    readonly status: 400 | 500,
+    readonly code: string,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'ProjectCoordinatorError'
+  }
+}
 
 /** Whether a wire value is a usable opaque id. */
 export function isManagerId(value: unknown): value is string {

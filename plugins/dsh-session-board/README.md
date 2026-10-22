@@ -38,16 +38,20 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - `project_assign_task`：在指定分支工作区新建任务会话并把 brief 作为首条消息（不能派到项目外）；
 - `project_message_session`：向项目内已有会话排队发消息（不打断当前回合）；
 - `project_session_status`：查看项目内某个会话的状态、最后回合与预览；
-- 项目内的工作会话会额外获得 `report_to_coordinator` 工具，可主动把进展/阻塞回报给协调会话（可带 taskId，顺便更新任务备注）。
+- 项目内的工作会话会额外获得 `report_to_coordinator` 工具，可主动把进展/阻塞回报给协调会话（可带 taskId，且只能关联本项目的任务，顺便更新任务备注）。
+
+「项目会话」按需创建且幂等：同一个项目重复点击（包括多人同时打开）只会创建一个协调会话；创建失败时宿主回滚记录，项目节点旁给出提示并允许重试；已存在的协调会话若被用户删除，再次打开会自动重建。
+
+git remote 里内嵌的凭据（如 `https://x-access-token:TOKEN@host/repo.git`）在项目树、协调会话记录和协调 Agent 的工具输出里都会被移除，页面与模型只能看到去凭据后的地址。
 
 协调会话与子会话之间的消息都走官方 `session.prompt`，在各自会话日志里可见；不会删除会话、工作区或 git 数据。项目树不可用（没有 git 元数据）时按钮不显示。
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.8.1.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.8.2.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.1.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.2.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

@@ -9,7 +9,10 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { normalizeRemote, projectLabel, WORKSPACE_META_PATH, type WorkspaceGitInfo, type WorkspaceMetaResponse } from '../shared/workspace-meta.ts'
+import {
+  normalizeRemote, projectLabel, redactRemoteCredentials, WORKSPACE_META_PATH,
+  type WorkspaceGitInfo, type WorkspaceMetaResponse,
+} from '../shared/workspace-meta.ts'
 import type { BoardFetchRoute } from './routes.ts'
 
 const exec = promisify(execFile)
@@ -138,7 +141,8 @@ export function createWorkspaceMetaRoute(options: WorkspaceMetaOptions): BoardFe
       ...(facts.branch === undefined ? {} : { branch: facts.branch }),
       ...(projectKey === '' ? {} : { projectKey }),
       ...(label === null ? {} : { projectLabel: label }),
-      ...(facts.remote === undefined ? {} : { remote: facts.remote }),
+      // A configured remote can embed a credential; never send it to the page.
+      ...(facts.remote === undefined ? {} : { remote: redactRemoteCredentials(facts.remote) }),
       ...(facts.root === undefined ? {} : { root: facts.root }),
     }
   }

@@ -3,6 +3,7 @@ import {
   normalizeRemote,
   parseWorkspaceMetaResponse,
   projectLabel,
+  redactRemoteCredentials,
   WORKSPACE_META_PATH,
 } from '../src/shared/workspace-meta.ts'
 import { createWorkspaceMetaRoute, type GitFacts, type WorkspaceGitProbe } from '../src/host/workspace-meta.ts'
@@ -48,6 +49,17 @@ describe('workspace remote normalization', () => {
     expect(parseWorkspaceMetaResponse(payload)?.workspaces[0]).toMatchObject({ workspaceId: 'wa', branch: 'feat/main', projectLabel: 'c' })
     expect(parseWorkspaceMetaResponse({ ok: false })).toBeNull()
     expect(parseWorkspaceMetaResponse(null)).toBeNull()
+  })
+
+  it('strips credentials from URL remotes and keeps scp-like ones', () => {
+    expect(redactRemoteCredentials('https://x-access-token:SECRET@github.com/a/b.git'))
+      .toBe('https://github.com/a/b.git')
+    expect(redactRemoteCredentials('https://secret-token@github.com/a/b.git'))
+      .toBe('https://github.com/a/b.git')
+    expect(redactRemoteCredentials('ssh://git@git.zyql.com:2222/it-eff-lab/i-ai-gw.git'))
+      .toBe('ssh://git.zyql.com:2222/it-eff-lab/i-ai-gw.git')
+    expect(redactRemoteCredentials('git@github.com:a/b.git')).toBe('git@github.com:a/b.git')
+    expect(redactRemoteCredentials('')).toBe('')
   })
 })
 
@@ -97,6 +109,20 @@ describe('workspace meta route', () => {
     clock.now += 60_001
     await fetchRoute(route)
     expect(probe).toHaveBeenCalledTimes(6)
+  })
+
+  it('redacts credentials embedded in a configured remote', async () => {
+    const probe = vi.fn(async (path: string): Promise<GitFacts> => ({
+      root: path, branch: 'main', remote: 'https://x-access-token:TOKEN@github.com/me/i-ai-gw.git',
+    }))
+    const { route } = setup(probe)
+    const { status, body } = await fetchRoute(route)
+    expect(status).toBe(200)
+    const workspaces = body.workspaces as Array<Record<string, unknown>>
+    for (const row of workspaces) {
+      expect(String(row.remote)).not.toContain('TOKEN')
+      expect(row.projectKey).toBe('github.com/me/i-ai-gw')
+    }
   })
 
   it('keeps the route available when one probe fails', async () => {

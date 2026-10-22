@@ -11,7 +11,7 @@ export interface WorkspaceNode {
   entries: BoardEntry[]
   children: WorkspaceNode[]
   count: number
-  /** Branch (workspace leaf) or remote (project node); rendered as muted text. */
+  /** Branch of a workspace leaf, rendered as muted text; project nodes omit it. */
   subtitle?: string
   kind?: 'project' | 'workspace' | 'path'
   /** Normalized git origin key, present on project roots only. */

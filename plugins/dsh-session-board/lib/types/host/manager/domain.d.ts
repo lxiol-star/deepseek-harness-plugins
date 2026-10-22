@@ -52,6 +52,7 @@ export interface ManagerCoordinatorRecord {
     readonly sessionId: string;
     readonly workspaceId: string;
     readonly createdAt: number;
+    /** Display remote of the project, with embedded credentials removed. */
     readonly remote?: string;
 }
 /** Project coordinator domain. */

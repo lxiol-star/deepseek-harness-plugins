@@ -709,11 +709,18 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-workspace-head-row > .sb-group-head { flex: 1; min-width: 0; }
 .sb-workspace-action { flex: none; padding: 2px 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 10px; line-height: 16px; cursor: pointer; }
 .sb-workspace-action:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-workspace-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-workspace-action:disabled { opacity: .55; cursor: default; }
+.sb-workspace-error { margin: 2px 0 4px 18px; color: var(--dsw-alias-state-error-primary); font-size: 10px; line-height: 14px; }
 .sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }
 .sb-workspace-node > .sb-group-head { width: 100%; }
+/* A branch with no sessions has nothing to disclose: no pointer affordance. */
+.sb-workspace-node > .sb-group-head--static { cursor: default; }
+.sb-workspace-node > .sb-group-head--static:hover { color: var(--dsw-alias-label-secondary); }
+.sb-workspace-spacer { width: 10px; flex: 0 0 auto; }
 .sb-pill--archived { color: var(--dsw-alias-state-success-primary); }
 /* A session with no turns at all: placeholder, never summary typography. */
 .sb-line--empty {

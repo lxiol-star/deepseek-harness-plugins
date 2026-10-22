@@ -43,6 +43,7 @@ export const en = {
   'workspace.unassigned': 'Unassigned workspace',
   'workspace.coordinator': 'Project session',
   'workspace.coordinatorHint': 'Open or create this project\'s coordinator session',
+  'workspace.coordinatorFailed': 'Could not open the project session. Try again.',
 
   'batch.scopeMain': 'Selected main session',
   'batch.scopeChild': 'Child of {parent} (parentSession)',
@@ -165,6 +166,7 @@ export const en = {
   'a11y.list': 'Session list',
   'a11y.card': 'Open session {title}',
   'a11y.groupCount': '{group}, {count} sessions',
+  'a11y.groupBranchCount': '{group}, branch {branch}, {count} sessions',
 
   'manager.title': 'Manager panel',
   'manager.entry': 'Manager panel',
@@ -314,6 +316,7 @@ export const zh: Record<keyof typeof en, string> = {
   'workspace.unassigned': '未分配工作区',
   'workspace.coordinator': '项目会话',
   'workspace.coordinatorHint': '打开或创建该项目的协调会话',
+  'workspace.coordinatorFailed': '无法打开项目会话，请重试。',
 
   'batch.scopeMain': '选中的主会话',
   'batch.scopeChild': '子会话，父会话 {parent}（parentSession）',
@@ -436,6 +439,7 @@ export const zh: Record<keyof typeof en, string> = {
   'a11y.list': '会话列表',
   'a11y.card': '打开会话 {title}',
   'a11y.groupCount': '{group}，{count} 个会话',
+  'a11y.groupBranchCount': '{group}，分支 {branch}，{count} 个会话',
 
   'manager.title': '管理面板',
   'manager.entry': '管理面板',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createManagerRoutes } from '../src/host/manager/routes.ts'
-import { PROJECT_COORDINATOR_PATH } from '../src/shared/manager.ts'
+import { PROJECT_COORDINATOR_PATH, ProjectCoordinatorError } from '../src/shared/manager.ts'
 import type { ProjectCoordinatorResponse } from '../src/shared/manager.ts'
 
 /**
@@ -46,5 +46,29 @@ describe('project coordinator route', () => {
     }))
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({ ok: false, error: 'PROJECT_COORDINATOR_FAILED' })
+  })
+
+  it('keeps a classified bad request a 400 with its stable code', async () => {
+    const { route } = setup(async () => {
+      throw new ProjectCoordinatorError(400, 'PROJECT_INVALID', 'projectKey is unusable')
+    })
+    if (route === undefined) throw new Error('missing route')
+    const response = await route.fetch(new Request(`http://board${PROJECT_COORDINATOR_PATH}`, {
+      method: 'POST', body: JSON.stringify({ projectKey: '' }),
+    }))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ ok: false, error: 'PROJECT_INVALID' })
+  })
+
+  it('reports a server-side provisioning failure as a 500', async () => {
+    const { route } = setup(async () => {
+      throw new ProjectCoordinatorError(500, 'COORDINATOR_UNAVAILABLE', 'session controller failed')
+    })
+    if (route === undefined) throw new Error('missing route')
+    const response = await route.fetch(new Request(`http://board${PROJECT_COORDINATOR_PATH}`, {
+      method: 'POST', body: JSON.stringify({ projectKey: 'github.com/me/i-ai-gw' }),
+    }))
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({ ok: false, error: 'COORDINATOR_UNAVAILABLE' })
   })
 })

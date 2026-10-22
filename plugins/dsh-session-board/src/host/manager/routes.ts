@@ -8,7 +8,7 @@
  */
 import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse, ManagerWakeResponse, ProjectCoordinatorResponse } from '../../shared/manager.ts'
 import type { BoardFetchRoute } from '../routes.ts'
-import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH, MANAGER_WAKE_PATH, PROJECT_COORDINATOR_PATH } from '../../shared/manager.ts'
+import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH, MANAGER_WAKE_PATH, PROJECT_COORDINATOR_PATH, ProjectCoordinatorError } from '../../shared/manager.ts'
 
 /** Route handlers, implemented by the plugin wiring over the manager service. */
 export interface ManagerRouteHandlers {
@@ -115,6 +115,11 @@ export function createManagerRoutes(handlers: ManagerRouteHandlers): readonly Bo
         return jsonResponse(200, { ok: true, ...(await handlers.projectCoordinator(await readJsonBody(request))) })
       } catch (error) {
         handlers.warn(`dsh-session-board: project coordinator failed: ${describe(error)}`)
+        // A handler that classifies its failure keeps its wire status and code;
+        // anything else is a contained bad request.
+        if (error instanceof ProjectCoordinatorError) {
+          return jsonResponse(error.status, { ok: false, error: error.code })
+        }
         return jsonResponse(400, { ok: false, error: 'PROJECT_COORDINATOR_FAILED' })
       }
     },

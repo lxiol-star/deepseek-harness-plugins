@@ -25,7 +25,7 @@ export interface WorkspaceGitInfo {
   readonly projectKey?: string
   /** Display name of the project, usually the repository name. */
   readonly projectLabel?: string
-  /** Raw remote URL as configured (kept for tooltips). */
+  /** Raw remote URL as configured, with embedded credentials removed (kept for tooltips). */
   readonly remote?: string
   /** Absolute repository root, when the Workspace is inside one. */
   readonly root?: string
@@ -67,6 +67,34 @@ export function normalizeRemote(raw: string): string {
   const host = parts.shift()
   if (host === undefined || parts.length === 0) return ''
   return `${host}/${parts.join('/')}`
+}
+
+/**
+ * Remove credentials embedded in one git remote URL.
+ *
+ * A remote may be configured as `https://x-access-token:<token>@host/owner/repo`,
+ * and the board shows the remote in the UI and stores it in the coordinator
+ * record, so the token must never leave the host. Only the URL userinfo is
+ * dropped; scp-like `user@host:path` remotes carry no secret and are kept as
+ * configured. Malformed URLs fall back to a textual userinfo strip.
+ * @param raw - configured remote URL.
+ * @returns the URL without userinfo, or '' for an empty value.
+ */
+export function redactRemoteCredentials(raw: string): string {
+  const value = raw.trim()
+  if (value === '') return ''
+  if (value.includes('://')) {
+    try {
+      const url = new URL(value)
+      if (url.username === '' && url.password === '') return value
+      url.username = ''
+      url.password = ''
+      return url.toString()
+    } catch {
+      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
+    }
+  }
+  return value
 }
 
 /**

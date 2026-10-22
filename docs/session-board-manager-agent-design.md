@@ -544,3 +544,16 @@ M0 通过后再开 M1，避免把「面板 UI」建在一个没验证的 Agent �
 **后续**
 
 - M4：mux SSE 增量、自动唤醒预算/暂停 UI、`approval/asked` 派生 needs-input、空工作区也列在面板、发布 0.4.0（版本/CHANGELOG/Release/SHA256SUMS 按交接文档 §6）。
+
+## 17. 项目树与项目协调会话（0.7–0.8）
+
+管理 Agent 是全局的；同一个 git 仓库在不同分支上开多个工作区时，还需要**按项目**组织与派活。0.7/0.8 在其上追加：
+
+- **项目发现**：Host 只对 `workspaceRegistry.list()` 的路径执行 3 条短 git 命令（remote/branch/root），按归一化的 `origin`（https/ssh/scp 同 key）分组；120s 缓存、6 并发、单条失败降级为路径树。认证路由 `GET /api/session-board/workspace-meta` 返回 `{workspaceId,title,path,branch,projectKey,projectLabel,remote,root}`，remote 中的 userinfo 凭据在返回前脱敏。
+- **项目树**：客户端分组方式「项目树」使用元数据把同一仓库的分支工作区收进项目节点（分支名为副标题），没有会话的分支也以 0 计数静态行展示；非 git 工作区保持原路径树；项目/路径节点复用现有可折叠树。
+- **项目协调会话**：项目节点「项目会话」懒创建一个普通 DSH 会话（主工作区、`项目协调台 · <label>`），映射持久化在独立域 `dsh_session_board_projects`。工具：`project_overview`、`project_assign_task`（只允许项目内工作区，建任务会话+首条 brief）、`project_message_session`（项目内会话排队消息）、`project_session_status`；项目内工作会话额外获得 `report_to_coordinator`（可带 taskId，更新本项目任务备注）。协调→worker、worker→协调都走官方 `session.prompt`，可审计；不删除会话/工作区/git 数据。
+- **幂等与恢复**：`ensure()` 先合并 in-flight 再读持久记录；持久记录存在但没有会话时先校验（list/inspect）再重建；创建失败回滚记录，重试可恢复；controller 改写的 session id 全程以实际 id 为准。
+- **安全边界**：taskId 只能命中本项目任务；brief/消息/汇报/ID 限长；项目 key 在路由与 ensure 双重校验；旧协调记录的 remote 在打开时懒迁移为脱敏值。
+
+设计取舍：暂不实现 git worktree 自动建分支（需确认命名/基分支策略）；子会话之间不直连，由协调会话转发。
+

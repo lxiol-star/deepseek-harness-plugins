@@ -37,6 +37,7 @@ export declare const en: {
     readonly 'workspace.unassigned': "Unassigned workspace";
     readonly 'workspace.coordinator': "Project session";
     readonly 'workspace.coordinatorHint': "Open or create this project's coordinator session";
+    readonly 'workspace.coordinatorFailed': "Could not open the project session. Try again.";
     readonly 'batch.scopeMain': "Selected main session";
     readonly 'batch.scopeChild': "Child of {parent} (parentSession)";
     readonly 'batch.snapshot': "In-progress snapshot";
@@ -147,6 +148,7 @@ export declare const en: {
     readonly 'a11y.list': "Session list";
     readonly 'a11y.card': "Open session {title}";
     readonly 'a11y.groupCount': "{group}, {count} sessions";
+    readonly 'a11y.groupBranchCount': "{group}, branch {branch}, {count} sessions";
     readonly 'manager.title': "Manager panel";
     readonly 'manager.entry': "Manager panel";
     readonly 'manager.open': "Open manager panel";

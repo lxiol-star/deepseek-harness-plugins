@@ -4,11 +4,15 @@ import {
   MANAGER_STATE_KEY,
   MANAGER_STATE_TABLE,
   MANAGER_TASK_TABLE,
+  PROJECT_COORDINATOR_TABLE,
+  PROJECT_DOMAIN_NAME,
   emptyManagerState,
   managerDomainSpec,
   managerTaskSchema,
   managerStateSchema,
+  projectDomainSpec,
 } from '../src/host/manager/domain.ts'
+import type { ManagerCoordinatorRecord } from '../src/host/manager/domain.ts'
 import { MANAGER_NOTE_MAX, MANAGER_SELECTION_MAX } from '../src/shared/manager.ts'
 
 /** The state an absent or unusable record normalizes to. */
@@ -176,5 +180,55 @@ describe('managerDomainSpec', () => {
     expect(managerDomainSpec.tables[MANAGER_STATE_TABLE]?.valueSchema.parse(null)).toEqual(EMPTY_STATE)
     expect(managerDomainSpec.tables[MANAGER_TASK_TABLE]?.valueSchema.parse(null))
       .toMatchObject({ id: '', title: 'task', status: 'pending' })
+  })
+})
+
+describe('projectDomainSpec', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** Coordinator row schema as the domain opener reads it. */
+  const coordinatorSchema = projectDomainSpec.tables[PROJECT_COORDINATOR_TABLE]
+    ?.valueSchema as { parse(value: unknown): ManagerCoordinatorRecord }
+  const row = {
+    projectKey: 'github.com/me/i-ai-gw',
+    label: 'i-ai-gw',
+    sessionId: 'session-1',
+    workspaceId: 'wa',
+    createdAt: 7,
+    remote: 'git@github.com:me/i-ai-gw.git',
+  }
+
+  it('declares its own domain, version and coordinator table', () => {
+    expect(projectDomainSpec.name).toBe(PROJECT_DOMAIN_NAME)
+    expect(projectDomainSpec.name).toBe('dsh_session_board_projects')
+    expect(projectDomainSpec.version).toBe(1)
+    expect(projectDomainSpec.invalidRecords).toBe('backup-and-skip')
+    expect(Object.keys(projectDomainSpec.tables)).toEqual([PROJECT_COORDINATOR_TABLE])
+    expect(PROJECT_COORDINATOR_TABLE).toBe('coordinators')
+  })
+
+  it('keeps a complete coordinator row unchanged', () => {
+    expect(coordinatorSchema.parse(row)).toEqual(row)
+  })
+
+  it('fills a missing label and timestamp so old rows stay readable', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(12_345)
+    const parsed = coordinatorSchema.parse({ projectKey: 'github.com/me/i-ai-gw', sessionId: 's', workspaceId: 'w' })
+    expect(parsed).toMatchObject({
+      projectKey: 'github.com/me/i-ai-gw', label: 'i-ai-gw', sessionId: 's', workspaceId: 'w', createdAt: 12_345,
+    })
+    expect(parsed.remote).toBeUndefined()
+  })
+
+  it('drops an empty remote and keeps a configured one', () => {
+    expect(coordinatorSchema.parse({ ...row, remote: '' }).remote).toBeUndefined()
+    expect(coordinatorSchema.parse(row).remote).toBe('git@github.com:me/i-ai-gw.git')
+  })
+
+  it('rejects an incomplete identity so the domain backup-and-skips the row', () => {
+    expect(() => coordinatorSchema.parse({ projectKey: 'p' })).toThrow('incomplete')
+    expect(() => coordinatorSchema.parse(null)).toThrow('incomplete')
   })
 })

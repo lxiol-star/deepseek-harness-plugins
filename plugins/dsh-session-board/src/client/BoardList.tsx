@@ -33,9 +33,15 @@ export interface BoardListProps {
   backToTop?: boolean
   /** Workspace id → git facts; the project tree uses it, path fallback ignores it. */
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>> | undefined
-  /** Open (creating on first use) a project's coordinator session. */
-  onOpenCoordinator?: ((projectKey: string) => void) | undefined
+  /**
+   * Open (creating on first use) a project's coordinator session.
+   * A returned promise keeps the project's button busy until it settles.
+   */
+  onOpenCoordinator?: ((projectKey: string) => void | Promise<void>) | undefined
 }
+
+/** Per-project coordinator button state, keyed by normalized project key. */
+type CoordinatorState = Readonly<Record<string, 'pending' | 'failed'>>
 
 /** One group heading. */
 function GroupHeader({
@@ -88,21 +94,75 @@ export function BoardList({
   // applies when there is no workspace hierarchy to show either.
   const hasProjectNodes = grouping === 'tree'
     && Object.values(workspaceMeta ?? {}).some(info => info.projectKey !== undefined)
+  const [coordinator, setCoordinator] = useState<CoordinatorState>({})
+  const coordinatorBusy = useRef<Set<string>>(new Set())
   if (total === 0 && !hasProjectNodes) return <div className="sb-empty">{t(emptyKey)}</div>
+
+  // The host creates the session on first use, so a slow round trip must keep
+  // the button from firing a second create. State is per project: acting on B
+  // must not clear or re-enable A's pending state. Rejections from the callback
+  // are the failure signal, so the button surfaces them as an inline error.
+  const clearCoordinator = (projectKey: string): void => {
+    setCoordinator(current => {
+      if (!(projectKey in current)) return current
+      const next = { ...current }
+      delete next[projectKey]
+      return next
+    })
+  }
+  const failCoordinator = (projectKey: string): void => {
+    coordinatorBusy.current.delete(projectKey)
+    setCoordinator(current => ({ ...current, [projectKey]: 'failed' }))
+  }
+  const openCoordinator = (projectKey: string): void => {
+    if (onOpenCoordinator === undefined || coordinatorBusy.current.has(projectKey)) return
+    coordinatorBusy.current.add(projectKey)
+    setCoordinator(current => ({ ...current, [projectKey]: 'pending' }))
+    let result: void | Promise<void>
+    try {
+      result = onOpenCoordinator(projectKey)
+    } catch {
+      failCoordinator(projectKey)
+      return
+    }
+    if (result === undefined) {
+      coordinatorBusy.current.delete(projectKey)
+      clearCoordinator(projectKey)
+      return
+    }
+    void result.then(
+      () => {
+        coordinatorBusy.current.delete(projectKey)
+        clearCoordinator(projectKey)
+      },
+      () => { failCoordinator(projectKey) },
+    )
+  }
 
   if (grouping !== 'status') {
     const renderNode = (node: WorkspaceNode): ReactElement => {
       const open = collapsed?.[node.key] !== true
       const title = node.title || t('workspace.unassigned')
-      const header = <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={t('a11y.groupCount', { group: title, count: node.count })}>
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span>
-      </button>
+      // A leaf with no cards and no children has nothing to disclose; render a
+      // static heading instead of a fake expand/collapse control.
+      const expandable = node.kind === 'project' || node.entries.length > 0 || node.children.length > 0
+      const label = node.subtitle === undefined
+        ? t('a11y.groupCount', { group: title, count: node.count })
+        : t('a11y.groupBranchCount', { group: title, branch: node.subtitle, count: node.count })
+      const content = <><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span></>
+      const header = expandable
+        ? <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={label}><span aria-hidden="true">{open ? '▾' : '▸'}</span>{content}</button>
+        : <div className="sb-group-head sb-group-head--static" title={node.path}><span className="sb-workspace-spacer" aria-hidden="true" />{content}</div>
       const projectKey = node.projectKey
+      const state = projectKey === undefined ? undefined : coordinator[projectKey]
+      const pending = state === 'pending'
+      const failed = state === 'failed'
       return <section className="sb-workspace-node" key={node.key} data-open={open ? 'true' : 'false'} data-kind={node.kind}>
         {node.kind === 'project' && projectKey !== undefined && onOpenCoordinator !== undefined
-          ? <div className="sb-workspace-head-row">{header}<button type="button" className="sb-workspace-action" title={t('workspace.coordinatorHint')} onClick={() => onOpenCoordinator(projectKey)}>{t('workspace.coordinator')}</button></div>
+          ? <div className="sb-workspace-head-row">{header}<button type="button" className="sb-workspace-action" title={t('workspace.coordinatorHint')} disabled={pending} aria-busy={pending ? true : undefined} onClick={() => openCoordinator(projectKey)}>{t('workspace.coordinator')}</button></div>
           : header}
-        {open ? <div className="sb-workspace-body">
+        {failed ? <p className="sb-workspace-error" role="alert">{t('workspace.coordinatorFailed')}</p> : null}
+        {expandable && open ? <div className="sb-workspace-body">
           {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} workspaceMeta={workspaceMeta} onOpenCoordinator={onOpenCoordinator} /> : null}
           {node.children.map(renderNode)}
         </div> : null}

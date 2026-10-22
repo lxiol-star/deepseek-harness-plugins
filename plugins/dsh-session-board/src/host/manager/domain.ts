@@ -112,7 +112,8 @@ export interface ManagerCoordinatorRecord {
   readonly sessionId: string
   readonly workspaceId: string
   readonly createdAt: number
-    readonly remote?: string
+  /** Display remote of the project, with embedded credentials removed. */
+  readonly remote?: string
 }
 
 /** Normalize one coordinator row; an empty identity is unusable. */

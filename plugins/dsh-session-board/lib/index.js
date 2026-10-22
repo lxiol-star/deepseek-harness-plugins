@@ -764,7 +764,24 @@ function isManagerTaskStatus(value) {
 var MANAGER_ID_MAX = 200;
 var MANAGER_TITLE_MAX = 160;
 var MANAGER_NOTE_MAX = 2e3;
+var MANAGER_PROMPT_MAX = 8e3;
 var MANAGER_SELECTION_MAX = 500;
+var ProjectCoordinatorError = class extends Error {
+  /**
+   * @param status - wire status: 400 for an unusable request, 500 for a server failure.
+   * @param code - stable error code returned to the caller.
+   * @param message - actionable description for logs and tools.
+   * @param options - standard `Error` options, typically `cause`.
+   */
+  constructor(status, code, message, options) {
+    super(message, options);
+    this.status = status;
+    this.code = code;
+    this.name = "ProjectCoordinatorError";
+  }
+  status;
+  code;
+};
 function isManagerId(value) {
   return typeof value === "string" && value.length > 0 && value.length <= MANAGER_ID_MAX && !value.includes("\0");
 }
@@ -2210,6 +2227,9 @@ function createManagerRoutes(handlers) {
         return jsonResponse(200, { ok: true, ...await handlers.projectCoordinator(await readJsonBody(request)) });
       } catch (error) {
         handlers.warn(`dsh-session-board: project coordinator failed: ${describe2(error)}`);
+        if (error instanceof ProjectCoordinatorError) {
+          return jsonResponse(error.status, { ok: false, error: error.code });
+        }
         return jsonResponse(400, { ok: false, error: "PROJECT_COORDINATOR_FAILED" });
       }
     }
@@ -2219,6 +2239,7 @@ function createManagerRoutes(handlers) {
 
 // src/host/manager/projects.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
+import { basename } from "node:path";
 
 // src/host/workspace-meta.ts
 import { execFile } from "node:child_process";
@@ -2246,6 +2267,22 @@ function normalizeRemote(raw) {
   const host = parts.shift();
   if (host === void 0 || parts.length === 0) return "";
   return `${host}/${parts.join("/")}`;
+}
+function redactRemoteCredentials(raw) {
+  const value = raw.trim();
+  if (value === "") return "";
+  if (value.includes("://")) {
+    try {
+      const url = new URL(value);
+      if (url.username === "" && url.password === "") return value;
+      url.username = "";
+      url.password = "";
+      return url.toString();
+    } catch {
+      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
+    }
+  }
+  return value;
 }
 function projectLabel(key) {
   const parts = key.split("/");
@@ -2325,7 +2362,8 @@ function createWorkspaceMetaRoute(options) {
       ...facts.branch === void 0 ? {} : { branch: facts.branch },
       ...projectKey === "" ? {} : { projectKey },
       ...label === null ? {} : { projectLabel: label },
-      ...facts.remote === void 0 ? {} : { remote: facts.remote },
+      // A configured remote can embed a credential; never send it to the page.
+      ...facts.remote === void 0 ? {} : { remote: redactRemoteCredentials(facts.remote) },
       ...facts.root === void 0 ? {} : { root: facts.root }
     };
   };
@@ -2358,6 +2396,7 @@ function createWorkspaceMetaRoute(options) {
 var PROMPT_TIMEOUT_MS = 3e4;
 var PROJECT_CACHE_MS = 12e4;
 var PROBE_CONCURRENCY2 = 6;
+var SESSION_CHECK_TIMEOUT_MS = 5e3;
 var LINE_OUTPUT2 = {
   schema: { type: "array", items: { type: "string" } },
   render: (_args, value) => {
@@ -2373,6 +2412,11 @@ function argString2(input, name2, tool) {
   const value = input[name2];
   if (typeof value !== "string" || value.trim() === "") throw new Error(`${tool}: "${name2}" must be a non-empty string`);
   return value.trim();
+}
+function argId(input, name2, tool) {
+  const value = argString2(input, name2, tool);
+  if (!isManagerId(value)) throw new Error(`${tool}: "${name2}" must be a non-empty bounded id`);
+  return value;
 }
 var COORDINATOR_POLICY = [
   "You are the coordinator of one git project in the DSH session board.",
@@ -2390,16 +2434,39 @@ var ProjectCoordinators = class {
   }
   deps;
   cached = null;
+  inflightProjects = null;
   installed = /* @__PURE__ */ new Map();
   inflight = /* @__PURE__ */ new Map();
+  disposed = false;
   /**
    * Probe every registered Workspace and group them by git origin.
+   *
+   * Concurrent callers share one probe pass: Agent creation instantiates the
+   * report tool for every session, and without the shared pass a burst would
+   * spawn one git probe storm per session.
    * @param force - ignore the cache.
    * @returns projects, sorted by label.
    */
   async projects(force = false) {
     const now = this.now();
     if (!force && this.cached !== null && now - this.cached.at < PROJECT_CACHE_MS) return this.cached.projects;
+    const running = this.inflightProjects;
+    if (running !== null) return await running;
+    const task = this.probeProjects(now);
+    this.inflightProjects = task;
+    try {
+      return await task;
+    } finally {
+      if (this.inflightProjects === task) this.inflightProjects = null;
+    }
+  }
+  /**
+   * One probe pass over the registry. Failures are per Workspace: a broken
+   * checkout costs its own project row only.
+   * @param at - cache timestamp taken before the probes start.
+   * @returns projects, sorted by label.
+   */
+  async probeProjects(at) {
     const registry = this.deps.ctx.workspaceRegistry;
     const listed = registry.list();
     const probe = this.deps.probe ?? probeWorkspaceGit;
@@ -2424,7 +2491,7 @@ var ProjectCoordinators = class {
       const label = projectLabel(key) ?? key;
       let project = grouped.get(key);
       if (project === void 0) {
-        project = { key, label, remote: info.remote, workspaces: [] };
+        project = { key, label, remote: redactRemoteCredentials(info.remote), workspaces: [] };
         grouped.set(key, project);
       }
       project.workspaces.push({
@@ -2435,7 +2502,7 @@ var ProjectCoordinators = class {
       });
     }
     const projects = [...grouped.values()].map((project) => ({ ...project, workspaces: [...project.workspaces].sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path)) })).sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
-    this.cached = { at: now, projects };
+    this.cached = { at, projects };
     return projects;
   }
   /**
@@ -2452,50 +2519,128 @@ var ProjectCoordinators = class {
    * @returns the coordinator identity.
    */
   async ensure(projectKey) {
-    const existing = this.deps.coordinators.get(projectKey);
-    if (existing !== void 0) {
-      return { projectKey, label: existing.label, sessionId: existing.sessionId, workspaceId: existing.workspaceId, created: false };
+    if (!isManagerId(projectKey)) {
+      throw new ProjectCoordinatorError(400, "PROJECT_INVALID", "projectKey must be a non-empty bounded string");
     }
     const running = this.inflight.get(projectKey);
     if (running !== void 0) return await running;
-    const task = (async () => {
-      const project = await this.view(projectKey);
-      if (project === null) throw new Error(`unknown project "${projectKey}"`);
-      const workspace = pickCoordinatorWorkspace(project);
-      const sessionId = randomUUID2();
-      const record2 = {
-        projectKey,
-        label: project.label,
-        sessionId,
-        workspaceId: workspace.workspaceId,
-        createdAt: this.now(),
-        ...project.remote === void 0 ? {} : { remote: project.remote }
-      };
-      await this.deps.coordinators.put(projectKey, record2);
-      try {
-        const created = await this.deps.ctx.sessionController.create({ sessionId, workspaceId: workspace.workspaceId });
-        if (created.sessionId !== sessionId) {
-          const corrected = { ...record2, sessionId: created.sessionId };
-          await this.deps.coordinators.put(projectKey, corrected);
-        }
-        try {
-          await this.deps.ctx.sessionController.rename({ sessionId, title: `\u9879\u76EE\u534F\u8C03\u53F0 \xB7 ${project.label}` });
-        } catch (error) {
-          this.deps.warn(`dsh-session-board: coordinator rename failed: ${String(error)}`);
-        }
-        return { projectKey, label: project.label, sessionId, workspaceId: workspace.workspaceId, created: true };
-      } catch (error) {
-        await this.deps.coordinators.delete(projectKey).catch(() => false);
-        this.deps.warn(`dsh-session-board: coordinator create failed: ${String(error)}`);
-        throw error;
-      }
-    })();
+    const task = this.open(projectKey);
     this.inflight.set(projectKey, task);
     try {
       return await task;
     } finally {
-      this.inflight.delete(projectKey);
+      if (this.inflight.get(projectKey) === task) this.inflight.delete(projectKey);
     }
+  }
+  /**
+   * Resolve or provision one coordinator. A persisted record whose session no
+   * longer exists (a crash between the record write and session creation, or a
+   * user-deleted session) is dropped and reprovisioned instead of handing the
+   * client a dead id.
+   * @param projectKey - validated normalized origin key.
+   * @returns the coordinator identity.
+   */
+  async open(projectKey) {
+    const existing = this.deps.coordinators.get(projectKey);
+    if (existing !== void 0) {
+      const state = await this.coordinatorSessionState(existing.sessionId);
+      if (state !== "missing") {
+        if (existing.remote !== void 0) {
+          const redacted = redactRemoteCredentials(existing.remote);
+          if (redacted !== existing.remote) {
+            await this.deps.coordinators.put(projectKey, { ...existing, remote: redacted }).catch(
+              (error) => this.deps.warn(`dsh-session-board: coordinator record redaction failed: ${String(error)}`)
+            );
+          }
+        }
+        return { projectKey, label: existing.label, sessionId: existing.sessionId, workspaceId: existing.workspaceId, created: false };
+      }
+      this.deps.warn(`dsh-session-board: coordinator record for "${projectKey}" has no session; recreating`);
+      await this.deps.coordinators.delete(projectKey).catch(() => false);
+    }
+    const project = await this.view(projectKey);
+    if (project === null) throw new ProjectCoordinatorError(400, "PROJECT_UNKNOWN", `unknown project "${projectKey}"`);
+    const workspace = pickCoordinatorWorkspace(project);
+    const requestedSessionId = randomUUID2();
+    let record2 = {
+      projectKey,
+      label: project.label,
+      sessionId: requestedSessionId,
+      workspaceId: workspace.workspaceId,
+      createdAt: this.now(),
+      ...project.remote === void 0 ? {} : { remote: project.remote }
+    };
+    await this.deps.coordinators.put(projectKey, record2);
+    try {
+      const created = await this.deps.ctx.sessionController.create({
+        sessionId: requestedSessionId,
+        workspaceId: workspace.workspaceId
+      });
+      const sessionId = created.sessionId;
+      if (sessionId !== requestedSessionId) {
+        record2 = { ...record2, sessionId };
+        await this.deps.coordinators.put(projectKey, record2);
+      }
+      try {
+        await this.deps.ctx.sessionController.rename({ sessionId, title: `\u9879\u76EE\u534F\u8C03\u53F0 \xB7 ${project.label}` });
+      } catch (error) {
+        this.deps.warn(`dsh-session-board: coordinator rename failed: ${String(error)}`);
+      }
+      this.installProjectWorkers(project);
+      return { projectKey, label: project.label, sessionId, workspaceId: workspace.workspaceId, created: true };
+    } catch (error) {
+      await this.deps.coordinators.delete(projectKey).catch(() => false);
+      this.deps.warn(`dsh-session-board: coordinator create failed: ${String(error)}`);
+      throw new ProjectCoordinatorError(
+        500,
+        "COORDINATOR_UNAVAILABLE",
+        `coordinator provisioning failed for "${project.label}"`,
+        { cause: error }
+      );
+    }
+  }
+  /**
+   * Install the report tool on every live Agent of one project's sessions.
+   * @param project - project whose coordinator just became available.
+   */
+  installProjectWorkers(project) {
+    const registry = this.deps.ctx.workspaceRegistry;
+    for (const workspace of project.workspaces) {
+      const listed = registry.get(workspace.workspaceId);
+      for (const sessionId of listed?.sessionIds ?? []) {
+        const agent = this.deps.ctx.agents.get(sessionId);
+        if (agent !== void 0) this.installAgent(agent);
+      }
+    }
+  }
+  /**
+   * Whether a persisted coordinator id still names a Session.
+   *
+   * The header listing is the primary check: it reads headers, not event logs,
+   * so verifying a coordinator that already exists stays cheap. `inspect` is
+   * only the fallback for a failed listing (it reads the full log). `unknown` is
+   * deliberate too: a failed check must not trigger a second coordinator, so
+   * only a successful listing that omits the id counts as proof the Session is
+   * gone.
+   * @param sessionId - persisted coordinator session id.
+   * @returns `live`, `missing`, or `unknown` when existence cannot be checked.
+   */
+  async coordinatorSessionState(sessionId) {
+    if (this.deps.ctx.agents.get(sessionId) !== void 0) return "live";
+    const controller = this.deps.ctx.sessionController;
+    try {
+      const listed = await controller.list({}, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS));
+      return listed.items.some((item) => item.sessionId === sessionId) ? "live" : "missing";
+    } catch {
+    }
+    if (typeof controller.inspect === "function") {
+      try {
+        await controller.inspect(sessionId, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS));
+        return "live";
+      } catch {
+      }
+    }
+    return "unknown";
   }
   /**
    * Install project tools on one Agent: coordinator tools for a coordinator
@@ -2503,65 +2648,88 @@ var ProjectCoordinators = class {
    * @param agent - every published Agent.
    */
   installAgent(agent) {
-    if (this.installed.has(agent.id)) return;
+    if (this.disposed || this.installed.has(agent.id)) return;
     const coordinator = [...this.deps.coordinators.entries()].find(([, record2]) => record2.sessionId === agent.id);
     if (coordinator !== void 0) {
       this.installCoordinator(agent, coordinator[0]);
       return;
     }
-    void this.installWorker(agent);
+    const slot = { disposed: false, disposers: [] };
+    this.installed.set(agent.id, slot);
+    void this.installWorker(agent, slot);
   }
   /** Drop one Agent's tool registrations. */
   disposeAgent(agentId) {
-    const dispose = this.installed.get(agentId);
-    if (dispose === void 0) return;
+    const slot = this.installed.get(agentId);
+    if (slot === void 0) return;
     this.installed.delete(agentId);
-    dispose();
+    this.disposeSlot(slot);
   }
   /** Release every registration; unload path. */
   dispose() {
-    for (const dispose of [...this.installed.values()]) dispose();
+    this.disposed = true;
+    for (const slot of [...this.installed.values()]) this.disposeSlot(slot);
     this.installed.clear();
+  }
+  /** Run one slot's disposers once; also cancels a still-pending install. */
+  disposeSlot(slot) {
+    slot.disposed = true;
+    for (const dispose of slot.disposers.reverse()) dispose();
+    slot.disposers.length = 0;
   }
   /** Register coordinator tools and prompt sections on one Agent. */
   installCoordinator(agent, projectKey) {
-    const disposers = [];
+    const slot = { disposed: false, disposers: [] };
     try {
       for (const definition of coordinatorToolDefinitions(this, projectKey)) {
-        disposers.push(agent.ctx.tools.register(definition));
+        slot.disposers.push(agent.ctx.tools.register(definition));
       }
-      disposers.push(agent.ctx.systemPrompt.section({
+      slot.disposers.push(agent.ctx.systemPrompt.section({
         name: "session-board:project-coordinator",
         order: 900,
         text: COORDINATOR_POLICY
       }));
-      this.installed.set(agent.id, () => {
-        for (const dispose of disposers.reverse()) dispose();
-      });
+      this.installed.set(agent.id, slot);
     } catch (error) {
-      for (const dispose of disposers.reverse()) dispose();
+      this.disposeSlot(slot);
       this.deps.warn(`dsh-session-board: coordinator tools failed: ${String(error)}`);
     }
   }
-  /** Worker tool: report to the project coordinator if this session belongs to a project. */
-  async installWorker(agent) {
+  /**
+   * Worker tool: report to the project coordinator if this session belongs to
+   * a project. Runs detached; the slot bounds the damage of a late completion.
+   * @param agent - published Agent whose session may be a project worker.
+   * @param slot - slot already owned by this Agent in {@link installed}.
+   */
+  async installWorker(agent, slot) {
     try {
       const projects = await this.projects();
+      if (slot.disposed) return;
       const workspace = this.deps.ctx.workspaceRegistry.list().find((candidate) => candidate.sessionIds.includes(agent.id));
-      if (workspace === void 0) return;
+      if (workspace === void 0) {
+        this.dropSlot(agent.id, slot);
+        return;
+      }
       for (const project of projects) {
         if (!project.workspaces.some((candidate) => candidate.workspaceId === workspace.id)) continue;
         const coordinator = this.deps.coordinators.get(project.key);
-        if (coordinator === void 0) return;
-        if (this.installed.has(agent.id)) return;
+        if (coordinator === void 0) {
+          this.dropSlot(agent.id, slot);
+          return;
+        }
         const definition = reportToolDefinition(this, project.key, coordinator.sessionId, agent.id);
-        const dispose = agent.ctx.tools.register(definition);
-        this.installed.set(agent.id, dispose);
+        slot.disposers.push(agent.ctx.tools.register(definition));
         return;
       }
+      this.dropSlot(agent.id, slot);
     } catch (error) {
+      this.dropSlot(agent.id, slot);
       this.deps.warn(`dsh-session-board: worker project tool failed: ${String(error)}`);
     }
+  }
+  /** Remove an Agent's slot when no tool was registered for it. */
+  dropSlot(agentId, slot) {
+    if (this.installed.get(agentId) === slot) this.installed.delete(agentId);
   }
   /** One project view with live session/task counts. */
   async overviewLines(projectKey) {
@@ -2596,13 +2764,24 @@ var ProjectCoordinators = class {
     tasks.sort((left, right) => right.updatedAt - left.updatedAt);
     return tasks;
   }
-  /** Resolve one project session and assert project membership. */
-  projectSession(projectKey, sessionId) {
+  /**
+   * Resolve one project session and assert project membership.
+   *
+   * Membership is read from a TTL-refreshed project view, never the raw cache
+   * field: the cache is only refreshed by project listings, so a long-lived
+   * plugin would otherwise authorize against a snapshot of unknown age.
+   * @param projectKey - coordinator project key.
+   * @param sessionId - untrusted session id from a tool call.
+   * @returns the owning workspace id when the session belongs to the project.
+   */
+  async projectSession(projectKey, sessionId) {
+    const project = await this.view(projectKey);
+    if (project === null) throw new Error(`unknown project "${projectKey}"`);
+    const workspaceIds = new Set(project.workspaces.map((workspace) => workspace.workspaceId));
     const registry = this.deps.ctx.workspaceRegistry;
     for (const workspace of registry.list()) {
       if (!workspace.sessionIds.includes(sessionId)) continue;
-      const project = this.cached?.projects.find((candidate) => candidate.workspaces.some((row) => row.workspaceId === workspace.id));
-      if (project?.key === projectKey) return { workspaceId: workspace.id };
+      if (workspaceIds.has(workspace.id)) return { workspaceId: workspace.id };
     }
     throw new Error(`session "${sessionId}" is not part of project "${projectKey}"`);
   }
@@ -2631,21 +2810,29 @@ var ProjectCoordinators = class {
     const now = this.now();
     const record2 = {
       id: randomUUID2(),
-      title: input.title.slice(0, MANAGER_TITLE_MAX),
+      title: truncateCodePoints(input.title, MANAGER_TITLE_MAX),
       status: "assigned",
       workspaceId: input.workspaceId,
       createdAt: now,
       updatedAt: now
     };
     await this.deps.tasks.put(record2.id, record2);
+    let sessionId;
     try {
       const created = await this.deps.ctx.sessionController.create({ workspaceId: input.workspaceId });
-      const withSession = { ...record2, sessionId: created.sessionId, updatedAt: this.now() };
+      sessionId = created.sessionId;
+      const withSession = { ...record2, sessionId, updatedAt: this.now() };
       await this.deps.tasks.put(record2.id, withSession);
-      await this.prompt(created.sessionId, input.brief);
+      await this.prompt(created.sessionId, truncateCodePoints(input.brief, MANAGER_PROMPT_MAX));
       return withSession;
     } catch (error) {
-      const failed = { ...record2, status: "failed", note: `dispatch failed: ${String(error)}`.slice(0, 2e3), updatedAt: this.now() };
+      const failed = {
+        ...record2,
+        ...sessionId === void 0 ? {} : { sessionId },
+        status: "failed",
+        note: `dispatch failed: ${String(error)}`.slice(0, MANAGER_NOTE_MAX),
+        updatedAt: this.now()
+      };
       await this.deps.tasks.put(record2.id, failed);
       throw error;
     }
@@ -2657,8 +2844,8 @@ var ProjectCoordinators = class {
    * @param text - message text.
    */
   async messageSession(projectKey, sessionId, text) {
-    this.projectSession(projectKey, sessionId);
-    await this.prompt(sessionId, text);
+    await this.projectSession(projectKey, sessionId);
+    await this.prompt(sessionId, truncateCodePoints(text, MANAGER_PROMPT_MAX));
   }
   /**
    * Status lines for one project session.
@@ -2667,7 +2854,7 @@ var ProjectCoordinators = class {
    * @returns human-readable lines.
    */
   async sessionStatus(projectKey, sessionId) {
-    this.projectSession(projectKey, sessionId);
+    await this.projectSession(projectKey, sessionId);
     const level = this.deps.mux.snapshot().sources[sessionId];
     const agent = this.deps.ctx.agents.get(sessionId);
     let title;
@@ -2688,6 +2875,10 @@ var ProjectCoordinators = class {
   }
   /**
    * Receive one worker report and relay it to the coordinator session.
+   *
+   * `taskId` comes from the model and is therefore untrusted: only a task whose
+   * Workspace (or session) belongs to this project may be annotated, so a
+   * worker cannot overwrite another project's task note by passing its id.
    * @param projectKey - project key.
    * @param senderSessionId - worker session.
    * @param text - report text.
@@ -2696,15 +2887,38 @@ var ProjectCoordinators = class {
   async report(projectKey, senderSessionId, text, taskId) {
     const record2 = this.deps.coordinators.get(projectKey);
     if (record2 === void 0) throw new Error(`project "${projectKey}" has no coordinator`);
-    const task = taskId === void 0 ? "" : `
-\u5173\u8054\u4EFB\u52A1\uFF1A${taskId}`;
-    await this.prompt(record2.sessionId, `[\u9879\u76EE\u6C47\u62A5 \xB7 ${record2.label} \xB7 \u6765\u81EA ${senderSessionId}] ${text}${task}`);
+    const body = truncateCodePoints(text, MANAGER_PROMPT_MAX);
+    let linked;
     if (taskId !== void 0) {
       const current = this.deps.tasks.get(taskId);
-      if (current !== void 0) {
-        const next = { ...current, note: text.slice(0, 2e3), updatedAt: this.now() };
-        await this.deps.tasks.put(taskId, next);
-      }
+      if (current !== void 0 && await this.taskInProject(projectKey, current)) linked = current;
+    }
+    const association = linked === void 0 ? "" : `
+\u5173\u8054\u4EFB\u52A1\uFF1A${linked.id}`;
+    await this.prompt(record2.sessionId, `[\u9879\u76EE\u6C47\u62A5 \xB7 ${record2.label} \xB7 \u6765\u81EA ${senderSessionId}] ${body}${association}`);
+    if (linked !== void 0) {
+      const next = { ...linked, note: truncateCodePoints(text, MANAGER_NOTE_MAX), updatedAt: this.now() };
+      await this.deps.tasks.put(linked.id, next);
+    }
+  }
+  /**
+   * Whether a task row belongs to one project.
+   * @param projectKey - coordinator project key.
+   * @param task - stored task row.
+   * @returns true when the task's workspace or session is a project member.
+   */
+  async taskInProject(projectKey, task) {
+    const project = await this.view(projectKey);
+    if (project === null) return false;
+    if (task.workspaceId !== void 0) {
+      return project.workspaces.some((workspace) => workspace.workspaceId === task.workspaceId);
+    }
+    if (task.sessionId === void 0) return false;
+    try {
+      await this.projectSession(projectKey, task.sessionId);
+      return true;
+    } catch {
+      return false;
     }
   }
   now() {
@@ -2712,7 +2926,8 @@ var ProjectCoordinators = class {
   }
 };
 function pickCoordinatorWorkspace(project) {
-  const main = project.workspaces.find((workspace) => workspace.path.split("/").filter(Boolean).pop() === project.label);
+  const label = project.label.toLowerCase();
+  const main = project.workspaces.find((workspace) => basename(workspace.path).toLowerCase() === label);
   const chosen = main ?? project.workspaces[0];
   if (chosen === void 0) throw new Error(`project "${project.label}" has no workspace`);
   return chosen;
@@ -2747,7 +2962,7 @@ function coordinatorToolDefinitions(projects, projectKey) {
         const task = await projects.assignTask(projectKey, {
           title: argString2(input, "title", "project_assign_task"),
           brief: argString2(input, "brief", "project_assign_task"),
-          workspaceId: argString2(input, "workspaceId", "project_assign_task")
+          workspaceId: argId(input, "workspaceId", "project_assign_task")
         });
         return [`- task ${task.id} created in workspace ${task.workspaceId ?? "?"}`, ...task.sessionId === void 0 ? [] : [`- session ${task.sessionId}`]];
       }
@@ -2767,7 +2982,7 @@ function coordinatorToolDefinitions(projects, projectKey) {
       output: LINE_OUTPUT2,
       async execute(args, _exec) {
         const input = argObject2(args, "project_message_session");
-        const sessionId = argString2(input, "sessionId", "project_message_session");
+        const sessionId = argId(input, "sessionId", "project_message_session");
         await projects.messageSession(projectKey, sessionId, argString2(input, "text", "project_message_session"));
         return [`- message queued for ${sessionId}`];
       }
@@ -2784,7 +2999,7 @@ function coordinatorToolDefinitions(projects, projectKey) {
       output: LINE_OUTPUT2,
       async execute(args, _exec) {
         const input = argObject2(args, "project_session_status");
-        return await projects.sessionStatus(projectKey, argString2(input, "sessionId", "project_session_status"));
+        return await projects.sessionStatus(projectKey, argId(input, "sessionId", "project_session_status"));
       }
     }
   ];
@@ -2806,7 +3021,7 @@ function reportToolDefinition(projects, projectKey, coordinatorSessionId, sender
     async execute(args, _exec) {
       const input = argObject2(args, "report_to_coordinator");
       const text = argString2(input, "text", "report_to_coordinator");
-      const taskId = typeof input.taskId === "string" && input.taskId !== "" ? input.taskId : void 0;
+      const taskId = isManagerId(input.taskId) ? input.taskId : void 0;
       await projects.report(projectKey, senderSessionId, text, taskId);
       return [`- report sent to coordinator ${coordinatorSessionId}`];
     }
@@ -2867,8 +3082,12 @@ function startManager(options) {
       wake: async (raw) => ({ wake: await service.wake(raw) }),
       projectCoordinator: async (raw) => {
         const body = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
-        if (typeof body.projectKey !== "string" || body.projectKey === "") throw new Error("projectKey is required");
-        if (projects === null) throw new Error("project coordinator store unavailable");
+        if (!isManagerId(body.projectKey)) {
+          throw new ProjectCoordinatorError(400, "PROJECT_INVALID", "projectKey must be a non-empty bounded string");
+        }
+        if (projects === null) {
+          throw new ProjectCoordinatorError(500, "COORDINATOR_UNAVAILABLE", "project coordinator store unavailable");
+        }
         const result = await projects.ensure(body.projectKey);
         return { projectKey: result.projectKey, label: result.label, sessionId: result.sessionId, workspaceId: result.workspaceId, created: result.created };
       },

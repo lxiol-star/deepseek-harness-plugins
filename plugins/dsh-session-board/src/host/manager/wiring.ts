@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { BoardFetchRoute } from '../routes.ts'
 import type { DomainSpec, DomainTableSpec } from '../domain.ts'
+import { ProjectCoordinatorError, isManagerId } from '../../shared/manager.ts'
 import { MANAGER_STATE_TABLE, MANAGER_TASK_TABLE, PROJECT_COORDINATOR_TABLE, managerDomainSpec, projectDomainSpec } from './domain.ts'
 import type { ManagerCoordinatorRecord, ManagerStateRecord, ManagerTaskRecord } from './domain.ts'
 import { EventMux } from './mux.ts'
@@ -115,8 +116,14 @@ export function startManager(options: ManagerWiringOptions): void {
       wake: async raw => ({ wake: await service.wake(raw) }),
       projectCoordinator: async raw => {
         const body = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as { projectKey?: unknown }) : {}
-        if (typeof body.projectKey !== 'string' || body.projectKey === '') throw new Error('projectKey is required')
-        if (projects === null) throw new Error('project coordinator store unavailable')
+        // `projectKey` becomes a storage key; the wire value is bounded exactly
+        // like every other id the manager panel accepts.
+        if (!isManagerId(body.projectKey)) {
+          throw new ProjectCoordinatorError(400, 'PROJECT_INVALID', 'projectKey must be a non-empty bounded string')
+        }
+        if (projects === null) {
+          throw new ProjectCoordinatorError(500, 'COORDINATOR_UNAVAILABLE', 'project coordinator store unavailable')
+        }
         const result = await projects.ensure(body.projectKey)
         return { projectKey: result.projectKey, label: result.label, sessionId: result.sessionId, workspaceId: result.workspaceId, created: result.created }
       },

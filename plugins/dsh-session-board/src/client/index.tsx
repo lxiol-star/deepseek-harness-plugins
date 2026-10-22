@@ -231,21 +231,20 @@ function useFilters(face: BoardFace, groups: ReturnType<BoardModel['getSnapshot'
  * retries.
  * @param face - board face for navigation.
  * @param projectKey - normalized git origin key of the project node.
+ * @throws Error when the host cannot provide a session; the board turns that
+ * into the project node's inline error and retries on the next click.
  */
 async function openProjectCoordinator(face: BoardFace, projectKey: string): Promise<void> {
-  try {
-    const response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ projectKey }),
-    })
-    const payload: unknown = await response.json().catch(() => null)
-    if (!response.ok || typeof payload !== 'object' || payload === null) return
-    const sessionId = (payload as { sessionId?: unknown }).sessionId
-    if (typeof sessionId === 'string' && sessionId !== '') face.openSession(sessionId)
-  } catch {
-    // Navigation is best-effort; a failed fetch must not break the list.
-  }
+  const response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectKey }),
+  })
+  const payload: unknown = await response.json().catch(() => null)
+  if (!response.ok || typeof payload !== 'object' || payload === null) throw new Error('PROJECT_COORDINATOR_FAILED')
+  const sessionId = (payload as { sessionId?: unknown }).sessionId
+  if (typeof sessionId !== 'string' || sessionId === '') throw new Error('PROJECT_COORDINATOR_FAILED')
+  face.openSession(sessionId)
 }
 
 /** The docked column's React root. */
@@ -261,7 +260,7 @@ function DockRoot({ face }: { face: BoardFace }): ReactElement {
     <BoardDock
       grouping={view.grouping}
       workspaceMeta={workspaceMeta}
-      onOpenCoordinator={(projectKey) => { void openProjectCoordinator(face, projectKey) }}
+      onOpenCoordinator={(projectKey) => openProjectCoordinator(face, projectKey)}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}
@@ -301,7 +300,12 @@ function OpenOverlayContent({ face }: { face: BoardFace }): ReactElement {
       open
       grouping={view.grouping}
       workspaceMeta={workspaceMeta}
-      onOpenCoordinator={(projectKey) => { void openProjectCoordinator(face, projectKey) }}
+      onOpenCoordinator={async (projectKey) => {
+        // Like a card click, leave the fullscreen board once the session is
+        // actually open; a failed request keeps it on screen with its error.
+        await openProjectCoordinator(face, projectKey)
+        setBoardOpen(false)
+      }}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}

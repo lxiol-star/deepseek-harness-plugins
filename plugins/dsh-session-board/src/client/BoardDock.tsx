@@ -55,7 +55,7 @@ export interface BoardDockProps {
   /** Workspace id → git facts, for the project tree. */
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>
   /** Open the coordinator session of one project. */
-  onOpenCoordinator?: (projectKey: string) => void
+  onOpenCoordinator?: (projectKey: string) => void | Promise<void>
 }
 
 /** A small icon button. */
@@ -147,7 +147,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.8.1"
+        data-session-board-version="0.8.2"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -178,7 +178,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.8.1"
+        data-session-board-version="0.8.2"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}

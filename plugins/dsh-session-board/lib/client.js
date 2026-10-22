@@ -623,22 +623,59 @@ function BoardList({
   workspaceMeta,
   onOpenCoordinator
 }) {
-  let total = groups.reduce((sum, group) => sum + group.entries.length, 0), hasProjectNodes = grouping === "tree" && Object.values(workspaceMeta ?? {}).some((info) => info.projectKey !== void 0);
+  let total = groups.reduce((sum, group) => sum + group.entries.length, 0), hasProjectNodes = grouping === "tree" && Object.values(workspaceMeta ?? {}).some((info) => info.projectKey !== void 0), [coordinator, setCoordinator] = (0, import_react4.useState)({}), coordinatorBusy = (0, import_react4.useRef)(/* @__PURE__ */ new Set());
   if (total === 0 && !hasProjectNodes) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
+  let clearCoordinator = (projectKey) => {
+    setCoordinator((current) => {
+      if (!(projectKey in current)) return current;
+      let next = { ...current };
+      return delete next[projectKey], next;
+    });
+  }, failCoordinator = (projectKey) => {
+    coordinatorBusy.current.delete(projectKey), setCoordinator((current) => ({ ...current, [projectKey]: "failed" }));
+  }, openCoordinator = (projectKey) => {
+    if (onOpenCoordinator === void 0 || coordinatorBusy.current.has(projectKey)) return;
+    coordinatorBusy.current.add(projectKey), setCoordinator((current) => ({ ...current, [projectKey]: "pending" }));
+    let result;
+    try {
+      result = onOpenCoordinator(projectKey);
+    } catch {
+      failCoordinator(projectKey);
+      return;
+    }
+    if (result === void 0) {
+      coordinatorBusy.current.delete(projectKey), clearCoordinator(projectKey);
+      return;
+    }
+    result.then(
+      () => {
+        coordinatorBusy.current.delete(projectKey), clearCoordinator(projectKey);
+      },
+      () => {
+        failCoordinator(projectKey);
+      }
+    );
+  };
   if (grouping !== "status") {
     let renderNode = (node) => {
-      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), header = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": t("a11y.groupCount", { group: title, count: node.count }), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), expandable = node.kind === "project" || node.entries.length > 0 || node.children.length > 0, label = node.subtitle === void 0 ? t("a11y.groupCount", { group: title, count: node.count }) : t("a11y.groupBranchCount", { group: title, branch: node.subtitle, count: node.count }), content = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: title }),
         node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", children: node.subtitle }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
-      ] }), projectKey = node.projectKey;
+      ] }), header = expandable ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": label, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+        content
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-group-head sb-group-head--static", title: node.path, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-spacer", "aria-hidden": "true" }),
+        content
+      ] }), projectKey = node.projectKey, state = projectKey === void 0 ? void 0 : coordinator[projectKey], pending = state === "pending", failed = state === "failed";
       return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("section", { className: "sb-workspace-node", "data-open": open ? "true" : "false", "data-kind": node.kind, children: [
         node.kind === "project" && projectKey !== void 0 && onOpenCoordinator !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-head-row", children: [
           header,
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "sb-workspace-action", title: t("workspace.coordinatorHint"), onClick: () => onOpenCoordinator(projectKey), children: t("workspace.coordinator") })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "sb-workspace-action", title: t("workspace.coordinatorHint"), disabled: pending, "aria-busy": pending ? !0 : void 0, onClick: () => openCoordinator(projectKey), children: t("workspace.coordinator") })
         ] }) : header,
-        open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-body", children: [
+        failed ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "sb-workspace-error", role: "alert", children: t("workspace.coordinatorFailed") }) : null,
+        expandable && open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-body", children: [
           node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, workspaceMeta, onOpenCoordinator }) : null,
           node.children.map(renderNode)
         ] }) : null
@@ -750,7 +787,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.1",
+      "data-session-board-version": "0.8.2",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -774,7 +811,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.1",
+      "data-session-board-version": "0.8.2",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1274,7 +1311,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.1",
+        "data-session-board-version": "0.8.2",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2031,11 +2068,18 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-workspace-head-row > .sb-group-head { flex: 1; min-width: 0; }
 .sb-workspace-action { flex: none; padding: 2px 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 10px; line-height: 16px; cursor: pointer; }
 .sb-workspace-action:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-workspace-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-workspace-action:disabled { opacity: .55; cursor: default; }
+.sb-workspace-error { margin: 2px 0 4px 18px; color: var(--dsw-alias-state-error-primary); font-size: 10px; line-height: 14px; }
 .sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }
 .sb-workspace-node > .sb-group-head { width: 100%; }
+/* A branch with no sessions has nothing to disclose: no pointer affordance. */
+.sb-workspace-node > .sb-group-head--static { cursor: default; }
+.sb-workspace-node > .sb-group-head--static:hover { color: var(--dsw-alias-label-secondary); }
+.sb-workspace-spacer { width: 10px; flex: 0 0 auto; }
 .sb-pill--archived { color: var(--dsw-alias-state-success-primary); }
 /* A session with no turns at all: placeholder, never summary typography. */
 .sb-line--empty {
@@ -2832,6 +2876,7 @@ var NS = "session-board", en = {
   "workspace.unassigned": "Unassigned workspace",
   "workspace.coordinator": "Project session",
   "workspace.coordinatorHint": "Open or create this project's coordinator session",
+  "workspace.coordinatorFailed": "Could not open the project session. Try again.",
   "batch.scopeMain": "Selected main session",
   "batch.scopeChild": "Child of {parent} (parentSession)",
   "batch.snapshot": "In-progress snapshot",
@@ -2942,6 +2987,7 @@ var NS = "session-board", en = {
   "a11y.list": "Session list",
   "a11y.card": "Open session {title}",
   "a11y.groupCount": "{group}, {count} sessions",
+  "a11y.groupBranchCount": "{group}, branch {branch}, {count} sessions",
   "manager.title": "Manager panel",
   "manager.entry": "Manager panel",
   "manager.open": "Open manager panel",
@@ -3083,6 +3129,7 @@ var NS = "session-board", en = {
   "workspace.unassigned": "\u672A\u5206\u914D\u5DE5\u4F5C\u533A",
   "workspace.coordinator": "\u9879\u76EE\u4F1A\u8BDD",
   "workspace.coordinatorHint": "\u6253\u5F00\u6216\u521B\u5EFA\u8BE5\u9879\u76EE\u7684\u534F\u8C03\u4F1A\u8BDD",
+  "workspace.coordinatorFailed": "\u65E0\u6CD5\u6253\u5F00\u9879\u76EE\u4F1A\u8BDD\uFF0C\u8BF7\u91CD\u8BD5\u3002",
   "batch.scopeMain": "\u9009\u4E2D\u7684\u4E3B\u4F1A\u8BDD",
   "batch.scopeChild": "\u5B50\u4F1A\u8BDD\uFF0C\u7236\u4F1A\u8BDD {parent}\uFF08parentSession\uFF09",
   "batch.snapshot": "\u8FDB\u884C\u4E2D\u5FEB\u7167",
@@ -3193,6 +3240,7 @@ var NS = "session-board", en = {
   "a11y.list": "\u4F1A\u8BDD\u5217\u8868",
   "a11y.card": "\u6253\u5F00\u4F1A\u8BDD {title}",
   "a11y.groupCount": "{group}\uFF0C{count} \u4E2A\u4F1A\u8BDD",
+  "a11y.groupBranchCount": "{group}\uFF0C\u5206\u652F {branch}\uFF0C{count} \u4E2A\u4F1A\u8BDD",
   "manager.title": "\u7BA1\u7406\u9762\u677F",
   "manager.entry": "\u7BA1\u7406\u9762\u677F",
   "manager.open": "\u6253\u5F00\u7BA1\u7406\u9762\u677F",
@@ -5265,7 +5313,7 @@ function createWorkspaceMeta() {
           if (parsed === null) throw new Error("WORKSPACE_META_UNAVAILABLE");
           let byId = {};
           for (let workspace of parsed.workspaces) byId[workspace.workspaceId] = workspace;
-          state.set({ status: "ready", byId, at: parsed.generatedAt });
+          state.set({ status: "ready", byId, at: Date.now() });
         } catch {
           state.set({ ...state.getSnapshot(), status: "error" });
         } finally {
@@ -5654,17 +5702,15 @@ function useFilters(face, groups) {
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
 async function openProjectCoordinator(face, projectKey) {
-  try {
-    let response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectKey })
-    }), payload = await response.json().catch(() => null);
-    if (!response.ok || typeof payload != "object" || payload === null) return;
-    let sessionId = payload.sessionId;
-    typeof sessionId == "string" && sessionId !== "" && face.openSession(sessionId);
-  } catch {
-  }
+  let response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectKey })
+  }), payload = await response.json().catch(() => null);
+  if (!response.ok || typeof payload != "object" || payload === null) throw new Error("PROJECT_COORDINATOR_FAILED");
+  let sessionId = payload.sessionId;
+  if (typeof sessionId != "string" || sessionId === "") throw new Error("PROJECT_COORDINATOR_FAILED");
+  face.openSession(sessionId);
 }
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
@@ -5673,9 +5719,7 @@ function DockRoot({ face }) {
     {
       grouping: view.grouping,
       workspaceMeta,
-      onOpenCoordinator: (projectKey) => {
-        openProjectCoordinator(face, projectKey);
-      },
+      onOpenCoordinator: (projectKey) => openProjectCoordinator(face, projectKey),
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",
       t,
@@ -5713,8 +5757,8 @@ function OpenOverlayContent({ face }) {
       open: !0,
       grouping: view.grouping,
       workspaceMeta,
-      onOpenCoordinator: (projectKey) => {
-        openProjectCoordinator(face, projectKey);
+      onOpenCoordinator: async (projectKey) => {
+        await openProjectCoordinator(face, projectKey), setBoardOpen(!1);
       },
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",

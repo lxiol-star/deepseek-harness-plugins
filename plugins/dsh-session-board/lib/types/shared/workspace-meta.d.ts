@@ -23,7 +23,7 @@ export interface WorkspaceGitInfo {
     readonly projectKey?: string;
     /** Display name of the project, usually the repository name. */
     readonly projectLabel?: string;
-    /** Raw remote URL as configured (kept for tooltips). */
+    /** Raw remote URL as configured, with embedded credentials removed (kept for tooltips). */
     readonly remote?: string;
     /** Absolute repository root, when the Workspace is inside one. */
     readonly root?: string;
@@ -44,6 +44,18 @@ export interface WorkspaceMetaResponse {
  * @returns the normalized key, or '' when the URL is not usable.
  */
 export declare function normalizeRemote(raw: string): string;
+/**
+ * Remove credentials embedded in one git remote URL.
+ *
+ * A remote may be configured as `https://x-access-token:<token>@host/owner/repo`,
+ * and the board shows the remote in the UI and stores it in the coordinator
+ * record, so the token must never leave the host. Only the URL userinfo is
+ * dropped; scp-like `user@host:path` remotes carry no secret and are kept as
+ * configured. Malformed URLs fall back to a textual userinfo strip.
+ * @param raw - configured remote URL.
+ * @returns the URL without userinfo, or '' for an empty value.
+ */
+export declare function redactRemoteCredentials(raw: string): string;
 /**
  * Derive the project identity from a normalized remote key.
  * @param key - value returned by {@link normalizeRemote}.

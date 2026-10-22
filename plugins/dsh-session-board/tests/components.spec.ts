@@ -315,4 +315,122 @@ describe('actual React components', () => {
     expect(background.hasAttribute('inert')).toBe(false)
     expect(document.activeElement).toBe(opener)
   })
+  it('names the branch for assistive tech and keeps both project-header actions independent', async () => {
+    const workspaceEntry = { ...entry, workspaceId: 'wa', workspacePath: '/repo/i-ai-gw', workspaceTitle: 'i-ai-gw' }
+    const meta = {
+      wa: {
+        workspaceId: 'wa', title: 'i-ai-gw', path: '/repo/i-ai-gw', branch: 'feat/main',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+    }
+    const openCoordinator = vi.fn()
+    const toggle = vi.fn()
+    const props = {
+      groups: [{ id: 'attention', entries: [workspaceEntry] }], t: components.t, grouping: 'tree',
+      workspaceMeta: meta, onOpenCoordinator: openCoordinator, collapsed: {}, onToggleGroup: toggle,
+      onOpen: vi.fn(), onAck: vi.fn(), emptyKey: 'empty.noSessions',
+    }
+    const view = mount(components.BoardList, props); await view.render(props)
+    const row = view.container.querySelector('.sb-workspace-head-row')!
+    expect(row.querySelectorAll('button')).toHaveLength(2)
+    const header = row.querySelectorAll('button')[0] as HTMLButtonElement
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+    expect(header.getAttribute('aria-label')).toBe('i-ai-gw, 1 sessions')
+    // The branch subtitle must survive in the workspace leaf's accessible name:
+    // an aria-label that only names the workspace hides it from assistive tech.
+    const branchHeader = view.container.querySelector('.sb-workspace-node[data-kind="workspace"] > button')!
+    expect(branchHeader.getAttribute('aria-label')).toContain('feat/main')
+    await React.act(async () => { header.click() })
+    expect(toggle).toHaveBeenLastCalledWith('project:github.com/me/i-ai-gw')
+    expect(openCoordinator).not.toHaveBeenCalled()
+    await React.act(async () => { (row.querySelectorAll('button')[1] as HTMLButtonElement).click() })
+    expect(openCoordinator).toHaveBeenCalledWith('github.com/me/i-ai-gw')
+  })
+  it('shows session-less branches without a fake disclosure control or empty hint', async () => {
+    const meta = {
+      wa: {
+        workspaceId: 'wa', title: 'i-ai-gw', path: '/repo/i-ai-gw', branch: 'feat/main',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+      wd: {
+        workspaceId: 'wd', title: 'i-ai-gw-idle', path: '/repo/i-ai-gw-idle', branch: 'feat/idle',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+    }
+    const props = {
+      groups: [], t: components.t, grouping: 'tree', workspaceMeta: meta,
+      onOpenCoordinator: vi.fn(), collapsed: {}, onToggleGroup: vi.fn(),
+      onOpen: vi.fn(), onAck: vi.fn(), emptyKey: 'empty.noSessions',
+    }
+    const view = mount(components.BoardList, props); await view.render(props)
+    expect(view.container.textContent).not.toContain('No sessions yet')
+    expect(view.container.querySelector('.sb-workspace-node[data-kind="project"]')).not.toBeNull()
+    const leaves = [...view.container.querySelectorAll('.sb-workspace-node[data-kind="workspace"]')]
+    expect(leaves).toHaveLength(2)
+    for (const leaf of leaves) {
+      expect(leaf.querySelector('button')).toBeNull()
+      expect(leaf.querySelector('.sb-group-head--static')?.getAttribute('aria-expanded')).toBeNull()
+    }
+    const idle = leaves.find(leaf => leaf.textContent?.includes('i-ai-gw-idle'))
+    expect(idle?.textContent).toContain('feat/idle')
+    expect(idle?.textContent).toContain('0')
+  })
+  it('keeps one coordinator request in flight and reports a failure inline', async () => {
+    const workspaceEntry = { ...entry, workspaceId: 'wa', workspacePath: '/repo/i-ai-gw', workspaceTitle: 'i-ai-gw' }
+    const meta = {
+      wa: {
+        workspaceId: 'wa', title: 'i-ai-gw', path: '/repo/i-ai-gw', branch: 'feat/main',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+    }
+    let resolveOpen: (() => void) | undefined
+    const openCoordinator = vi.fn(() => new Promise<void>(resolve => { resolveOpen = resolve }))
+    const props = {
+      groups: [{ id: 'attention', entries: [workspaceEntry] }], t: components.t, grouping: 'tree',
+      workspaceMeta: meta, onOpenCoordinator: openCoordinator, collapsed: {}, onToggleGroup: vi.fn(),
+      onOpen: vi.fn(), onAck: vi.fn(), emptyKey: 'empty.noSessions',
+    }
+    const view = mount(components.BoardList, props); await view.render(props)
+    const action = (): HTMLButtonElement =>
+      [...view.container.querySelectorAll('button')].find(button => button.textContent === 'Project session') as HTMLButtonElement
+    await React.act(async () => { action().click() })
+    expect(openCoordinator).toHaveBeenCalledTimes(1)
+    expect(action().disabled).toBe(true)
+    expect(action().getAttribute('aria-busy')).toBe('true')
+    // A second click while the host is creating the session must not create another.
+    await React.act(async () => { action().click() })
+    expect(openCoordinator).toHaveBeenCalledTimes(1)
+    await React.act(async () => { resolveOpen?.() })
+    expect(action().disabled).toBe(false)
+    expect(action().getAttribute('aria-busy')).toBeNull()
+    // A failed request re-enables the button and leaves a retry message behind it.
+    openCoordinator.mockImplementationOnce(async () => { throw new Error('offline') })
+    await React.act(async () => { action().click() })
+    expect(action().disabled).toBe(false)
+    expect(view.container.querySelector('.sb-workspace-error')?.textContent).toContain('Try again')
+    openCoordinator.mockImplementation(async () => {})
+    await React.act(async () => { action().click() })
+    expect(view.container.querySelector('.sb-workspace-error')).toBeNull()
+  })
+  it('plumbs the project coordinator action through the fullscreen board', async () => {
+    const workspaceEntry = { ...entry, workspaceId: 'wa', workspacePath: '/repo/i-ai-gw', workspaceTitle: 'i-ai-gw' }
+    const meta = {
+      wa: {
+        workspaceId: 'wa', title: 'i-ai-gw', path: '/repo/i-ai-gw', branch: 'feat/main',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+    }
+    const openCoordinator = vi.fn()
+    const props = {
+      open: true, groups: [{ id: 'attention', entries: [workspaceEntry] }], t: components.t,
+      grouping: 'tree', density: 'compact', online: true, onClose: vi.fn(), onToggleDensity: vi.fn(),
+      onOpen: vi.fn(), onAck: vi.fn(), collapsedGroups: {}, onToggleGroup: vi.fn(),
+      workspaceMeta: meta, onOpenCoordinator: openCoordinator,
+    }
+    const view = mount(components.BoardOverlay, props); await view.render(props)
+    const action = [...document.querySelectorAll('button')].find(candidate => candidate.textContent === 'Project session')
+    expect(action).toBeDefined()
+    await React.act(async () => { action?.click() })
+    expect(openCoordinator).toHaveBeenCalledWith('github.com/me/i-ai-gw')
+  })
 })

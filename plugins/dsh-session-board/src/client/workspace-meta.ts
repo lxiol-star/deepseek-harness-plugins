@@ -53,7 +53,10 @@ export function createWorkspaceMeta(): WorkspaceMetaFace {
         if (parsed === null) throw new Error('WORKSPACE_META_UNAVAILABLE')
         const byId: Record<string, WorkspaceGitInfo> = {}
         for (const workspace of parsed.workspaces) byId[workspace.workspaceId] = workspace
-        state.set({ status: 'ready', byId, at: parsed.generatedAt })
+        // The cache lifetime is client-side bookkeeping; `generatedAt` comes
+        // from the host clock, which need not agree with this one (the Web
+        // client can talk to a remote host), so anchor it on receipt instead.
+        state.set({ status: 'ready', byId, at: Date.now() })
       } catch {
         // Keep an older map: the path-only tree still renders correctly.
         state.set({ ...state.getSnapshot(), status: 'error' })
