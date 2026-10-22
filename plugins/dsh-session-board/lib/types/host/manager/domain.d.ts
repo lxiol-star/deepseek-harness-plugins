@@ -41,5 +41,20 @@ export declare function emptyManagerState(): ManagerStateRecord;
 export declare const managerStateSchema: RecordSchema<ManagerStateRecord>;
 /** Normalize one stored task row. */
 export declare const managerTaskSchema: RecordSchema<ManagerTaskRecord>;
+/** Domain holding project coordinator session mappings. */
+export declare const PROJECT_DOMAIN_NAME = "dsh_session_board_projects";
+/** Table mapping a project key to its coordinator session. */
+export declare const PROJECT_COORDINATOR_TABLE = "coordinators";
+/** One persisted project coordinator. */
+export interface ManagerCoordinatorRecord {
+    readonly projectKey: string;
+    readonly label: string;
+    readonly sessionId: string;
+    readonly workspaceId: string;
+    readonly createdAt: number;
+    readonly remote?: string;
+}
+/** Project coordinator domain. */
+export declare const projectDomainSpec: DomainSpec;
 /** Manager domain: one identity/selection record plus the task board. */
 export declare const managerDomainSpec: DomainSpec;

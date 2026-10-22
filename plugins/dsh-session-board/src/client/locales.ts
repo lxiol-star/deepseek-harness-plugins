@@ -41,6 +41,8 @@ export const en = {
   'filter.byTree': 'Project tree',
   'card.archived': 'Archived to Wiki',
   'workspace.unassigned': 'Unassigned workspace',
+  'workspace.coordinator': 'Project session',
+  'workspace.coordinatorHint': 'Open or create this project\'s coordinator session',
 
   'batch.scopeMain': 'Selected main session',
   'batch.scopeChild': 'Child of {parent} (parentSession)',
@@ -310,6 +312,8 @@ export const zh: Record<keyof typeof en, string> = {
   'filter.byTree': '项目树',
   'card.archived': '已归档到 Wiki',
   'workspace.unassigned': '未分配工作区',
+  'workspace.coordinator': '项目会话',
+  'workspace.coordinatorHint': '打开或创建该项目的协调会话',
 
   'batch.scopeMain': '选中的主会话',
   'batch.scopeChild': '子会话，父会话 {parent}（parentSession）',

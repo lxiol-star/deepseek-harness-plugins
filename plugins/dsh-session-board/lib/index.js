@@ -747,6 +747,7 @@ var MANAGER_STATE_PATH = "/api/session-board/manager/state";
 var MANAGER_SELECTION_PATH = "/api/session-board/manager/selection";
 var MANAGER_TASK_PATH = "/api/session-board/manager/task";
 var MANAGER_WAKE_PATH = "/api/session-board/manager/wake";
+var PROJECT_COORDINATOR_PATH = "/api/session-board/project/coordinator";
 var MANAGER_TASK_STATUSES = [
   "pending",
   "assigned",
@@ -840,6 +841,33 @@ var managerTaskSchema = {
     };
   }
 };
+var PROJECT_DOMAIN_NAME = "dsh_session_board_projects";
+var PROJECT_COORDINATOR_TABLE = "coordinators";
+var coordinatorSchema = {
+  parse(value) {
+    const source = typeof value === "object" && value !== null ? value : {};
+    const projectKey = typeof source.projectKey === "string" ? source.projectKey : "";
+    const sessionId = typeof source.sessionId === "string" ? source.sessionId : "";
+    const workspaceId = typeof source.workspaceId === "string" ? source.workspaceId : "";
+    if (projectKey === "" || sessionId === "" || workspaceId === "") throw new Error("coordinator row is incomplete");
+    return {
+      projectKey,
+      label: typeof source.label === "string" && source.label !== "" ? source.label : projectKey.split("/").pop() ?? projectKey,
+      sessionId,
+      workspaceId,
+      createdAt: typeof source.createdAt === "number" ? source.createdAt : Date.now(),
+      ...typeof source.remote === "string" && source.remote !== "" ? { remote: source.remote } : {}
+    };
+  }
+};
+var projectDomainSpec = defineDomain({
+  name: PROJECT_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: "backup-and-skip",
+  tables: {
+    [PROJECT_COORDINATOR_TABLE]: domainTable(coordinatorSchema)
+  }
+});
 var managerDomainSpec = defineDomain({
   name: MANAGER_DOMAIN_NAME,
   version: 1,
@@ -2173,7 +2201,616 @@ function createManagerRoutes(handlers) {
       }
     }
   };
-  return [stateRoute, selectionRoute, taskRoute, wakeRoute];
+  const coordinatorRoute = {
+    path: PROJECT_COORDINATOR_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      try {
+        return jsonResponse(200, { ok: true, ...await handlers.projectCoordinator(await readJsonBody(request)) });
+      } catch (error) {
+        handlers.warn(`dsh-session-board: project coordinator failed: ${describe2(error)}`);
+        return jsonResponse(400, { ok: false, error: "PROJECT_COORDINATOR_FAILED" });
+      }
+    }
+  };
+  return [stateRoute, selectionRoute, taskRoute, wakeRoute, coordinatorRoute];
+}
+
+// src/host/manager/projects.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// src/host/workspace-meta.ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+// src/shared/workspace-meta.ts
+var WORKSPACE_META_PATH = "/api/session-board/workspace-meta";
+function normalizeRemote(raw) {
+  let value = raw.trim();
+  if (value === "") return "";
+  if (value.startsWith("git@") || /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/.test(value)) {
+    const at = value.indexOf("@");
+    const colon = value.indexOf(":", at);
+    if (colon !== -1) value = `${value.slice(at + 1, colon)}/${value.slice(colon + 1)}`;
+  } else if (value.includes("://")) {
+    try {
+      const url = new URL(value);
+      value = `${url.hostname}${url.pathname}`;
+    } catch {
+      return "";
+    }
+  }
+  value = value.replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+  const parts = value.split("/").filter(Boolean).map((part) => part.toLowerCase());
+  const host = parts.shift();
+  if (host === void 0 || parts.length === 0) return "";
+  return `${host}/${parts.join("/")}`;
+}
+function projectLabel(key) {
+  const parts = key.split("/");
+  return parts.length === 0 || parts[parts.length - 1] === "" ? null : parts[parts.length - 1];
+}
+
+// src/host/workspace-meta.ts
+var exec = promisify(execFile);
+var MAX_WORKSPACES = 400;
+var PROBE_CONCURRENCY = 6;
+var DEFAULT_TTL_MS = 12e4;
+async function probeWorkspaceGit(path) {
+  const run = async (args) => {
+    const result = await exec("git", ["-C", path, ...args], { timeout: 2500, maxBuffer: 64 * 1024 });
+    return result.stdout.trim();
+  };
+  let root;
+  try {
+    root = await run(["rev-parse", "--show-toplevel"]);
+  } catch {
+    return {};
+  }
+  if (root === "") return {};
+  let branch;
+  let remote;
+  try {
+    const value = await run(["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (value !== "" && value !== "HEAD") branch = value;
+  } catch {
+  }
+  try {
+    const value = await run(["config", "--get", "remote.origin.url"]);
+    if (value !== "") remote = value;
+  } catch {
+  }
+  return { root, ...branch === void 0 ? {} : { branch }, ...remote === void 0 ? {} : { remote } };
+}
+function jsonResponse2(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+  });
+}
+function createWorkspaceMetaRoute(options) {
+  const ttl = options.ttlMs ?? DEFAULT_TTL_MS;
+  const probe = options.probe ?? probeWorkspaceGit;
+  const now = options.now ?? Date.now;
+  const cache = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Map();
+  const factsFor = async (workspaceId, path) => {
+    const cached = cache.get(workspaceId);
+    if (cached !== void 0 && now() - cached.at < ttl) return cached.facts;
+    const running = inflight.get(workspaceId);
+    if (running !== void 0) return await running;
+    const task = (async () => {
+      try {
+        const facts = await probe(path);
+        cache.set(workspaceId, { at: now(), facts });
+        return facts;
+      } catch (error) {
+        options.warn(`dsh-session-board: workspace probe failed for ${path}: ${String(error)}`);
+        return {};
+      } finally {
+        inflight.delete(workspaceId);
+      }
+    })();
+    inflight.set(workspaceId, task);
+    return await task;
+  };
+  const rowFor = (workspace, facts) => {
+    const projectKey = facts.remote === void 0 ? "" : normalizeRemote(facts.remote);
+    const label = projectKey === "" ? null : projectLabel(projectKey);
+    return {
+      workspaceId: workspace.id,
+      title: workspace.title,
+      path: workspace.path,
+      ...facts.branch === void 0 ? {} : { branch: facts.branch },
+      ...projectKey === "" ? {} : { projectKey },
+      ...label === null ? {} : { projectLabel: label },
+      ...facts.remote === void 0 ? {} : { remote: facts.remote },
+      ...facts.root === void 0 ? {} : { root: facts.root }
+    };
+  };
+  return {
+    path: WORKSPACE_META_PATH,
+    methods: ["GET"],
+    requestBody: "buffered",
+    fetch: async () => {
+      try {
+        const listed = options.registry.list().slice(0, MAX_WORKSPACES);
+        const rows = [];
+        for (let start = 0; start < listed.length; start += PROBE_CONCURRENCY) {
+          const chunk = listed.slice(start, start + PROBE_CONCURRENCY);
+          const facts = await Promise.all(chunk.map(async (workspace) => await factsFor(workspace.id, workspace.path)));
+          chunk.forEach((workspace, index) => {
+            rows.push(rowFor(workspace, facts[index] ?? {}));
+          });
+        }
+        const body = { ok: true, generatedAt: now(), workspaces: rows };
+        return jsonResponse2(200, body);
+      } catch (error) {
+        options.warn(`dsh-session-board: workspace meta failed: ${String(error)}`);
+        return jsonResponse2(500, { ok: false, error: "WORKSPACE_META_UNAVAILABLE" });
+      }
+    }
+  };
+}
+
+// src/host/manager/projects.ts
+var PROMPT_TIMEOUT_MS = 3e4;
+var PROJECT_CACHE_MS = 12e4;
+var PROBE_CONCURRENCY2 = 6;
+var LINE_OUTPUT2 = {
+  schema: { type: "array", items: { type: "string" } },
+  render: (_args, value) => {
+    if (!Array.isArray(value)) return [];
+    return value.map((line) => ({ type: "text", text: typeof line === "string" ? line : JSON.stringify(line) }));
+  }
+};
+function argObject2(args, tool) {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) throw new Error(`${tool}: arguments must be an object`);
+  return args;
+}
+function argString2(input, name2, tool) {
+  const value = input[name2];
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`${tool}: "${name2}" must be a non-empty string`);
+  return value.trim();
+}
+var COORDINATOR_POLICY = [
+  "You are the coordinator of one git project in the DSH session board.",
+  "The project contains several Workspaces: the main checkout and branches/worktrees.",
+  "Use project_overview to see branches, sessions and tasks; project_assign_task to",
+  "create a task session in a branch Workspace; project_message_session to queue an",
+  "instruction into an existing session; project_session_status to inspect one.",
+  "Workers can report to you with report_to_coordinator. Keep replies short and",
+  "evidence-based. Never delete sessions, workspaces or git data; ask the user."
+].join("\n");
+var ProjectCoordinators = class {
+  /** @param deps - nested host context plus the durable tables. */
+  constructor(deps) {
+    this.deps = deps;
+  }
+  deps;
+  cached = null;
+  installed = /* @__PURE__ */ new Map();
+  inflight = /* @__PURE__ */ new Map();
+  /**
+   * Probe every registered Workspace and group them by git origin.
+   * @param force - ignore the cache.
+   * @returns projects, sorted by label.
+   */
+  async projects(force = false) {
+    const now = this.now();
+    if (!force && this.cached !== null && now - this.cached.at < PROJECT_CACHE_MS) return this.cached.projects;
+    const registry = this.deps.ctx.workspaceRegistry;
+    const listed = registry.list();
+    const probe = this.deps.probe ?? probeWorkspaceGit;
+    const facts = /* @__PURE__ */ new Map();
+    for (let start = 0; start < listed.length; start += PROBE_CONCURRENCY2) {
+      const chunk = listed.slice(start, start + PROBE_CONCURRENCY2);
+      const results = await Promise.all(chunk.map(async (workspace) => {
+        try {
+          return { id: workspace.id, facts: await probe(workspace.path) };
+        } catch {
+          return { id: workspace.id, facts: {} };
+        }
+      }));
+      for (const row of results) facts.set(row.id, row.facts);
+    }
+    const grouped = /* @__PURE__ */ new Map();
+    for (const workspace of listed) {
+      const info = facts.get(workspace.id);
+      if (info?.remote === void 0) continue;
+      const key = normalizeRemote(info.remote);
+      if (key === "") continue;
+      const label = projectLabel(key) ?? key;
+      let project = grouped.get(key);
+      if (project === void 0) {
+        project = { key, label, remote: info.remote, workspaces: [] };
+        grouped.set(key, project);
+      }
+      project.workspaces.push({
+        workspaceId: workspace.id,
+        title: workspace.title,
+        path: workspace.path,
+        ...info.branch === void 0 ? {} : { branch: info.branch }
+      });
+    }
+    const projects = [...grouped.values()].map((project) => ({ ...project, workspaces: [...project.workspaces].sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path)) })).sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+    this.cached = { at: now, projects };
+    return projects;
+  }
+  /**
+   * Look one project up by key.
+   * @param projectKey - normalized origin key.
+   * @returns the project, or null.
+   */
+  async view(projectKey) {
+    return (await this.projects()).find((project) => project.key === projectKey) ?? null;
+  }
+  /**
+   * Open (creating on first use) one project's coordinator session.
+   * @param projectKey - normalized origin key from the project tree.
+   * @returns the coordinator identity.
+   */
+  async ensure(projectKey) {
+    const existing = this.deps.coordinators.get(projectKey);
+    if (existing !== void 0) {
+      return { projectKey, label: existing.label, sessionId: existing.sessionId, workspaceId: existing.workspaceId, created: false };
+    }
+    const running = this.inflight.get(projectKey);
+    if (running !== void 0) return await running;
+    const task = (async () => {
+      const project = await this.view(projectKey);
+      if (project === null) throw new Error(`unknown project "${projectKey}"`);
+      const workspace = pickCoordinatorWorkspace(project);
+      const sessionId = randomUUID2();
+      const record2 = {
+        projectKey,
+        label: project.label,
+        sessionId,
+        workspaceId: workspace.workspaceId,
+        createdAt: this.now(),
+        ...project.remote === void 0 ? {} : { remote: project.remote }
+      };
+      await this.deps.coordinators.put(projectKey, record2);
+      try {
+        const created = await this.deps.ctx.sessionController.create({ sessionId, workspaceId: workspace.workspaceId });
+        if (created.sessionId !== sessionId) {
+          const corrected = { ...record2, sessionId: created.sessionId };
+          await this.deps.coordinators.put(projectKey, corrected);
+        }
+        try {
+          await this.deps.ctx.sessionController.rename({ sessionId, title: `\u9879\u76EE\u534F\u8C03\u53F0 \xB7 ${project.label}` });
+        } catch (error) {
+          this.deps.warn(`dsh-session-board: coordinator rename failed: ${String(error)}`);
+        }
+        return { projectKey, label: project.label, sessionId, workspaceId: workspace.workspaceId, created: true };
+      } catch (error) {
+        await this.deps.coordinators.delete(projectKey).catch(() => false);
+        this.deps.warn(`dsh-session-board: coordinator create failed: ${String(error)}`);
+        throw error;
+      }
+    })();
+    this.inflight.set(projectKey, task);
+    try {
+      return await task;
+    } finally {
+      this.inflight.delete(projectKey);
+    }
+  }
+  /**
+   * Install project tools on one Agent: coordinator tools for a coordinator
+   * session, report tool for a worker whose project already has a coordinator.
+   * @param agent - every published Agent.
+   */
+  installAgent(agent) {
+    if (this.installed.has(agent.id)) return;
+    const coordinator = [...this.deps.coordinators.entries()].find(([, record2]) => record2.sessionId === agent.id);
+    if (coordinator !== void 0) {
+      this.installCoordinator(agent, coordinator[0]);
+      return;
+    }
+    void this.installWorker(agent);
+  }
+  /** Drop one Agent's tool registrations. */
+  disposeAgent(agentId) {
+    const dispose = this.installed.get(agentId);
+    if (dispose === void 0) return;
+    this.installed.delete(agentId);
+    dispose();
+  }
+  /** Release every registration; unload path. */
+  dispose() {
+    for (const dispose of [...this.installed.values()]) dispose();
+    this.installed.clear();
+  }
+  /** Register coordinator tools and prompt sections on one Agent. */
+  installCoordinator(agent, projectKey) {
+    const disposers = [];
+    try {
+      for (const definition of coordinatorToolDefinitions(this, projectKey)) {
+        disposers.push(agent.ctx.tools.register(definition));
+      }
+      disposers.push(agent.ctx.systemPrompt.section({
+        name: "session-board:project-coordinator",
+        order: 900,
+        text: COORDINATOR_POLICY
+      }));
+      this.installed.set(agent.id, () => {
+        for (const dispose of disposers.reverse()) dispose();
+      });
+    } catch (error) {
+      for (const dispose of disposers.reverse()) dispose();
+      this.deps.warn(`dsh-session-board: coordinator tools failed: ${String(error)}`);
+    }
+  }
+  /** Worker tool: report to the project coordinator if this session belongs to a project. */
+  async installWorker(agent) {
+    try {
+      const projects = await this.projects();
+      const workspace = this.deps.ctx.workspaceRegistry.list().find((candidate) => candidate.sessionIds.includes(agent.id));
+      if (workspace === void 0) return;
+      for (const project of projects) {
+        if (!project.workspaces.some((candidate) => candidate.workspaceId === workspace.id)) continue;
+        const coordinator = this.deps.coordinators.get(project.key);
+        if (coordinator === void 0) return;
+        if (this.installed.has(agent.id)) return;
+        const definition = reportToolDefinition(this, project.key, coordinator.sessionId, agent.id);
+        const dispose = agent.ctx.tools.register(definition);
+        this.installed.set(agent.id, dispose);
+        return;
+      }
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: worker project tool failed: ${String(error)}`);
+    }
+  }
+  /** One project view with live session/task counts. */
+  async overviewLines(projectKey) {
+    const project = await this.view(projectKey);
+    if (project === null) throw new Error(`unknown project "${projectKey}"`);
+    const levels = this.deps.mux.snapshot().sources;
+    const registry = this.deps.ctx.workspaceRegistry;
+    const tasks = this.taskViews(project);
+    const lines = [`- project ${project.label}${project.remote === void 0 ? "" : ` (${project.remote})`}`];
+    for (const workspace of project.workspaces) {
+      const listed = registry.get(workspace.workspaceId);
+      const sessionIds = listed?.sessionIds ?? [];
+      let running = 0;
+      let waiting = 0;
+      for (const id of sessionIds) {
+        const level = levels[id];
+        if (level?.status === "running") running += 1;
+        if (level?.status === "waiting" || level?.status === "error") waiting += 1;
+      }
+      lines.push(`- workspace ${workspace.title} [${workspace.branch ?? "no branch"}] sessions=${sessionIds.length} running=${running} waiting=${waiting}`);
+    }
+    lines.push(...tasks.length === 0 ? ["- tasks (none)"] : ["- tasks", ...tasks.map((task) => `  - ${task.id} [${task.status}] ${task.title}${task.sessionId === void 0 ? "" : ` session=${task.sessionId}`}`)]);
+    return lines;
+  }
+  /** Tasks whose workspace belongs to one project. */
+  taskViews(project) {
+    const workspaces = new Set(project.workspaces.map((workspace) => workspace.workspaceId));
+    const tasks = [];
+    for (const [, task] of this.deps.tasks.entries()) {
+      if (task.workspaceId !== void 0 && workspaces.has(task.workspaceId)) tasks.push(task);
+    }
+    tasks.sort((left, right) => right.updatedAt - left.updatedAt);
+    return tasks;
+  }
+  /** Resolve one project session and assert project membership. */
+  projectSession(projectKey, sessionId) {
+    const registry = this.deps.ctx.workspaceRegistry;
+    for (const workspace of registry.list()) {
+      if (!workspace.sessionIds.includes(sessionId)) continue;
+      const project = this.cached?.projects.find((candidate) => candidate.workspaces.some((row) => row.workspaceId === workspace.id));
+      if (project?.key === projectKey) return { workspaceId: workspace.id };
+    }
+    throw new Error(`session "${sessionId}" is not part of project "${projectKey}"`);
+  }
+  /** Queue one text prompt into an existing session. */
+  async prompt(sessionId, text) {
+    const request = {
+      requestId: randomUUID2(),
+      sessionId,
+      mode: "queue",
+      content: [{ type: "text", text }]
+    };
+    await this.deps.ctx.sessionController.prompt(request, AbortSignal.timeout(PROMPT_TIMEOUT_MS));
+  }
+  /**
+   * Create a task session in one branch workspace of a project.
+   * @param projectKey - project key.
+   * @param input - task title, brief and target workspace id.
+   * @returns the created task and session.
+   */
+  async assignTask(projectKey, input) {
+    const project = await this.view(projectKey);
+    if (project === null) throw new Error(`unknown project "${projectKey}"`);
+    if (!project.workspaces.some((workspace) => workspace.workspaceId === input.workspaceId)) {
+      throw new Error(`workspace "${input.workspaceId}" is not part of project "${projectKey}"`);
+    }
+    const now = this.now();
+    const record2 = {
+      id: randomUUID2(),
+      title: input.title.slice(0, MANAGER_TITLE_MAX),
+      status: "assigned",
+      workspaceId: input.workspaceId,
+      createdAt: now,
+      updatedAt: now
+    };
+    await this.deps.tasks.put(record2.id, record2);
+    try {
+      const created = await this.deps.ctx.sessionController.create({ workspaceId: input.workspaceId });
+      const withSession = { ...record2, sessionId: created.sessionId, updatedAt: this.now() };
+      await this.deps.tasks.put(record2.id, withSession);
+      await this.prompt(created.sessionId, input.brief);
+      return withSession;
+    } catch (error) {
+      const failed = { ...record2, status: "failed", note: `dispatch failed: ${String(error)}`.slice(0, 2e3), updatedAt: this.now() };
+      await this.deps.tasks.put(record2.id, failed);
+      throw error;
+    }
+  }
+  /**
+   * Queue one message into an existing project session.
+   * @param projectKey - project key.
+   * @param sessionId - target project session.
+   * @param text - message text.
+   */
+  async messageSession(projectKey, sessionId, text) {
+    this.projectSession(projectKey, sessionId);
+    await this.prompt(sessionId, text);
+  }
+  /**
+   * Status lines for one project session.
+   * @param projectKey - project key.
+   * @param sessionId - target session.
+   * @returns human-readable lines.
+   */
+  async sessionStatus(projectKey, sessionId) {
+    this.projectSession(projectKey, sessionId);
+    const level = this.deps.mux.snapshot().sources[sessionId];
+    const agent = this.deps.ctx.agents.get(sessionId);
+    let title;
+    try {
+      const list = await this.deps.ctx.sessionController.list({}, AbortSignal.timeout(5e3));
+      title = list.items.find((item) => item.sessionId === sessionId)?.projections?.values.title ?? void 0;
+    } catch {
+    }
+    return [
+      `- session ${sessionId}`,
+      `- status ${level?.status ?? agent?.status ?? "unknown"}`,
+      ...title === void 0 ? [] : [`- title ${previewText(title, 120)}`],
+      ...level?.turn === void 0 ? [] : [`- last turn ${level.turn}`],
+      ...level?.lastKind === void 0 ? [] : [`- last turn end ${level.lastKind}`],
+      ...level?.lastError === void 0 ? [] : [`- last error ${level.lastError}`],
+      ...level?.preview === void 0 ? [] : [`- last assistant ${level.preview}`]
+    ];
+  }
+  /**
+   * Receive one worker report and relay it to the coordinator session.
+   * @param projectKey - project key.
+   * @param senderSessionId - worker session.
+   * @param text - report text.
+   * @param taskId - optional task this report belongs to.
+   */
+  async report(projectKey, senderSessionId, text, taskId) {
+    const record2 = this.deps.coordinators.get(projectKey);
+    if (record2 === void 0) throw new Error(`project "${projectKey}" has no coordinator`);
+    const task = taskId === void 0 ? "" : `
+\u5173\u8054\u4EFB\u52A1\uFF1A${taskId}`;
+    await this.prompt(record2.sessionId, `[\u9879\u76EE\u6C47\u62A5 \xB7 ${record2.label} \xB7 \u6765\u81EA ${senderSessionId}] ${text}${task}`);
+    if (taskId !== void 0) {
+      const current = this.deps.tasks.get(taskId);
+      if (current !== void 0) {
+        const next = { ...current, note: text.slice(0, 2e3), updatedAt: this.now() };
+        await this.deps.tasks.put(taskId, next);
+      }
+    }
+  }
+  now() {
+    return this.deps.now?.() ?? Date.now();
+  }
+};
+function pickCoordinatorWorkspace(project) {
+  const main = project.workspaces.find((workspace) => workspace.path.split("/").filter(Boolean).pop() === project.label);
+  const chosen = main ?? project.workspaces[0];
+  if (chosen === void 0) throw new Error(`project "${project.label}" has no workspace`);
+  return chosen;
+}
+function coordinatorToolDefinitions(projects, projectKey) {
+  return [
+    {
+      name: "project_overview",
+      description: "List this project's Workspaces/branches with session counts, running/waiting sessions and project tasks.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      output: LINE_OUTPUT2,
+      async execute(_args, _exec) {
+        return await projects.overviewLines(projectKey);
+      }
+    },
+    {
+      name: "project_assign_task",
+      description: "Create a task session inside one branch Workspace of this project and send the brief as its first message.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short task title." },
+          brief: { type: "string", description: "Complete task instructions for the new session." },
+          workspaceId: { type: "string", description: "Target Workspace id from project_overview." }
+        },
+        required: ["title", "brief", "workspaceId"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT2,
+      async execute(args, _exec) {
+        const input = argObject2(args, "project_assign_task");
+        const task = await projects.assignTask(projectKey, {
+          title: argString2(input, "title", "project_assign_task"),
+          brief: argString2(input, "brief", "project_assign_task"),
+          workspaceId: argString2(input, "workspaceId", "project_assign_task")
+        });
+        return [`- task ${task.id} created in workspace ${task.workspaceId ?? "?"}`, ...task.sessionId === void 0 ? [] : [`- session ${task.sessionId}`]];
+      }
+    },
+    {
+      name: "project_message_session",
+      description: "Queue a message into an existing session of this project (does not interrupt the current turn).",
+      parameters: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string", description: "Target session id (already inside this project)." },
+          text: { type: "string", description: "Message to send." }
+        },
+        required: ["sessionId", "text"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT2,
+      async execute(args, _exec) {
+        const input = argObject2(args, "project_message_session");
+        const sessionId = argString2(input, "sessionId", "project_message_session");
+        await projects.messageSession(projectKey, sessionId, argString2(input, "text", "project_message_session"));
+        return [`- message queued for ${sessionId}`];
+      }
+    },
+    {
+      name: "project_session_status",
+      description: "Show status, last turn and preview of one session in this project.",
+      parameters: {
+        type: "object",
+        properties: { sessionId: { type: "string", description: "Target session id." } },
+        required: ["sessionId"],
+        additionalProperties: false
+      },
+      output: LINE_OUTPUT2,
+      async execute(args, _exec) {
+        const input = argObject2(args, "project_session_status");
+        return await projects.sessionStatus(projectKey, argString2(input, "sessionId", "project_session_status"));
+      }
+    }
+  ];
+}
+function reportToolDefinition(projects, projectKey, coordinatorSessionId, senderSessionId) {
+  return {
+    name: "report_to_coordinator",
+    description: "Report progress, a blocker or a result of this project to its coordinator session. Use short factual text.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "What to report." },
+        taskId: { type: "string", description: "Optional task id this report belongs to." }
+      },
+      required: ["text"],
+      additionalProperties: false
+    },
+    output: LINE_OUTPUT2,
+    async execute(args, _exec) {
+      const input = argObject2(args, "report_to_coordinator");
+      const text = argString2(input, "text", "report_to_coordinator");
+      const taskId = typeof input.taskId === "string" && input.taskId !== "" ? input.taskId : void 0;
+      await projects.report(projectKey, senderSessionId, text, taskId);
+      return [`- report sent to coordinator ${coordinatorSessionId}`];
+    }
+  };
 }
 
 // src/host/manager/wiring.ts
@@ -2182,11 +2819,13 @@ function startManager(options) {
   const mux = new EventMux();
   void (async () => {
     let service;
+    let managerTasks = null;
     try {
       const domain = await storageDomain.open(managerDomainSpec);
       ctx.effect(() => () => domain.close(), "dsh-session-board: manager domain");
       const stateTable = domain.table(MANAGER_STATE_TABLE);
       const taskTable = domain.table(MANAGER_TASK_TABLE);
+      managerTasks = taskTable;
       service = new ManagerService({
         ctx,
         state: stateTable,
@@ -2200,6 +2839,21 @@ function startManager(options) {
       warn(`dsh-session-board: manager store unavailable, manager panel disabled: ${describe3(error)}`);
       return;
     }
+    let projects = null;
+    try {
+      const domain = await storageDomain.open(projectDomainSpec);
+      ctx.effect(() => () => domain.close(), "dsh-session-board: projects domain");
+      projects = new ProjectCoordinators({
+        ctx,
+        coordinators: domain.table(PROJECT_COORDINATOR_TABLE),
+        tasks: managerTasks,
+        mux,
+        warn
+      });
+      ctx.effect(() => () => projects?.dispose(), "dsh-session-board: project coordinators");
+    } catch (error) {
+      warn(`dsh-session-board: project coordinator store unavailable: ${describe3(error)}`);
+    }
     const routes = createManagerRoutes({
       state: async () => {
         try {
@@ -2211,6 +2865,13 @@ function startManager(options) {
       selection: async (raw) => await service.writeSelection(raw),
       task: async (raw) => await service.task(readTaskRequest(raw)),
       wake: async (raw) => ({ wake: await service.wake(raw) }),
+      projectCoordinator: async (raw) => {
+        const body = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+        if (typeof body.projectKey !== "string" || body.projectKey === "") throw new Error("projectKey is required");
+        if (projects === null) throw new Error("project coordinator store unavailable");
+        const result = await projects.ensure(body.projectKey);
+        return { projectKey: result.projectKey, label: result.label, sessionId: result.sessionId, workspaceId: result.workspaceId, created: result.created };
+      },
       warn
     });
     for (const route of routes) {
@@ -2226,9 +2887,11 @@ function startManager(options) {
     });
     ctx.on("agent/created", ({ agent }) => {
       service.installAgent(agent);
+      projects?.installAgent(agent);
     });
     ctx.on("agent/disposed", ({ agent }) => {
       service.disposeAgent(agent.id);
+      projects?.disposeAgent(agent.id);
       mux.remove(agent.id);
     });
   })();
@@ -2366,13 +3029,13 @@ async function runSynthesisModel(llm, request) {
 }
 
 // src/host/wiki-archive.ts
-import { execFile as execFile2 } from "node:child_process";
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { execFile as execFile3 } from "node:child_process";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { homedir as homedir2 } from "node:os";
 import { dirname, join as join2, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { promisify as promisify2 } from "node:util";
+import { promisify as promisify3 } from "node:util";
 
 // src/shared/archive.ts
 var MAX_ARCHIVE_SELECTION = 50;
@@ -2440,9 +3103,9 @@ function parseWikiWorkflow(raw) {
 }
 
 // src/host/wiki-config.ts
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-var exec = promisify(execFile);
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+var exec2 = promisify2(execFile2);
 var WikiConfigError = class extends Error {
   /**
    * @param errors - stable codes such as `INVALID_WIKI_ROOT`.
@@ -2508,7 +3171,7 @@ async function probeWikiEnvironment(runtime) {
     return failedStatus(runtime, ["Wiki scripts directory is not configured", ...runtime.dshHome === null ? ["DSH_HOME is unknown"] : []]);
   }
   try {
-    const result = await exec(runtime.paths.python, [
+    const result = await exec2(runtime.paths.python, [
       runtime.bridgePath,
       "status",
       "--wiki-root",
@@ -2545,7 +3208,7 @@ function validateWikiWrite(raw) {
 }
 
 // src/host/wiki-archive.ts
-var exec2 = promisify2(execFile2);
+var exec3 = promisify3(execFile3);
 var SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 var PREVIEW_TTL_MS = 5 * 6e4;
 var WikiArchiveError = class extends Error {
@@ -2659,7 +3322,7 @@ function createWikiArchiver(options = {}) {
     const runtime = runtimeOf();
     const script = join2(runtime.engineDir, "wiki-archive.py");
     try {
-      return await exec2(runtime.paths.python, [script, ...args], {
+      return await exec3(runtime.paths.python, [script, ...args], {
         timeout: runtime.paths.timeoutSeconds * 1e3,
         maxBuffer: 4 * 1024 * 1024,
         signal,
@@ -2678,7 +3341,7 @@ function createWikiArchiver(options = {}) {
     if (runtime.dshHome === null) throw new WikiArchiveError("ARCHIVE_UNAVAILABLE", "DSH_HOME is unknown");
     const providerArguments = operation === "synthesize" ? ["--provider", runtime.paths.provider, ...runtime.paths.synthConfig === "" ? [] : ["--synth-config", runtime.paths.synthConfig]] : [];
     try {
-      const result = await exec2(
+      const result = await exec3(
         runtime.paths.python,
         [
           runtime.bridgePath,
@@ -2797,7 +3460,7 @@ function createWikiArchiver(options = {}) {
       if (closed) throw new WikiArchiveError("CANCELLED");
       const rows = new Map(previewed.results.map((row) => [row.session, row]));
       const summary = { ...previewed, selected: ids.length, scope };
-      const token = randomUUID2(), expiresAt = now() + PREVIEW_TTL_MS;
+      const token = randomUUID3(), expiresAt = now() + PREVIEW_TTL_MS;
       previews.set(token, { ids, expiresAt, sources: ids.map((id) => rows.get(id)?.source ?? ""), scope, mode });
       return { token, expiresAt, summary, mode };
     }),
@@ -2905,7 +3568,7 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     // Never awaits the domain: before it is ready this answers with an empty
     // feed, and the connecting stream delivers the first real snapshot.
-    fetch: async () => jsonResponse2(200, readFeed())
+    fetch: async () => jsonResponse3(200, readFeed())
   };
   const ackRoute = {
     path: BOARD_ACK_PATH,
@@ -2914,14 +3577,14 @@ data: ${JSON.stringify(feed)}
     fetch: async (request) => {
       const sessionId = readSessionId2(await readJsonBody2(request));
       if (sessionId === null) {
-        return jsonResponse2(400, { ok: false, error: "sessionId must be a non-empty string" });
+        return jsonResponse3(400, { ok: false, error: "sessionId must be a non-empty string" });
       }
       const durable = await options.ack(sessionId);
       if (!durable) {
-        return jsonResponse2(500, { ok: false, error: "acknowledgement could not be stored" });
+        return jsonResponse3(500, { ok: false, error: "acknowledgement could not be stored" });
       }
       broadcast();
-      return jsonResponse2(200, { ok: true });
+      return jsonResponse3(200, { ok: true });
     }
   };
   const archiveOperations = /* @__PURE__ */ new Map();
@@ -2931,14 +3594,14 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     fetch: async (request) => {
       const body = await readJsonBody2(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse3(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       try {
-        if (value.action === "capabilities") return jsonResponse2(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } });
+        if (value.action === "capabilities") return jsonResponse3(200, { ok: true, capabilities: { workflow: WIKI_WORKFLOW_CAPABILITY, synthesisModel: SYNTHESIS_MODEL_CAPABILITY, wikiConfig: WIKI_CONFIG_CAPABILITY } });
         if (value.action === "preview") {
           const mode = value.mode === "archive" ? "archive" : "full";
           const preview = await options.wikiArchive.preview(validateWikiIds(value.sessionIds), mode);
-          return jsonResponse2(200, { ok: true, preview });
+          return jsonResponse3(200, { ok: true, preview });
         }
         if ((value.action === "start" || value.action === "status") && typeof value.token === "string" && value.token.length <= 100) {
           let operation = archiveOperations.get(value.token);
@@ -2959,19 +3622,19 @@ data: ${JSON.stringify(feed)}
             operation = archiveOperations.get(token);
           }
           if (operation === void 0) throw new WikiArchiveError("PREVIEW_EXPIRED");
-          return jsonResponse2(200, { ok: true, operation });
+          return jsonResponse3(200, { ok: true, operation });
         }
         if (value.action === "commit" && typeof value.token === "string" && value.token.length <= 100) {
           const result = await options.wikiArchive.commit(value.token);
-          return jsonResponse2(200, { ok: true, result });
+          return jsonResponse3(200, { ok: true, result });
         }
-        return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
+        return jsonResponse3(400, { ok: false, error: "INVALID_SELECTION" });
       } catch (error) {
         options.warn(`dsh-session-board: wiki archive failed: ${describeError2(error)}`);
         const code = error instanceof WikiArchiveError ? error.code : "ARCHIVE_UNAVAILABLE";
         const detail = error instanceof WikiArchiveError ? error.detail : void 0;
         const status = code === "INVALID_SELECTION" ? 400 : code === "BUSY" ? 429 : 409;
-        return jsonResponse2(status, { ok: false, error: code, ...detail === void 0 || detail === "" ? {} : { detail } });
+        return jsonResponse3(status, { ok: false, error: code, ...detail === void 0 || detail === "" ? {} : { detail } });
       }
     }
   };
@@ -2981,26 +3644,26 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     fetch: async (request) => {
       const store = options.synthesisModel;
-      if (store === void 0) return jsonResponse2(503, { ok: false, error: "STORE_UNAVAILABLE" });
+      if (store === void 0) return jsonResponse3(503, { ok: false, error: "STORE_UNAVAILABLE" });
       const body = await readJsonBody2(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse3(400, { ok: false, error: "INVALID_SELECTION" });
       const value = body;
       if (value.action === "read") {
         const pref2 = readStoredPref(store, options.warn);
-        return jsonResponse2(200, { ok: true, selection: selectionOf(pref2) });
+        return jsonResponse3(200, { ok: true, selection: selectionOf(pref2) });
       }
       if (value.action === "catalog") {
         try {
           const groups = await store.catalog();
-          return jsonResponse2(200, { ok: true, groups });
+          return jsonResponse3(200, { ok: true, groups });
         } catch (error) {
           options.warn(`dsh-session-board: model catalog read failed: ${describeError2(error)}`);
-          return jsonResponse2(500, { ok: false, error: "CATALOG_UNAVAILABLE" });
+          return jsonResponse3(500, { ok: false, error: "CATALOG_UNAVAILABLE" });
         }
       }
-      if (value.action !== "write") return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
+      if (value.action !== "write") return jsonResponse3(400, { ok: false, error: "INVALID_SELECTION" });
       const pref = readSynthesisPrefBody(value);
-      if (pref === null) return jsonResponse2(400, { ok: false, error: "INVALID_SELECTION" });
+      if (pref === null) return jsonResponse3(400, { ok: false, error: "INVALID_SELECTION" });
       const selection = selectionOf(pref);
       if (selection !== null) {
         let verdict = "UNKNOWN_MODEL";
@@ -3009,14 +3672,14 @@ data: ${JSON.stringify(feed)}
         } catch {
           verdict = "UNKNOWN_MODEL";
         }
-        if (verdict !== "ok") return jsonResponse2(400, { ok: false, error: verdict });
+        if (verdict !== "ok") return jsonResponse3(400, { ok: false, error: verdict });
       }
       try {
         await store.write(pref);
       } catch {
-        return jsonResponse2(500, { ok: false, error: "STORE_UNAVAILABLE" });
+        return jsonResponse3(500, { ok: false, error: "STORE_UNAVAILABLE" });
       }
-      return jsonResponse2(200, { ok: true, selection });
+      return jsonResponse3(200, { ok: true, selection });
     }
   };
   const wikiConfigRoute = {
@@ -3025,26 +3688,26 @@ data: ${JSON.stringify(feed)}
     requestBody: "buffered",
     fetch: async (request) => {
       const settings = options.wikiSettings;
-      if (settings === void 0) return jsonResponse2(503, { ok: false, error: "HOST_OUTDATED" });
+      if (settings === void 0) return jsonResponse3(503, { ok: false, error: "HOST_OUTDATED" });
       const body = await readJsonBody2(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG" });
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return jsonResponse3(400, { ok: false, error: "INVALID_CONFIG" });
       const value = body;
       try {
-        if (value.action === "read") return jsonResponse2(200, { ok: true, ...await settings.read() });
-        if (value.action === "probe") return jsonResponse2(200, { ok: true, status: await settings.probe() });
-        if (value.action === "reset") return jsonResponse2(200, { ok: true, ...await settings.reset() });
+        if (value.action === "read") return jsonResponse3(200, { ok: true, ...await settings.read() });
+        if (value.action === "probe") return jsonResponse3(200, { ok: true, status: await settings.probe() });
+        if (value.action === "reset") return jsonResponse3(200, { ok: true, ...await settings.reset() });
         if (value.action === "write") {
           try {
-            return jsonResponse2(200, { ok: true, ...await settings.write(value.config) });
+            return jsonResponse3(200, { ok: true, ...await settings.write(value.config) });
           } catch (error) {
-            if (error instanceof WikiConfigError) return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG", errors: error.errors });
+            if (error instanceof WikiConfigError) return jsonResponse3(400, { ok: false, error: "INVALID_CONFIG", errors: error.errors });
             throw error;
           }
         }
-        return jsonResponse2(400, { ok: false, error: "INVALID_CONFIG" });
+        return jsonResponse3(400, { ok: false, error: "INVALID_CONFIG" });
       } catch (error) {
         options.warn(`dsh-session-board: wiki config failed: ${describeError2(error)}`);
-        return jsonResponse2(500, { ok: false, error: "STORE_UNAVAILABLE" });
+        return jsonResponse3(500, { ok: false, error: "STORE_UNAVAILABLE" });
       }
     }
   };
@@ -3114,7 +3777,7 @@ function readSynthesisPrefBody(body) {
   const pref = parseSynthesisPref({ model, provider, reasoningEffort: effort ?? null });
   return pref.model === null || pref.provider === null ? null : pref;
 }
-function jsonResponse2(status, payload) {
+function jsonResponse3(status, payload) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
@@ -3140,140 +3803,6 @@ function readSessionId2(body) {
 }
 function describeError2(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-// src/host/workspace-meta.ts
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
-
-// src/shared/workspace-meta.ts
-var WORKSPACE_META_PATH = "/api/session-board/workspace-meta";
-function normalizeRemote(raw) {
-  let value = raw.trim();
-  if (value === "") return "";
-  if (value.startsWith("git@") || /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/.test(value)) {
-    const at = value.indexOf("@");
-    const colon = value.indexOf(":", at);
-    if (colon !== -1) value = `${value.slice(at + 1, colon)}/${value.slice(colon + 1)}`;
-  } else if (value.includes("://")) {
-    try {
-      const url = new URL(value);
-      value = `${url.hostname}${url.pathname}`;
-    } catch {
-      return "";
-    }
-  }
-  value = value.replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
-  const parts = value.split("/").filter(Boolean).map((part) => part.toLowerCase());
-  const host = parts.shift();
-  if (host === void 0 || parts.length === 0) return "";
-  return `${host}/${parts.join("/")}`;
-}
-function projectLabel(key) {
-  const parts = key.split("/");
-  return parts.length === 0 || parts[parts.length - 1] === "" ? null : parts[parts.length - 1];
-}
-
-// src/host/workspace-meta.ts
-var exec3 = promisify3(execFile3);
-var MAX_WORKSPACES = 400;
-var PROBE_CONCURRENCY = 6;
-var DEFAULT_TTL_MS = 12e4;
-async function probeWorkspaceGit(path) {
-  const run = async (args) => {
-    const result = await exec3("git", ["-C", path, ...args], { timeout: 2500, maxBuffer: 64 * 1024 });
-    return result.stdout.trim();
-  };
-  let root;
-  try {
-    root = await run(["rev-parse", "--show-toplevel"]);
-  } catch {
-    return {};
-  }
-  if (root === "") return {};
-  let branch;
-  let remote;
-  try {
-    const value = await run(["rev-parse", "--abbrev-ref", "HEAD"]);
-    if (value !== "" && value !== "HEAD") branch = value;
-  } catch {
-  }
-  try {
-    const value = await run(["config", "--get", "remote.origin.url"]);
-    if (value !== "") remote = value;
-  } catch {
-  }
-  return { root, ...branch === void 0 ? {} : { branch }, ...remote === void 0 ? {} : { remote } };
-}
-function jsonResponse3(status, body) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-  });
-}
-function createWorkspaceMetaRoute(options) {
-  const ttl = options.ttlMs ?? DEFAULT_TTL_MS;
-  const probe = options.probe ?? probeWorkspaceGit;
-  const now = options.now ?? Date.now;
-  const cache = /* @__PURE__ */ new Map();
-  const inflight = /* @__PURE__ */ new Map();
-  const factsFor = async (workspaceId, path) => {
-    const cached = cache.get(workspaceId);
-    if (cached !== void 0 && now() - cached.at < ttl) return cached.facts;
-    const running = inflight.get(workspaceId);
-    if (running !== void 0) return await running;
-    const task = (async () => {
-      try {
-        const facts = await probe(path);
-        cache.set(workspaceId, { at: now(), facts });
-        return facts;
-      } catch (error) {
-        options.warn(`dsh-session-board: workspace probe failed for ${path}: ${String(error)}`);
-        return {};
-      } finally {
-        inflight.delete(workspaceId);
-      }
-    })();
-    inflight.set(workspaceId, task);
-    return await task;
-  };
-  const rowFor = (workspace, facts) => {
-    const projectKey = facts.remote === void 0 ? "" : normalizeRemote(facts.remote);
-    const label = projectKey === "" ? null : projectLabel(projectKey);
-    return {
-      workspaceId: workspace.id,
-      title: workspace.title,
-      path: workspace.path,
-      ...facts.branch === void 0 ? {} : { branch: facts.branch },
-      ...projectKey === "" ? {} : { projectKey },
-      ...label === null ? {} : { projectLabel: label },
-      ...facts.remote === void 0 ? {} : { remote: facts.remote },
-      ...facts.root === void 0 ? {} : { root: facts.root }
-    };
-  };
-  return {
-    path: WORKSPACE_META_PATH,
-    methods: ["GET"],
-    requestBody: "buffered",
-    fetch: async () => {
-      try {
-        const listed = options.registry.list().slice(0, MAX_WORKSPACES);
-        const rows = [];
-        for (let start = 0; start < listed.length; start += PROBE_CONCURRENCY) {
-          const chunk = listed.slice(start, start + PROBE_CONCURRENCY);
-          const facts = await Promise.all(chunk.map(async (workspace) => await factsFor(workspace.id, workspace.path)));
-          chunk.forEach((workspace, index) => {
-            rows.push(rowFor(workspace, facts[index] ?? {}));
-          });
-        }
-        const body = { ok: true, generatedAt: now(), workspaces: rows };
-        return jsonResponse3(200, body);
-      } catch (error) {
-        options.warn(`dsh-session-board: workspace meta failed: ${String(error)}`);
-        return jsonResponse3(500, { ok: false, error: "WORKSPACE_META_UNAVAILABLE" });
-      }
-    }
-  };
 }
 
 // src/host/plugin.ts

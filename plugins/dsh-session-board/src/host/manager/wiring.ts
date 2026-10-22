@@ -14,12 +14,13 @@ import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { BoardFetchRoute } from '../routes.ts'
 import type { DomainSpec, DomainTableSpec } from '../domain.ts'
-import { MANAGER_STATE_TABLE, MANAGER_TASK_TABLE, managerDomainSpec } from './domain.ts'
-import type { ManagerStateRecord, ManagerTaskRecord } from './domain.ts'
+import { MANAGER_STATE_TABLE, MANAGER_TASK_TABLE, PROJECT_COORDINATOR_TABLE, managerDomainSpec, projectDomainSpec } from './domain.ts'
+import type { ManagerCoordinatorRecord, ManagerStateRecord, ManagerTaskRecord } from './domain.ts'
 import { EventMux } from './mux.ts'
 import { ManagerService, defaultManagerDir } from './service.ts'
 import type { ManagerTable } from './service.ts'
 import { createManagerRoutes } from './routes.ts'
+import { ProjectCoordinators } from './projects.ts'
 
 /** Table value type recovered from a domain spec declaration. */
 type TableValueOf<S, N extends keyof S & string> =
@@ -59,11 +60,14 @@ export function startManager(options: ManagerWiringOptions): void {
 
   void (async (): Promise<void> => {
     let service: ManagerService
+    /** Hoisted so the project coordinator store can reuse the manager task table. */
+    let managerTasks: ManagerTable<ManagerTaskRecord> | null = null
     try {
       const domain = await storageDomain.open(managerDomainSpec)
       ctx.effect(() => () => domain.close(), 'dsh-session-board: manager domain')
       const stateTable = domain.table(MANAGER_STATE_TABLE)
       const taskTable = domain.table(MANAGER_TASK_TABLE)
+      managerTasks = taskTable as unknown as ManagerTable<ManagerTaskRecord>
       service = new ManagerService({
         ctx,
         state: stateTable as unknown as ManagerTable<ManagerStateRecord>,
@@ -76,6 +80,24 @@ export function startManager(options: ManagerWiringOptions): void {
     } catch (error) {
       warn(`dsh-session-board: manager store unavailable, manager panel disabled: ${describe(error)}`)
       return
+    }
+
+    // Project coordinators are a separate store: a broken project table keeps
+    // the manager panel usable (the coordinator entry then reports the error).
+    let projects: ProjectCoordinators | null = null
+    try {
+      const domain = await storageDomain.open(projectDomainSpec)
+      ctx.effect(() => () => domain.close(), 'dsh-session-board: projects domain')
+      projects = new ProjectCoordinators({
+        ctx,
+        coordinators: domain.table(PROJECT_COORDINATOR_TABLE) as unknown as ManagerTable<ManagerCoordinatorRecord>,
+        tasks: managerTasks as unknown as ManagerTable<ManagerTaskRecord>,
+        mux,
+        warn,
+      })
+      ctx.effect(() => () => projects?.dispose(), 'dsh-session-board: project coordinators')
+    } catch (error) {
+      warn(`dsh-session-board: project coordinator store unavailable: ${describe(error)}`)
     }
 
     // Routes first: state/selection/task are the panel's only Host surface.
@@ -91,6 +113,13 @@ export function startManager(options: ManagerWiringOptions): void {
       selection: async raw => await service.writeSelection(raw),
       task: async raw => await service.task(readTaskRequest(raw)),
       wake: async raw => ({ wake: await service.wake(raw) }),
+      projectCoordinator: async raw => {
+        const body = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as { projectKey?: unknown }) : {}
+        if (typeof body.projectKey !== 'string' || body.projectKey === '') throw new Error('projectKey is required')
+        if (projects === null) throw new Error('project coordinator store unavailable')
+        const result = await projects.ensure(body.projectKey)
+        return { projectKey: result.projectKey, label: result.label, sessionId: result.sessionId, workspaceId: result.workspaceId, created: result.created }
+      },
       warn,
     })
     for (const route of routes) {
@@ -111,9 +140,11 @@ export function startManager(options: ManagerWiringOptions): void {
     })
     ctx.on('agent/created', ({ agent }) => {
       service.installAgent(agent)
+      projects?.installAgent(agent)
     })
     ctx.on('agent/disposed', ({ agent }) => {
       service.disposeAgent(agent.id)
+      projects?.disposeAgent(agent.id)
       mux.remove(agent.id)
     })
   })()

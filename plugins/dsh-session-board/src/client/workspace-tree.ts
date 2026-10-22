@@ -14,6 +14,8 @@ export interface WorkspaceNode {
   /** Branch (workspace leaf) or remote (project node); rendered as muted text. */
   subtitle?: string
   kind?: 'project' | 'workspace' | 'path'
+  /** Normalized git origin key, present on project roots only. */
+  projectKey?: string
 }
 
 export function workspaceKey(entry: BoardEntry): string { return entry.workspaceId || entry.workspacePath || entry.workspaceTitle || 'unassigned' }
@@ -180,6 +182,7 @@ function projectNodes(groups: readonly BoardGroup[], meta: Readonly<Record<strin
         children,
         count: children.reduce((sum, child) => sum + child.count, 0),
         kind: 'project' as const,
+        projectKey: project.key,
       }
     })
   return [...projectRoots, ...pathTrees(rest)]

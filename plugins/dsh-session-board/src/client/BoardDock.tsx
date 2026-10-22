@@ -54,6 +54,8 @@ export interface BoardDockProps {
   onToggleGroup: (group: string) => void
   /** Workspace id → git facts, for the project tree. */
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>
+  /** Open the coordinator session of one project. */
+  onOpenCoordinator?: (projectKey: string) => void
 }
 
 /** A small icon button. */
@@ -84,7 +86,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   const {
     groups, grouping, t, collapsed, width, density, online,
     onToggleCollapse, onWidth, onToggleDensity, onOpenBoard,
-    onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled, collapsedGroups, onToggleGroup, workspaceMeta,
+    onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled, collapsedGroups, onToggleGroup, workspaceMeta, onOpenCoordinator,
   } = props
 
   const [dragging, setDragging] = useState(false)
@@ -145,7 +147,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.7.1"
+        data-session-board-version="0.8.0"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -176,7 +178,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.7.1"
+        data-session-board-version="0.8.0"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}
@@ -228,6 +230,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
           onToggleSelect={onToggleSelect}
           selectionDisabled={selectionDisabled}
           workspaceMeta={workspaceMeta}
+          onOpenCoordinator={onOpenCoordinator}
         />
       </div>
       <div

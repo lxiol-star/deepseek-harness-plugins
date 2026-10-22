@@ -33,6 +33,8 @@ export interface BoardListProps {
   backToTop?: boolean
   /** Workspace id → git facts; the project tree uses it, path fallback ignores it. */
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>> | undefined
+  /** Open (creating on first use) a project's coordinator session. */
+  onOpenCoordinator?: ((projectKey: string) => void) | undefined
 }
 
 /** One group heading. */
@@ -79,6 +81,7 @@ export function BoardList({
   emptyKey,
   grouping = 'status',
   workspaceMeta,
+  onOpenCoordinator,
 }: BoardListProps): ReactElement {
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
   if (total === 0) return <div className="sb-empty">{t(emptyKey)}</div>
@@ -87,12 +90,16 @@ export function BoardList({
     const renderNode = (node: WorkspaceNode): ReactElement => {
       const open = collapsed?.[node.key] !== true
       const title = node.title || t('workspace.unassigned')
-      return <section className="sb-workspace-node" key={node.key} data-open={open ? 'true' : 'false'}>
-        <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={t('a11y.groupCount', { group: title, count: node.count })}>
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span>
-        </button>
+      const header = <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={t('a11y.groupCount', { group: title, count: node.count })}>
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span>
+      </button>
+      const projectKey = node.projectKey
+      return <section className="sb-workspace-node" key={node.key} data-open={open ? 'true' : 'false'} data-kind={node.kind}>
+        {node.kind === 'project' && projectKey !== undefined && onOpenCoordinator !== undefined
+          ? <div className="sb-workspace-head-row">{header}<button type="button" className="sb-workspace-action" title={t('workspace.coordinatorHint')} onClick={() => onOpenCoordinator(projectKey)}>{t('workspace.coordinator')}</button></div>
+          : header}
         {open ? <div className="sb-workspace-body">
-          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} workspaceMeta={workspaceMeta} /> : null}
+          {node.entries.length > 0 ? <BoardList groups={groups.map(group => ({ ...group, entries: group.entries.filter(entry => node.entries.includes(entry)) }))} t={t} collapsed={collapsed} onToggleGroup={onToggleGroup} onOpen={onOpen} onAck={onAck} selected={selected} onToggleSelect={onToggleSelect} selectionDisabled={selectionDisabled} emptyKey={emptyKey} workspaceMeta={workspaceMeta} onOpenCoordinator={onOpenCoordinator} /> : null}
           {node.children.map(renderNode)}
         </div> : null}
       </section>

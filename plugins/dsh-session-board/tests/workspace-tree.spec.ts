@@ -49,6 +49,7 @@ describe('workspace tree', () => {
     const roots = buildWorkspaceNodes(groups, true, meta)
     const project = roots.find(node => node.kind === 'project')
     expect(project?.title).toBe('i-ai-gw')
+    expect(project?.projectKey).toBe('git.zyql.com/it-eff-lab/i-ai-gw')
     expect(project?.path).toBe('git@git.zyql.com:it-eff-lab/i-ai-gw.git')
     expect(project?.children.map(child => child.title)).toEqual(['i-ai-gw', 'i-ai-gw-tpm'])
     expect(project?.children.map(child => child.subtitle)).toEqual(['feat/main', 'feat/tpm'])

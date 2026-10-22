@@ -268,7 +268,8 @@ function projectNodes(groups, meta) {
       entries: [],
       children,
       count: children.reduce((sum, child) => sum + child.count, 0),
-      kind: "project"
+      kind: "project",
+      projectKey: project.key
     };
   }), ...pathTrees(rest)];
 }
@@ -610,21 +611,25 @@ function BoardList({
   selectionDisabled,
   emptyKey,
   grouping = "status",
-  workspaceMeta
+  workspaceMeta,
+  onOpenCoordinator
 }) {
   if (groups.reduce((sum, group) => sum + group.entries.length, 0) === 0) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
   if (grouping !== "status") {
     let renderNode = (node) => {
-      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned");
-      return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("section", { className: "sb-workspace-node", "data-open": open ? "true" : "false", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": t("a11y.groupCount", { group: title, count: node.count }), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: title }),
-          node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", children: node.subtitle }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
-        ] }),
+      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), header = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": t("a11y.groupCount", { group: title, count: node.count }), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: title }),
+        node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", children: node.subtitle }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
+      ] }), projectKey = node.projectKey;
+      return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("section", { className: "sb-workspace-node", "data-open": open ? "true" : "false", "data-kind": node.kind, children: [
+        node.kind === "project" && projectKey !== void 0 && onOpenCoordinator !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-head-row", children: [
+          header,
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "sb-workspace-action", title: t("workspace.coordinatorHint"), onClick: () => onOpenCoordinator(projectKey), children: t("workspace.coordinator") })
+        ] }) : header,
         open ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-workspace-body", children: [
-          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, workspaceMeta }) : null,
+          node.entries.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BoardList, { groups: groups.map((group) => ({ ...group, entries: group.entries.filter((entry) => node.entries.includes(entry)) })), t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, workspaceMeta, onOpenCoordinator }) : null,
           node.children.map(renderNode)
         ] }) : null
       ] }, node.key);
@@ -705,7 +710,8 @@ function BoardDock(props) {
     selectionDisabled,
     collapsedGroups,
     onToggleGroup,
-    workspaceMeta
+    workspaceMeta,
+    onOpenCoordinator
   } = props, [dragging, setDragging] = (0, import_react5.useState)(!1), [liveWidth, setLiveWidth] = (0, import_react5.useState)(width), dragState = (0, import_react5.useRef)(null), hidden = useDocumentHidden(), total = groups.reduce((sum, group) => sum + group.entries.length, 0), onPointerDown = (0, import_react5.useCallback)((event) => {
     event.button === 0 && (event.preventDefault(), event.currentTarget.setPointerCapture(event.pointerId), dragState.current = { startX: event.clientX, startWidth: clampDockWidth(width), pointerId: event.pointerId, frame: null, latest: clampDockWidth(width) }, setDragging(!0));
   }, [width]), onPointerMove = (0, import_react5.useCallback)((event) => {
@@ -734,7 +740,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.7.1",
+      "data-session-board-version": "0.8.0",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -758,7 +764,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.7.1",
+      "data-session-board-version": "0.8.0",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -805,7 +811,8 @@ function BoardDock(props) {
               selected,
               onToggleSelect,
               selectionDisabled,
-              workspaceMeta
+              workspaceMeta,
+              onOpenCoordinator
             }
           )
         ] }),
@@ -1210,7 +1217,8 @@ function BoardOverlay(props) {
     selectionDisabled,
     collapsedGroups,
     onToggleGroup,
-    workspaceMeta
+    workspaceMeta,
+    onOpenCoordinator
   } = props, panelRef = (0, import_react6.useRef)(null), closeRef = (0, import_react6.useRef)(onClose);
   closeRef.current = onClose;
   let restoreLabelsRef = (0, import_react6.useRef)([]);
@@ -1256,7 +1264,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.7.1",
+        "data-session-board-version": "0.8.0",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1310,7 +1318,8 @@ function BoardOverlay(props) {
               selected,
               onToggleSelect,
               selectionDisabled,
-              workspaceMeta
+              workspaceMeta,
+              onOpenCoordinator
             }
           ) })
         ]
@@ -2008,6 +2017,10 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-root .sb-card[data-expanded="true"] { height: 320px; min-height: 320px; max-height: 320px; flex-basis: 320px; }
 .sb-card-details { align-self: flex-start; font-size: 11px; }
 .sb-workspace-node { min-width: 0; margin-bottom: 8px; }
+.sb-workspace-head-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sb-workspace-head-row > .sb-group-head { flex: 1; min-width: 0; }
+.sb-workspace-action { flex: none; padding: 2px 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 10px; line-height: 16px; cursor: pointer; }
+.sb-workspace-action:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
@@ -2807,6 +2820,8 @@ var NS = "session-board", en = {
   "filter.byTree": "Project tree",
   "card.archived": "Archived to Wiki",
   "workspace.unassigned": "Unassigned workspace",
+  "workspace.coordinator": "Project session",
+  "workspace.coordinatorHint": "Open or create this project's coordinator session",
   "batch.scopeMain": "Selected main session",
   "batch.scopeChild": "Child of {parent} (parentSession)",
   "batch.snapshot": "In-progress snapshot",
@@ -3056,6 +3071,8 @@ var NS = "session-board", en = {
   "filter.byTree": "\u9879\u76EE\u6811",
   "card.archived": "\u5DF2\u5F52\u6863\u5230 Wiki",
   "workspace.unassigned": "\u672A\u5206\u914D\u5DE5\u4F5C\u533A",
+  "workspace.coordinator": "\u9879\u76EE\u4F1A\u8BDD",
+  "workspace.coordinatorHint": "\u6253\u5F00\u6216\u521B\u5EFA\u8BE5\u9879\u76EE\u7684\u534F\u8C03\u4F1A\u8BDD",
   "batch.scopeMain": "\u9009\u4E2D\u7684\u4E3B\u4F1A\u8BDD",
   "batch.scopeChild": "\u5B50\u4F1A\u8BDD\uFF0C\u7236\u4F1A\u8BDD {parent}\uFF08parentSession\uFF09",
   "batch.snapshot": "\u8FDB\u884C\u4E2D\u5FEB\u7167",
@@ -4677,7 +4694,7 @@ function SessionBoardSettingsPage({ t, settings, wiki }) {
 }
 
 // src/shared/manager.ts
-var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_PATH = "/api/session-board/manager/selection", MANAGER_TASK_PATH = "/api/session-board/manager/task", MANAGER_WAKE_PATH = "/api/session-board/manager/wake", MANAGER_TASK_STATUSES = [
+var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_PATH = "/api/session-board/manager/selection", MANAGER_TASK_PATH = "/api/session-board/manager/task", MANAGER_WAKE_PATH = "/api/session-board/manager/wake", PROJECT_COORDINATOR_PATH = "/api/session-board/project/coordinator", MANAGER_TASK_STATUSES = [
   "pending",
   "assigned",
   "running",
@@ -5626,6 +5643,19 @@ function useFilters(face, groups) {
   }, [face]);
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) };
 }
+async function openProjectCoordinator(face, projectKey) {
+  try {
+    let response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectKey })
+    }), payload = await response.json().catch(() => null);
+    if (!response.ok || typeof payload != "object" || payload === null) return;
+    let sessionId = payload.sessionId;
+    typeof sessionId == "string" && sessionId !== "" && face.openSession(sessionId);
+  } catch {
+  }
+}
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
@@ -5633,6 +5663,9 @@ function DockRoot({ face }) {
     {
       grouping: view.grouping,
       workspaceMeta,
+      onOpenCoordinator: (projectKey) => {
+        openProjectCoordinator(face, projectKey);
+      },
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",
       t,
@@ -5670,6 +5703,9 @@ function OpenOverlayContent({ face }) {
       open: !0,
       grouping: view.grouping,
       workspaceMeta,
+      onOpenCoordinator: (projectKey) => {
+        openProjectCoordinator(face, projectKey);
+      },
       groups: filtering.filtered,
       emptyKey: groups.some((group) => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions",
       t,

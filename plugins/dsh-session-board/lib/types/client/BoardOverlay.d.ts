@@ -47,6 +47,8 @@ export interface BoardOverlayProps {
     onToggleGroup: (group: string) => void;
     /** Workspace id → git facts, for the project tree. */
     workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>;
+    /** Open the coordinator session of one project. */
+    onOpenCoordinator?: (projectKey: string) => void;
 }
 /** The fullscreen board, or null while closed. */
 export declare function BoardOverlay(props: BoardOverlayProps): ReactElement | null;

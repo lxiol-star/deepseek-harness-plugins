@@ -43,6 +43,8 @@ export interface BoardDockProps {
     onToggleGroup: (group: string) => void;
     /** Workspace id → git facts, for the project tree. */
     workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>;
+    /** Open the coordinator session of one project. */
+    onOpenCoordinator?: (projectKey: string) => void;
 }
 /** The docked column. */
 export declare function BoardDock(props: BoardDockProps): ReactElement;

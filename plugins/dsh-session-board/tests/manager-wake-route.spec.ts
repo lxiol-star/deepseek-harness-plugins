@@ -19,6 +19,7 @@ function wakeRoute(wakeHandler: (body: unknown) => Promise<ManagerWakeResponse>)
     selection: async () => { throw new Error('unused') },
     task: async () => { throw new Error('unused') },
     wake: wakeHandler,
+    projectCoordinator: async () => ({ projectKey: 'p', label: 'p', sessionId: 's', workspaceId: 'w', created: false }),
     warn: () => {},
   })
   return routes.find(route => route.path === MANAGER_WAKE_PATH)
@@ -63,6 +64,7 @@ describe('manager wake route', () => {
       selection: async () => { throw new Error('unused') },
       task: async () => { throw new Error('unused') },
       wake: async () => { throw new Error('bad action') },
+      projectCoordinator: async () => ({ projectKey: 'p', label: 'p', sessionId: 's', workspaceId: 'w', created: false }),
       warn,
     })
     const route = routes.find(candidate => candidate.path === MANAGER_WAKE_PATH)

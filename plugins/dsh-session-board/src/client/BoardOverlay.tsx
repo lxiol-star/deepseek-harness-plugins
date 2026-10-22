@@ -54,6 +54,8 @@ export interface BoardOverlayProps {
   onToggleGroup: (group: string) => void
   /** Workspace id → git facts, for the project tree. */
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>
+  /** Open the coordinator session of one project. */
+  onOpenCoordinator?: (projectKey: string) => void
 }
 
 /**
@@ -75,7 +77,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   const {
     open, groups, grouping, t, density, online,
     onClose, onToggleDensity, onOpen, onAck, selected, onToggleSelect, toolbar, emptyKey, selectionDisabled,
-    collapsedGroups, onToggleGroup, workspaceMeta,
+    collapsedGroups, onToggleGroup, workspaceMeta, onOpenCoordinator,
   } = props
 
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -150,7 +152,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   return createPortal(
     <div
       className="sb-overlay sb-root"
-      data-session-board-version="0.7.1"
+      data-session-board-version="0.8.0"
       data-density={density}
       data-quiet={hidden ? 'true' : undefined}
       role="dialog"
@@ -205,6 +207,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
           onToggleSelect={onToggleSelect}
           selectionDisabled={selectionDisabled}
           workspaceMeta={workspaceMeta}
+          onOpenCoordinator={onOpenCoordinator}
         />
       </div>
     </div>,

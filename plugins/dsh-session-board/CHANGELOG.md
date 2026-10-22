@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 — 2026-10-22
+
+- **项目协调会话**：项目树的项目节点右侧新增「项目会话」按钮，按需在主工作区创建/打开一个普通 DSH 会话（「项目协调台 · <项目名>」），会话映射持久化在 `dsh_session_board_projects` 域。
+- 协调会话获得项目范围工具：`project_overview`（分支工作区/运行状态/任务）、`project_assign_task`（只能派到项目内工作区，创建任务会话+首条 brief）、`project_message_session`（向项目内已有会话排队消息）、`project_session_status`。
+- 项目内工作会话自动获得 `report_to_coordinator` 工具：可回报进展/阻塞给协调会话，带 taskId 时同时更新任务备注；消息均走官方 `session.prompt`，可在会话日志审计。
+- 新增认证路由 `POST /api/session-board/project/coordinator`（按 projectKey 打开/创建协调会话）；项目/任务数据分别落在独立域与 manager 任务表，互不影响。
+- 新增项目发现、协调会话生命周期、工具安装与执行、worker 回报、路由与树按钮的测试。
+
 ## 0.7.1 — 2026-10-22
 
 - 修正「按项目树」的中文选项文案：0.7.0 只改了英文 `Project tree`，中文分组下拉仍显示「工作区树」。

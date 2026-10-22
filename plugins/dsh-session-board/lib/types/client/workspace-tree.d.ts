@@ -12,6 +12,8 @@ export interface WorkspaceNode {
     /** Branch (workspace leaf) or remote (project node); rendered as muted text. */
     subtitle?: string;
     kind?: 'project' | 'workspace' | 'path';
+    /** Normalized git origin key, present on project roots only. */
+    projectKey?: string;
 }
 export declare function workspaceKey(entry: BoardEntry): string;
 /**

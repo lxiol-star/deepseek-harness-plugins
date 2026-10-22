@@ -6,9 +6,9 @@
  * the board's existing routes. Every handler answers `{ ok, ... }`, maps a
  * thrown Error to a contained 4xx/5xx, and never rejects past the boundary.
  */
-import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse, ManagerWakeResponse } from '../../shared/manager.ts'
+import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse, ManagerWakeResponse, ProjectCoordinatorResponse } from '../../shared/manager.ts'
 import type { BoardFetchRoute } from '../routes.ts'
-import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH, MANAGER_WAKE_PATH } from '../../shared/manager.ts'
+import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH, MANAGER_WAKE_PATH, PROJECT_COORDINATOR_PATH } from '../../shared/manager.ts'
 
 /** Route handlers, implemented by the plugin wiring over the manager service. */
 export interface ManagerRouteHandlers {
@@ -20,6 +20,8 @@ export interface ManagerRouteHandlers {
   task(body: unknown): Promise<ManagerTaskResponse>
   /** Enable/disable automatic wakeups or deliver one digest immediately. */
   wake(body: unknown): Promise<ManagerWakeResponse>
+  /** Open (creating on first use) one project's coordinator session. */
+  projectCoordinator(body: unknown): Promise<ProjectCoordinatorResponse>
   /** Contained warning sink. */
   warn(message: string): void
 }
@@ -104,5 +106,18 @@ export function createManagerRoutes(handlers: ManagerRouteHandlers): readonly Bo
       }
     },
   }
-  return [stateRoute, selectionRoute, taskRoute, wakeRoute]
+  const coordinatorRoute: BoardFetchRoute = {
+    path: PROJECT_COORDINATOR_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        return jsonResponse(200, { ok: true, ...(await handlers.projectCoordinator(await readJsonBody(request))) })
+      } catch (error) {
+        handlers.warn(`dsh-session-board: project coordinator failed: ${describe(error)}`)
+        return jsonResponse(400, { ok: false, error: 'PROJECT_COORDINATOR_FAILED' })
+      }
+    },
+  }
+  return [stateRoute, selectionRoute, taskRoute, wakeRoute, coordinatorRoute]
 }

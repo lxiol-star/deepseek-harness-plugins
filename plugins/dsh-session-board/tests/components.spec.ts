@@ -200,6 +200,28 @@ describe('actual React components', () => {
     expect(view.container.textContent).toContain('Confirm archive only')
     expect(view.container.textContent).toContain('No model calls and no index update.')
   })
+  it('project tree shows branch labels and opens the project coordinator', async () => {
+    const workspaceEntry = { ...entry, workspaceId: 'wa', workspacePath: '/repo/i-ai-gw', workspaceTitle: 'i-ai-gw' }
+    const meta = {
+      wa: {
+        workspaceId: 'wa', title: 'i-ai-gw', path: '/repo/i-ai-gw', branch: 'feat/main',
+        projectKey: 'github.com/me/i-ai-gw', projectLabel: 'i-ai-gw',
+      },
+    }
+    const open = vi.fn()
+    const props = {
+      groups: [{ id: 'attention', entries: [workspaceEntry] }], t: components.t, grouping: 'tree',
+      workspaceMeta: meta, onOpenCoordinator: open, collapsed: {}, onToggleGroup: vi.fn(),
+      onOpen: vi.fn(), onAck: vi.fn(), emptyKey: 'empty.noSessions',
+    }
+    const view = mount(components.BoardList, props); await view.render(props)
+    expect(view.container.textContent).toContain('i-ai-gw')
+    expect(view.container.textContent).toContain('feat/main')
+    const button = [...view.container.querySelectorAll('button')].find(candidate => candidate.textContent === 'Project session')!
+    expect(button).toBeDefined()
+    await React.act(async () => { button.click() })
+    expect(open).toHaveBeenCalledWith('github.com/me/i-ai-gw')
+  })
   it('archived-only button toggles the archive filter', async () => {
     const change = vi.fn()
     const filters = { query: '', status: 'all' as const, workspace: '' }

@@ -30,9 +30,11 @@ export interface BoardListProps {
     backToTop?: boolean;
     /** Workspace id → git facts; the project tree uses it, path fallback ignores it. */
     workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>> | undefined;
+    /** Open (creating on first use) a project's coordinator session. */
+    onOpenCoordinator?: ((projectKey: string) => void) | undefined;
 }
 /** The list itself, without its scroll container. */
-export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, grouping, workspaceMeta, }: BoardListProps): ReactElement;
+export declare function BoardList({ groups, t, collapsed, onToggleGroup, onOpen, onAck, selected, onToggleSelect, selectionDisabled, emptyKey, grouping, workspaceMeta, onOpenCoordinator, }: BoardListProps): ReactElement;
 /** Props of {@link BoardScroll}. */
 export interface BoardScrollProps extends BoardListProps {
     /** Class applied to the scroll container. */

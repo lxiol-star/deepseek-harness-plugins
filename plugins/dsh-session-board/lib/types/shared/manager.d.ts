@@ -17,6 +17,8 @@ export declare const MANAGER_SELECTION_PATH = "/api/session-board/manager/select
 export declare const MANAGER_TASK_PATH = "/api/session-board/manager/task";
 /** Enable/disable automatic wakeups or request one digest immediately. */
 export declare const MANAGER_WAKE_PATH = "/api/session-board/manager/wake";
+/** Open (creating on first use) the coordinator session of one project. */
+export declare const PROJECT_COORDINATOR_PATH = "/api/session-board/project/coordinator";
 /** Lifecycle of one tracked task. `running`/`blocked` are derived by the mux. */
 export declare const MANAGER_TASK_STATUSES: readonly ["pending", "assigned", "running", "blocked", "done", "failed", "orphaned"];
 /** One task status. */
@@ -63,6 +65,15 @@ export interface ManagerWakeStatus {
 }
 /** Wake actions accepted by `/manager/wake`. */
 export type ManagerWakeAction = 'enable' | 'disable' | 'now';
+/** `/project/coordinator` response. */
+export interface ProjectCoordinatorResponse {
+    readonly projectKey: string;
+    readonly label: string;
+    readonly sessionId: string;
+    readonly workspaceId: string;
+    /** True when this call created the session; false when it already existed. */
+    readonly created: boolean;
+}
 /** `/manager/wake` response. */
 export interface ManagerWakeResponse {
     readonly wake: ManagerWakeStatus;

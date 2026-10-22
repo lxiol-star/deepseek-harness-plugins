@@ -43,6 +43,7 @@ import { createWikiSettings, type WikiSettingsFace } from './wiki-settings.ts'
 import { SessionBoardSettingsPage } from './SettingsPage.tsx'
 import { ManagerController } from './manager/controller.ts'
 import { createWorkspaceMeta, type WorkspaceMetaFace } from './workspace-meta.ts'
+import { PROJECT_COORDINATOR_PATH } from '../shared/manager.ts'
 import { ManagerDrawer, ManagerToggle } from './manager/ManagerDrawer.tsx'
 import { ManagerChatPanel } from './manager/ManagerChat.tsx'
 import type {
@@ -224,6 +225,29 @@ function useFilters(face: BoardFace, groups: ReturnType<BoardModel['getSnapshot'
   return { filters, filtered, change, shown: filtered.reduce((sum, group) => sum + group.entries.length, 0) }
 }
 
+/**
+ * Open (creating on first use) one project's coordinator session and navigate
+ * to it. Failures are contained: the board stays usable and the next click
+ * retries.
+ * @param face - board face for navigation.
+ * @param projectKey - normalized git origin key of the project node.
+ */
+async function openProjectCoordinator(face: BoardFace, projectKey: string): Promise<void> {
+  try {
+    const response = await globalThis.fetch(PROJECT_COORDINATOR_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectKey }),
+    })
+    const payload: unknown = await response.json().catch(() => null)
+    if (!response.ok || typeof payload !== 'object' || payload === null) return
+    const sessionId = (payload as { sessionId?: unknown }).sessionId
+    if (typeof sessionId === 'string' && sessionId !== '') face.openSession(sessionId)
+  } catch {
+    // Navigation is best-effort; a failed fetch must not break the list.
+  }
+}
+
 /** The docked column's React root. */
 function DockRoot({ face }: { face: BoardFace }): ReactElement {
   const { groups } = useSnapshot(face.model, value => value)
@@ -237,6 +261,7 @@ function DockRoot({ face }: { face: BoardFace }): ReactElement {
     <BoardDock
       grouping={view.grouping}
       workspaceMeta={workspaceMeta}
+      onOpenCoordinator={(projectKey) => { void openProjectCoordinator(face, projectKey) }}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}
@@ -276,6 +301,7 @@ function OpenOverlayContent({ face }: { face: BoardFace }): ReactElement {
       open
       grouping={view.grouping}
       workspaceMeta={workspaceMeta}
+      onOpenCoordinator={(projectKey) => { void openProjectCoordinator(face, projectKey) }}
       groups={filtering.filtered}
       emptyKey={groups.some(group => group.entries.length > 0) ? "empty.noMatches" : "empty.noSessions"}
       t={t}

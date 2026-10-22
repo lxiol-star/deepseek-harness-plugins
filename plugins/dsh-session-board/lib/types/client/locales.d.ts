@@ -35,6 +35,8 @@ export declare const en: {
     readonly 'filter.byTree': "Project tree";
     readonly 'card.archived': "Archived to Wiki";
     readonly 'workspace.unassigned': "Unassigned workspace";
+    readonly 'workspace.coordinator': "Project session";
+    readonly 'workspace.coordinatorHint': "Open or create this project's coordinator session";
     readonly 'batch.scopeMain': "Selected main session";
     readonly 'batch.scopeChild': "Child of {parent} (parentSession)";
     readonly 'batch.snapshot': "In-progress snapshot";

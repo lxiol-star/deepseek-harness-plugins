@@ -100,6 +100,50 @@ export const managerTaskSchema: RecordSchema<ManagerTaskRecord> = {
   },
 }
 
+/** Domain holding project coordinator session mappings. */
+export const PROJECT_DOMAIN_NAME = 'dsh_session_board_projects'
+/** Table mapping a project key to its coordinator session. */
+export const PROJECT_COORDINATOR_TABLE = 'coordinators'
+
+/** One persisted project coordinator. */
+export interface ManagerCoordinatorRecord {
+  readonly projectKey: string
+  readonly label: string
+  readonly sessionId: string
+  readonly workspaceId: string
+  readonly createdAt: number
+    readonly remote?: string
+}
+
+/** Normalize one coordinator row; an empty identity is unusable. */
+const coordinatorSchema: RecordSchema<ManagerCoordinatorRecord> = {
+  parse(value) {
+    const source = (typeof value === 'object' && value !== null ? value : {}) as Partial<ManagerCoordinatorRecord>
+    const projectKey = typeof source.projectKey === 'string' ? source.projectKey : ''
+    const sessionId = typeof source.sessionId === 'string' ? source.sessionId : ''
+    const workspaceId = typeof source.workspaceId === 'string' ? source.workspaceId : ''
+    if (projectKey === '' || sessionId === '' || workspaceId === '') throw new Error('coordinator row is incomplete')
+    return {
+      projectKey,
+      label: typeof source.label === 'string' && source.label !== '' ? source.label : (projectKey.split('/').pop() ?? projectKey),
+      sessionId,
+      workspaceId,
+      createdAt: typeof source.createdAt === 'number' ? source.createdAt : Date.now(),
+      ...(typeof source.remote === 'string' && source.remote !== '' ? { remote: source.remote } : {}),
+    }
+  },
+}
+
+/** Project coordinator domain. */
+export const projectDomainSpec: DomainSpec = defineDomain({
+  name: PROJECT_DOMAIN_NAME,
+  version: 1,
+  invalidRecords: 'backup-and-skip',
+  tables: {
+    [PROJECT_COORDINATOR_TABLE]: domainTable(coordinatorSchema),
+  },
+})
+
 /** Manager domain: one identity/selection record plus the task board. */
 export const managerDomainSpec: DomainSpec = defineDomain({
   name: MANAGER_DOMAIN_NAME,
