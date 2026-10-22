@@ -993,6 +993,8 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-chip[data-status='failed'],
 .sb-manager-chip[data-status='orphaned'] { color: var(--dsw-alias-state-error-primary); }
 
+.sb-manager-wake-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-manager-wake-actions .sb-manager-btn { flex: 0 0 auto; }
 .sb-manager-selection {
   flex: 0 0 auto;
   display: flex;

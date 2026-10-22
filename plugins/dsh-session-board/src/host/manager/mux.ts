@@ -116,11 +116,29 @@ function statusAfterTurn(reason: string | undefined): MuxSourceLevel['status'] {
 export class EventMux {
   private readonly levels = new Map<string, MuxSourceLevel>()
   private readonly edges: StoredEdge[] = []
+  /** Sources whose events never become levels or edges (the manager session). */
+  private readonly ignored = new Set<string>()
   private revision = 0
   private seq = 0
   private dropped = 0
-  /** Drops accumulated since the last drain; reported once, then reset. */
+  /** Drops accumulated since the last delivered digest; reported once, then reset. */
   private droppedSinceDrain = 0
+
+  /**
+   * Stop folding one source (its own level and queued edges are dropped).
+   * Used for the manager session so a digest cannot wake the manager again.
+   * @param sessionId - source session id.
+   */
+  ignore(sessionId: string): void {
+    if (this.ignored.has(sessionId)) return
+    this.ignored.add(sessionId)
+    this.remove(sessionId)
+  }
+
+  /** Whether one source is ignored. */
+  isIgnored(sessionId: string): boolean {
+    return this.ignored.has(sessionId)
+  }
 
   /**
    * Fold one committed session event into its source level and edges.
@@ -129,6 +147,7 @@ export class EventMux {
    * @param now - injectable clock for tests.
    */
   record(sessionId: string, event: SessionEvent, now = Date.now()): void {
+    if (this.ignored.has(sessionId)) return
     const current = this.levels.get(sessionId)
     const base: MuxSourceLevel = current ?? { status: 'idle', lastAt: now }
     const touch = (next: MuxSourceLevel): void => {
@@ -163,7 +182,7 @@ export class EventMux {
           key: `${sessionId}:turn-end:${event.data.turn}`,
           sourceId: sessionId,
           kind: 'turn-end',
-          priority: status === 'error' ? 'error' : 'completed',
+          priority: status === 'error' ? 'error' : status === 'waiting' ? 'needs-input' : 'completed',
           at: now,
           summary: `turn ${event.data.turn} ended (${reason})`,
         })
@@ -208,6 +227,7 @@ export class EventMux {
    * @param now - injectable clock.
    */
   agentStatus(sessionId: string, status: 'idle' | 'running', now = Date.now()): void {
+    if (this.ignored.has(sessionId)) return
     const current = this.levels.get(sessionId)
     if (current !== undefined && current.status === 'error') return
     const next: MuxSourceLevel = { ...(current ?? { lastAt: now }), status, lastAt: now }
@@ -236,51 +256,53 @@ export class EventMux {
   }
 
   /**
-   * Drain ready edges for one manager digest (EPOLLONESHOT): the caller gets
-   * the highest-priority items in reverse-age order and the list is cleared.
+   * Read the pending edges a wakeup would deliver, highest priority first.
+   * The list is not consumed: the caller acknowledges only after a successful
+   * `session.prompt`, so a failed delivery can be retried.
    * @param maxItems - upper bound of returned edges.
-   * @returns up to `maxItems` edges, urgent first.
+   * @returns up to `maxItems` pending edges plus drops since the last digest.
    */
-  consumeEdges(maxItems = 20): MuxEdge[] {
-    return this.drain(maxItems).edges
+  pendingForWake(maxItems = 20): { edges: MuxEdge[]; dropped: number } {
+    const limit = Math.max(1, maxItems)
+    const sorted = [...this.edges].sort((left, right) =>
+      PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority] || right.at - left.at)
+    return {
+      edges: sorted.slice(0, limit).map(({ key, sourceId, kind, priority, at, summary }) =>
+        ({ key, sourceId, kind, priority, at, summary })),
+      dropped: this.droppedSinceDrain,
+    }
   }
 
   /**
-   * Drain the bounded edge list (EPOLLONESHOT) and report what the queue had
-   * to drop since the previous drain. The surplus beyond `maxItems` is a real
-   * loss too: it is counted in `stats().dropped` instead of vanishing.
+   * Mark delivered edges consumed. Called only after the manager prompt
+   * succeeded, so a failure leaves the queue intact for the retry.
+   * @param keys - edge keys that were delivered.
    */
-  private drain(maxItems: number): { edges: MuxEdge[]; dropped: number } {
-    const limit = Math.max(1, maxItems)
-    if (this.edges.length === 0) {
-      const dropped = this.droppedSinceDrain
-      this.droppedSinceDrain = 0
-      return { edges: [], dropped }
-    }
-    const sorted = [...this.edges].sort((left, right) =>
-      PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority] || right.at - left.at)
-    const picked = sorted.slice(0, limit)
-    const surplus = Math.max(0, this.edges.length - limit)
-    this.edges.length = 0
-    this.dropped += surplus
-    const dropped = this.droppedSinceDrain + surplus
-    this.droppedSinceDrain = 0
-    return {
-      edges: picked.map(({ key, sourceId, kind, priority, at, summary }) =>
-        ({ key, sourceId, kind, priority, at, summary })),
-      dropped,
-    }
+  acknowledge(keys: readonly string[]): void {
+    const delivered = new Set(keys)
+    this.removeBySeq(new Set(this.edges.filter(edge => delivered.has(edge.key)).map(edge => edge.seq)))
+    if (this.edges.length === 0) this.droppedSinceDrain = 0
   }
 
-  /** Manager digest text for the edges drained by one wakeup. */
-  digest(maxItems = 20): string {
-    const { edges, dropped } = this.drain(maxItems)
+  /**
+   * Manager digest text for one delivery (does not touch the queue).
+   * @param edges - edges returned by {@link pendingForWake}.
+   * @param dropped - how many edges the bounded queue dropped since the last digest.
+   * @returns the digest text, or '' when there is nothing to say.
+   */
+  digest(edges: readonly MuxEdge[], dropped = 0): string {
     if (edges.length === 0) return ''
-    const lines = edges.map(edge => `- [${edge.priority}] ${edge.sourceId}: ${edge.summary}`)
+    const labels: Record<MuxPriority, string> = {
+      'needs-input': '待处理',
+      error: '错误',
+      completed: '完成',
+      progress: '进度',
+    }
+    const lines = edges.map(edge => `- [${labels[edge.priority]}] ${edge.sourceId}: ${edge.summary}`)
     return [
       '[自动唤醒] 工作区/会话出现需要处理的变化：',
       ...lines,
-      ...(dropped > 0 ? [`（有 ${dropped} 条低优先级事件因队伍上限被丢弃）`] : []),
+      ...(dropped > 0 ? [`（另有 ${dropped} 条低优先级事件因队列上限被丢弃）`] : []),
     ].join('\n')
   }
 

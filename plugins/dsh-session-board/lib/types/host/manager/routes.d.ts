@@ -6,7 +6,7 @@
  * the board's existing routes. Every handler answers `{ ok, ... }`, maps a
  * thrown Error to a contained 4xx/5xx, and never rejects past the boundary.
  */
-import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse } from '../../shared/manager.ts';
+import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse, ManagerWakeResponse } from '../../shared/manager.ts';
 import type { BoardFetchRoute } from '../routes.ts';
 /** Route handlers, implemented by the plugin wiring over the manager service. */
 export interface ManagerRouteHandlers {
@@ -16,6 +16,8 @@ export interface ManagerRouteHandlers {
     selection(body: unknown): Promise<ManagerSelectionResponse>;
     /** Create or update one task. */
     task(body: unknown): Promise<ManagerTaskResponse>;
+    /** Enable/disable automatic wakeups or deliver one digest immediately. */
+    wake(body: unknown): Promise<ManagerWakeResponse>;
     /** Contained warning sink. */
     warn(message: string): void;
 }

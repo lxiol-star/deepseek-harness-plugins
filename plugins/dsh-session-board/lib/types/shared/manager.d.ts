@@ -15,6 +15,8 @@ export declare const MANAGER_STATE_PATH = "/api/session-board/manager/state";
 export declare const MANAGER_SELECTION_PATH = "/api/session-board/manager/selection";
 /** Create or update one manager task. */
 export declare const MANAGER_TASK_PATH = "/api/session-board/manager/task";
+/** Enable/disable automatic wakeups or request one digest immediately. */
+export declare const MANAGER_WAKE_PATH = "/api/session-board/manager/wake";
 /** Lifecycle of one tracked task. `running`/`blocked` are derived by the mux. */
 export declare const MANAGER_TASK_STATUSES: readonly ["pending", "assigned", "running", "blocked", "done", "failed", "orphaned"];
 /** One task status. */
@@ -40,6 +42,31 @@ export interface ManagerSelection {
 }
 /** Empty selection constant (fresh arrays so callers can spread safely). */
 export declare const EMPTY_SELECTION: ManagerSelection;
+/** Auto-wake status rendered by the panel. */
+export interface ManagerWakeStatus {
+    readonly enabled: boolean;
+    /** Pending notification edges (all severities). */
+    readonly pending: number;
+    readonly urgent: number;
+    readonly attention: number;
+    readonly completed: number;
+    /** Epoch ms of the last delivered digest. */
+    readonly lastWakeAt?: number;
+    /** Epoch ms of the next scheduled automatic digest. */
+    readonly nextAt?: number;
+    /** Automatic wakes in the current rolling hour. */
+    readonly wakesThisHour: number;
+    /** Budget suppressions since the last delivered digest. */
+    readonly suppressed: number;
+    /** Last delivery failure, if any. */
+    readonly error?: string;
+}
+/** Wake actions accepted by `/manager/wake`. */
+export type ManagerWakeAction = 'enable' | 'disable' | 'now';
+/** `/manager/wake` response. */
+export interface ManagerWakeResponse {
+    readonly wake: ManagerWakeStatus;
+}
 /** `/manager/state` response. */
 export interface ManagerStateView {
     /** Manager session id once provisioned; absent while the workspace is unavailable. */
@@ -48,8 +75,8 @@ export interface ManagerStateView {
     readonly managerWorkspaceId?: string;
     readonly selection: ManagerSelection;
     readonly tasks: readonly ManagerTaskView[];
-    /** Whether event-driven wakeups are enabled (default false). */
-    readonly wakeEnabled: boolean;
+    /** Automatic wakeup state: opt-in, pending counts, throttle diagnostics. */
+    readonly wake: ManagerWakeStatus;
     /** Monotone counter of the host-side event mux; clients may display staleness. */
     readonly muxRevision: number;
     /** Present when provisioning or a projection read failed; the panel shows it and retries. */
@@ -81,6 +108,12 @@ export interface ManagerTaskRequest {
 export interface ManagerTaskResponse {
     readonly task: ManagerTaskView;
 }
+/**
+ * Parse one `/manager/wake` status object.
+ * @param value - untrusted wire value.
+ * @returns the normalized status, or null when the value is not usable.
+ */
+export declare function parseManagerWakeStatus(value: unknown): ManagerWakeStatus | null;
 /** Whether a wire value names a known task status. */
 export declare function isManagerTaskStatus(value: unknown): value is ManagerTaskStatus;
 /** Longest id accepted from the wire before it becomes a storage key. */

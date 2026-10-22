@@ -16,7 +16,7 @@
  *  - a failed selection mirror write never discards the user's ticks: the
  *    local selection stays authoritative on screen and the next tick re-syncs.
  */
-import { type ManagerSelection, type ManagerTaskStatus, type ManagerTaskView } from '../../shared/manager.ts';
+import { type ManagerSelection, type ManagerTaskStatus, type ManagerTaskView, type ManagerWakeStatus } from '../../shared/manager.ts';
 import type { RetainSession, SessionListState, SessionReference, Source, WorkspacesService } from '../dsh.ts';
 /** localStorage key holding the drawer-open flag; nothing else is persisted. */
 export declare const MANAGER_STORE_KEY = "dsh.session-board.manager.v1";
@@ -32,7 +32,7 @@ export declare const MANAGER_POLL_MS = 4000;
 /** Consumer identity of the panel's retained manager Session. */
 export declare const MANAGER_REFERENCE_SOURCE = "sessionBoardManager";
 /** Stable error keys; the drawer renders them through the dictionary. */
-export type ManagerErrorKey = 'manager.errorState' | 'manager.errorPrompt' | 'manager.errorSelection' | 'manager.errorTask';
+export type ManagerErrorKey = 'manager.errorState' | 'manager.errorPrompt' | 'manager.errorSelection' | 'manager.errorTask' | 'manager.errorWake';
 /** Read phases of the host state mirror. */
 export type ManagerPhase = 'loading' | 'ready' | 'error';
 /** Readiness of the retained manager Session behind the embedded chat. */
@@ -53,7 +53,8 @@ export interface ManagerSnapshot {
     readonly managerWorkspaceId: string | null;
     readonly selection: ManagerSelection;
     readonly tasks: readonly ManagerTaskView[];
-    readonly wakeEnabled: boolean;
+    /** Automatic wakeup state: opt-in, pending counts, throttle diagnostics. */
+    readonly wake: ManagerWakeStatus;
     readonly muxRevision: number;
     /** A "send selection" round trip is in flight. */
     readonly sending: boolean;
@@ -178,6 +179,19 @@ export declare class ManagerController {
      * @returns whether the host accepted the write.
      */
     updateTask(taskId: string, patch: ManagerTaskPatch): Promise<boolean>;
+    /**
+     * Enable or disable automatic wakeups through the host route.
+     * @param enabled - new opt-in value.
+     * @returns whether the host accepted the change.
+     */
+    setWake(enabled: boolean): Promise<boolean>;
+    /**
+     * Ask the host for one digest as soon as the manager is idle.
+     * @returns whether the request was accepted.
+     */
+    wakeNow(): Promise<boolean>;
+    /** One `/manager/wake` round trip; publishes the returned status. */
+    private writeWake;
     /** Release the retained Session, timers and subscribers. Terminal. */
     dispose(): void;
     /** Swap in a new snapshot and wake every listener. */

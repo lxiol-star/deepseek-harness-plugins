@@ -26,6 +26,12 @@ export interface ManagerStateRecord {
     readonly revision: number;
     /** Latest free-form progress line (report_progress without a task). */
     readonly lastProgress?: string;
+    /** Epoch ms of the last delivered automatic digest. */
+    readonly lastWakeAt?: number;
+    /** Urgent/attention wake timestamps in the rolling hour. */
+    readonly wakeUrgentTimes?: readonly number[];
+    /** Completion wake timestamps in the rolling hour. */
+    readonly wakeBatchTimes?: readonly number[];
 }
 /** Durable task row (same fields the wire view exposes). */
 export type ManagerTaskRecord = ManagerTaskView;

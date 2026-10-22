@@ -68,6 +68,20 @@ describe('managerStateSchema.parse', () => {
     expect(managerStateSchema.parse({ wakeEnabled: 1 }).wakeEnabled).toBe(false)
   })
 
+  it('keeps bounded wake throttle state and drops corrupt values', () => {
+    const parsed = managerStateSchema.parse({
+      lastWakeAt: 1_000,
+      wakeUrgentTimes: [1_000, Number.NaN, 'x', -1],
+      wakeBatchTimes: Array.from({ length: 80 }, (_, index) => index + 1),
+    })
+    expect(parsed.lastWakeAt).toBe(1_000)
+    expect(parsed.wakeUrgentTimes).toEqual([1_000])
+    expect(parsed.wakeBatchTimes).toHaveLength(64)
+    const empty = managerStateSchema.parse({ lastWakeAt: 0, wakeUrgentTimes: 'nope' })
+    expect(empty).not.toHaveProperty('lastWakeAt')
+    expect(empty).not.toHaveProperty('wakeUrgentTimes')
+  })
+
   it('keeps a non-negative integer revision and otherwise resets to zero', () => {
     expect(managerStateSchema.parse({ revision: 7 }).revision).toBe(7)
     expect(managerStateSchema.parse({ revision: 0 }).revision).toBe(0)

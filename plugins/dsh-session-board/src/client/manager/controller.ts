@@ -21,14 +21,17 @@ import {
   MANAGER_SELECTION_PATH,
   MANAGER_STATE_PATH,
   MANAGER_TASK_PATH,
+  MANAGER_WAKE_PATH,
   buildSelectionMessage,
   isManagerTaskStatus,
+  parseManagerWakeStatus,
   normalizeSelection,
   type ManagerSelection,
   type ManagerSelectionResponse,
   type ManagerStateView,
   type ManagerTaskStatus,
   type ManagerTaskView,
+  type ManagerWakeStatus,
 } from '../../shared/manager.ts'
 import type {
   RetainSession,
@@ -62,6 +65,7 @@ export type ManagerErrorKey =
   | 'manager.errorPrompt'
   | 'manager.errorSelection'
   | 'manager.errorTask'
+  | 'manager.errorWake'
 
 /** Read phases of the host state mirror. */
 export type ManagerPhase = 'loading' | 'ready' | 'error'
@@ -85,7 +89,8 @@ export interface ManagerSnapshot {
   readonly managerWorkspaceId: string | null
   readonly selection: ManagerSelection
   readonly tasks: readonly ManagerTaskView[]
-  readonly wakeEnabled: boolean
+  /** Automatic wakeup state: opt-in, pending counts, throttle diagnostics. */
+  readonly wake: ManagerWakeStatus
   readonly muxRevision: number
   /** A "send selection" round trip is in flight. */
   readonly sending: boolean
@@ -144,6 +149,11 @@ interface ManagerPersisted {
   open: boolean
 }
 
+/** Wake status before the first host read (and for a host that predates the route). */
+function emptyWakeStatus(): ManagerWakeStatus {
+  return { enabled: false, pending: 0, urgent: 0, attention: 0, completed: 0, wakesThisHour: 0, suppressed: 0 }
+}
+
 /** The initial snapshot before any host read. */
 function initialState(): ManagerSnapshot {
   return {
@@ -156,7 +166,7 @@ function initialState(): ManagerSnapshot {
     managerWorkspaceId: null,
     selection: { workspaceIds: [...EMPTY_SELECTION.workspaceIds], sessionIds: [...EMPTY_SELECTION.sessionIds] },
     tasks: [],
-    wakeEnabled: false,
+    wake: emptyWakeStatus(),
     muxRevision: 0,
     sending: false,
     syncing: false,
@@ -241,13 +251,15 @@ function parseState(value: unknown): ManagerStateView | null {
   const managerWorkspaceId = stringOrNull(record['managerWorkspaceId'])
   const stateError = stringOrNull(record['error'])
   const revision = numberOrNull(record['muxRevision'])
+  const wake = parseManagerWakeStatus(record['wake'])
+    ?? (record['wakeEnabled'] === true ? { ...emptyWakeStatus(), enabled: true } : emptyWakeStatus())
   return {
     ...(managerSessionId === null ? {} : { managerSessionId }),
     ...(managerWorkspaceId === null ? {} : { managerWorkspaceId }),
     ...(stateError === null ? {} : { error: stateError }),
     selection: normalizeSelection(record['selection']),
     tasks,
-    wakeEnabled: record['wakeEnabled'] === true,
+    wake,
     muxRevision: revision ?? 0,
   }
 }
@@ -574,6 +586,41 @@ export class ManagerController {
     return this.writeTask({ action: 'update', task })
   }
 
+  /**
+   * Enable or disable automatic wakeups through the host route.
+   * @param enabled - new opt-in value.
+   * @returns whether the host accepted the change.
+   */
+  async setWake(enabled: boolean): Promise<boolean> {
+    return await this.writeWake({ action: enabled ? 'enable' : 'disable' })
+  }
+
+  /**
+   * Ask the host for one digest as soon as the manager is idle.
+   * @returns whether the request was accepted.
+   */
+  async wakeNow(): Promise<boolean> {
+    return await this.writeWake({ action: 'now' })
+  }
+
+  /** One `/manager/wake` round trip; publishes the returned status. */
+  private async writeWake(body: Record<string, unknown>): Promise<boolean> {
+    if (this.disposed) return false
+    try {
+      const payload = await postJson(MANAGER_WAKE_PATH, body)
+      if (payload['ok'] !== true) throw new Error(failureCode(payload))
+      const wake = parseManagerWakeStatus(payload['wake'])
+      if (wake === null) throw new Error('INVALID_RESPONSE')
+      if (!this.disposed) this.publish({ wake, ...(this.state.error === 'manager.errorWake' ? { error: null, errorDetail: null } : {}) })
+      return true
+    } catch (error) {
+      if (!this.disposed) {
+        this.publish({ error: 'manager.errorWake', errorDetail: error instanceof Error ? error.message : 'REQUEST_FAILED' })
+      }
+      return false
+    }
+  }
+
   /** Release the retained Session, timers and subscribers. Terminal. */
   dispose(): void {
     if (this.disposed) return
@@ -692,7 +739,7 @@ export class ManagerController {
       stateError: view.error ?? null,
       selection,
       tasks: [...view.tasks],
-      wakeEnabled: view.wakeEnabled,
+      wake: view.wake,
       muxRevision: view.muxRevision,
       ...(nextSessionId !== this.state.managerSessionId
         ? { reference: null, chat: 'idle' as const, chatError: null }

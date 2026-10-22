@@ -8,6 +8,7 @@ import {
   isManagerTaskStatus,
   managerPhase,
   normalizeSelection,
+  parseManagerWakeStatus,
   previewText,
 } from '../src/shared/manager.ts'
 
@@ -123,6 +124,24 @@ describe('normalizeSelection', () => {
     expect(normalizeSelection(null)).toEqual({ workspaceIds: [], sessionIds: [] })
     expect(normalizeSelection('w1')).toEqual({ workspaceIds: [], sessionIds: [] })
     expect(normalizeSelection({ workspaceIds: 'w1' })).toEqual({ workspaceIds: [], sessionIds: [] })
+  })
+})
+
+describe('parseManagerWakeStatus', () => {
+  it('normalizes a complete status object', () => {
+    expect(parseManagerWakeStatus({
+      enabled: true, pending: 3, urgent: 1, attention: 1, completed: 1,
+      lastWakeAt: 1_000, nextAt: 4_000, wakesThisHour: 2, suppressed: 0,
+    })).toEqual({
+      enabled: true, pending: 3, urgent: 1, attention: 1, completed: 1,
+      wakesThisHour: 2, suppressed: 0, lastWakeAt: 1_000, nextAt: 4_000,
+    })
+  })
+
+  it('rejects an object without the enabled flag and fills counters', () => {
+    expect(parseManagerWakeStatus(null)).toBeNull()
+    expect(parseManagerWakeStatus({ pending: 1 })).toBeNull()
+    expect(parseManagerWakeStatus({ enabled: false, pending: '3' })).toMatchObject({ enabled: false, pending: 0, urgent: 0 })
   })
 })
 

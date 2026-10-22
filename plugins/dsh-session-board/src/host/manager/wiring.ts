@@ -90,6 +90,7 @@ export function startManager(options: ManagerWiringOptions): void {
       },
       selection: async raw => await service.writeSelection(raw),
       task: async raw => await service.task(readTaskRequest(raw)),
+      wake: async raw => ({ wake: await service.wake(raw) }),
       warn,
     })
     for (const route of routes) {
@@ -105,6 +106,8 @@ export function startManager(options: ManagerWiringOptions): void {
     })
     ctx.on('agent/status', ({ agent, status }) => {
       mux.agentStatus(agent.id, status)
+      // The manager becoming idle is what releases a deferred digest.
+      service.noteAgentStatus(agent.id, status)
     })
     ctx.on('agent/created', ({ agent }) => {
       service.installAgent(agent)

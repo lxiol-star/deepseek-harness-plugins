@@ -73,11 +73,21 @@ export declare const MUX_LIMITS: {
 export declare class EventMux {
     private readonly levels;
     private readonly edges;
+    /** Sources whose events never become levels or edges (the manager session). */
+    private readonly ignored;
     private revision;
     private seq;
     private dropped;
-    /** Drops accumulated since the last drain; reported once, then reset. */
+    /** Drops accumulated since the last delivered digest; reported once, then reset. */
     private droppedSinceDrain;
+    /**
+     * Stop folding one source (its own level and queued edges are dropped).
+     * Used for the manager session so a digest cannot wake the manager again.
+     * @param sessionId - source session id.
+     */
+    ignore(sessionId: string): void;
+    /** Whether one source is ignored. */
+    isIgnored(sessionId: string): boolean;
     /**
      * Fold one committed session event into its source level and edges.
      * @param sessionId - source session id.
@@ -98,20 +108,29 @@ export declare class EventMux {
     /** Read the level-triggered truth plus the current edge list. */
     snapshot(): MuxSnapshot;
     /**
-     * Drain ready edges for one manager digest (EPOLLONESHOT): the caller gets
-     * the highest-priority items in reverse-age order and the list is cleared.
+     * Read the pending edges a wakeup would deliver, highest priority first.
+     * The list is not consumed: the caller acknowledges only after a successful
+     * `session.prompt`, so a failed delivery can be retried.
      * @param maxItems - upper bound of returned edges.
-     * @returns up to `maxItems` edges, urgent first.
+     * @returns up to `maxItems` pending edges plus drops since the last digest.
      */
-    consumeEdges(maxItems?: number): MuxEdge[];
+    pendingForWake(maxItems?: number): {
+        edges: MuxEdge[];
+        dropped: number;
+    };
     /**
-     * Drain the bounded edge list (EPOLLONESHOT) and report what the queue had
-     * to drop since the previous drain. The surplus beyond `maxItems` is a real
-     * loss too: it is counted in `stats().dropped` instead of vanishing.
+     * Mark delivered edges consumed. Called only after the manager prompt
+     * succeeded, so a failure leaves the queue intact for the retry.
+     * @param keys - edge keys that were delivered.
      */
-    private drain;
-    /** Manager digest text for the edges drained by one wakeup. */
-    digest(maxItems?: number): string;
+    acknowledge(keys: readonly string[]): void;
+    /**
+     * Manager digest text for one delivery (does not touch the queue).
+     * @param edges - edges returned by {@link pendingForWake}.
+     * @param dropped - how many edges the bounded queue dropped since the last digest.
+     * @returns the digest text, or '' when there is nothing to say.
+     */
+    digest(edges: readonly MuxEdge[], dropped?: number): string;
     /** Per-source edge budget: drop the oldest progress edges of that source. */
     private trimSource;
     /** Global edge budget: drop the oldest lowest-priority edges. */

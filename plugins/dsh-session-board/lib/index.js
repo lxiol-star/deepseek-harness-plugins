@@ -746,6 +746,7 @@ function emptySection() {
 var MANAGER_STATE_PATH = "/api/session-board/manager/state";
 var MANAGER_SELECTION_PATH = "/api/session-board/manager/selection";
 var MANAGER_TASK_PATH = "/api/session-board/manager/task";
+var MANAGER_WAKE_PATH = "/api/session-board/manager/wake";
 var MANAGER_TASK_STATUSES = [
   "pending",
   "assigned",
@@ -799,6 +800,11 @@ var MANAGER_STATE_KEY = "state";
 function emptyManagerState() {
   return { selection: { workspaceIds: [], sessionIds: [] }, wakeEnabled: false, revision: 0 };
 }
+function wakeTimes(value) {
+  if (!Array.isArray(value)) return void 0;
+  const times = value.filter((at) => typeof at === "number" && Number.isFinite(at) && at > 0);
+  return times.slice(-64);
+}
 var managerStateSchema = {
   parse(value) {
     const source = typeof value === "object" && value !== null ? value : {};
@@ -808,7 +814,10 @@ var managerStateSchema = {
       selection: normalizeSelection(source.selection),
       wakeEnabled: source.wakeEnabled === true,
       revision: Number.isInteger(source.revision) && source.revision >= 0 ? source.revision : 0,
-      ...typeof source.lastProgress === "string" && source.lastProgress !== "" ? { lastProgress: source.lastProgress.slice(0, 2e3) } : {}
+      ...typeof source.lastProgress === "string" && source.lastProgress !== "" ? { lastProgress: source.lastProgress.slice(0, 2e3) } : {},
+      ...typeof source.lastWakeAt === "number" && Number.isFinite(source.lastWakeAt) && source.lastWakeAt > 0 ? { lastWakeAt: source.lastWakeAt } : {},
+      ...wakeTimes(source.wakeUrgentTimes) === void 0 ? {} : { wakeUrgentTimes: wakeTimes(source.wakeUrgentTimes) },
+      ...wakeTimes(source.wakeBatchTimes) === void 0 ? {} : { wakeBatchTimes: wakeTimes(source.wakeBatchTimes) }
     };
   }
 };
@@ -877,11 +886,27 @@ function statusAfterTurn(reason) {
 var EventMux = class {
   levels = /* @__PURE__ */ new Map();
   edges = [];
+  /** Sources whose events never become levels or edges (the manager session). */
+  ignored = /* @__PURE__ */ new Set();
   revision = 0;
   seq = 0;
   dropped = 0;
-  /** Drops accumulated since the last drain; reported once, then reset. */
+  /** Drops accumulated since the last delivered digest; reported once, then reset. */
   droppedSinceDrain = 0;
+  /**
+   * Stop folding one source (its own level and queued edges are dropped).
+   * Used for the manager session so a digest cannot wake the manager again.
+   * @param sessionId - source session id.
+   */
+  ignore(sessionId) {
+    if (this.ignored.has(sessionId)) return;
+    this.ignored.add(sessionId);
+    this.remove(sessionId);
+  }
+  /** Whether one source is ignored. */
+  isIgnored(sessionId) {
+    return this.ignored.has(sessionId);
+  }
   /**
    * Fold one committed session event into its source level and edges.
    * @param sessionId - source session id.
@@ -889,6 +914,7 @@ var EventMux = class {
    * @param now - injectable clock for tests.
    */
   record(sessionId, event, now = Date.now()) {
+    if (this.ignored.has(sessionId)) return;
     const current = this.levels.get(sessionId);
     const base = current ?? { status: "idle", lastAt: now };
     const touch = (next) => {
@@ -923,7 +949,7 @@ var EventMux = class {
           key: `${sessionId}:turn-end:${event.data.turn}`,
           sourceId: sessionId,
           kind: "turn-end",
-          priority: status === "error" ? "error" : "completed",
+          priority: status === "error" ? "error" : status === "waiting" ? "needs-input" : "completed",
           at: now,
           summary: `turn ${event.data.turn} ended (${reason})`
         });
@@ -967,6 +993,7 @@ var EventMux = class {
    * @param now - injectable clock.
    */
   agentStatus(sessionId, status, now = Date.now()) {
+    if (this.ignored.has(sessionId)) return;
     const current = this.levels.get(sessionId);
     if (current !== void 0 && current.status === "error") return;
     const next = { ...current ?? { lastAt: now }, status, lastAt: now };
@@ -991,47 +1018,49 @@ var EventMux = class {
     };
   }
   /**
-   * Drain ready edges for one manager digest (EPOLLONESHOT): the caller gets
-   * the highest-priority items in reverse-age order and the list is cleared.
+   * Read the pending edges a wakeup would deliver, highest priority first.
+   * The list is not consumed: the caller acknowledges only after a successful
+   * `session.prompt`, so a failed delivery can be retried.
    * @param maxItems - upper bound of returned edges.
-   * @returns up to `maxItems` edges, urgent first.
+   * @returns up to `maxItems` pending edges plus drops since the last digest.
    */
-  consumeEdges(maxItems = 20) {
-    return this.drain(maxItems).edges;
-  }
-  /**
-   * Drain the bounded edge list (EPOLLONESHOT) and report what the queue had
-   * to drop since the previous drain. The surplus beyond `maxItems` is a real
-   * loss too: it is counted in `stats().dropped` instead of vanishing.
-   */
-  drain(maxItems) {
+  pendingForWake(maxItems = 20) {
     const limit = Math.max(1, maxItems);
-    if (this.edges.length === 0) {
-      const dropped2 = this.droppedSinceDrain;
-      this.droppedSinceDrain = 0;
-      return { edges: [], dropped: dropped2 };
-    }
     const sorted = [...this.edges].sort((left, right) => PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority] || right.at - left.at);
-    const picked = sorted.slice(0, limit);
-    const surplus = Math.max(0, this.edges.length - limit);
-    this.edges.length = 0;
-    this.dropped += surplus;
-    const dropped = this.droppedSinceDrain + surplus;
-    this.droppedSinceDrain = 0;
     return {
-      edges: picked.map(({ key, sourceId, kind, priority, at, summary }) => ({ key, sourceId, kind, priority, at, summary })),
-      dropped
+      edges: sorted.slice(0, limit).map(({ key, sourceId, kind, priority, at, summary }) => ({ key, sourceId, kind, priority, at, summary })),
+      dropped: this.droppedSinceDrain
     };
   }
-  /** Manager digest text for the edges drained by one wakeup. */
-  digest(maxItems = 20) {
-    const { edges, dropped } = this.drain(maxItems);
+  /**
+   * Mark delivered edges consumed. Called only after the manager prompt
+   * succeeded, so a failure leaves the queue intact for the retry.
+   * @param keys - edge keys that were delivered.
+   */
+  acknowledge(keys) {
+    const delivered = new Set(keys);
+    this.removeBySeq(new Set(this.edges.filter((edge) => delivered.has(edge.key)).map((edge) => edge.seq)));
+    if (this.edges.length === 0) this.droppedSinceDrain = 0;
+  }
+  /**
+   * Manager digest text for one delivery (does not touch the queue).
+   * @param edges - edges returned by {@link pendingForWake}.
+   * @param dropped - how many edges the bounded queue dropped since the last digest.
+   * @returns the digest text, or '' when there is nothing to say.
+   */
+  digest(edges, dropped = 0) {
     if (edges.length === 0) return "";
-    const lines = edges.map((edge) => `- [${edge.priority}] ${edge.sourceId}: ${edge.summary}`);
+    const labels = {
+      "needs-input": "\u5F85\u5904\u7406",
+      error: "\u9519\u8BEF",
+      completed: "\u5B8C\u6210",
+      progress: "\u8FDB\u5EA6"
+    };
+    const lines = edges.map((edge) => `- [${labels[edge.priority]}] ${edge.sourceId}: ${edge.summary}`);
     return [
       "[\u81EA\u52A8\u5524\u9192] \u5DE5\u4F5C\u533A/\u4F1A\u8BDD\u51FA\u73B0\u9700\u8981\u5904\u7406\u7684\u53D8\u5316\uFF1A",
       ...lines,
-      ...dropped > 0 ? [`\uFF08\u6709 ${dropped} \u6761\u4F4E\u4F18\u5148\u7EA7\u4E8B\u4EF6\u56E0\u961F\u4F0D\u4E0A\u9650\u88AB\u4E22\u5F03\uFF09`] : []
+      ...dropped > 0 ? [`\uFF08\u53E6\u6709 ${dropped} \u6761\u4F4E\u4F18\u5148\u7EA7\u4E8B\u4EF6\u56E0\u961F\u5217\u4E0A\u9650\u88AB\u4E22\u5F03\uFF09`] : []
     ].join("\n");
   }
   /** Per-source edge budget: drop the oldest progress edges of that source. */
@@ -1084,6 +1113,289 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// src/host/manager/wake.ts
+var DEFAULT_WAKE_TIMINGS = {
+  urgentDelayMs: 3e3,
+  attentionDelayMs: 12e3,
+  completedDelayMs: 45e3,
+  minGapMs: 3e3,
+  urgentBudgetPerHour: 20,
+  batchBudgetPerHour: 6,
+  retryBackoffMs: 15e3,
+  maxRetryBackoffMs: 12e4
+};
+var HOUR_MS = 36e5;
+var BUSY_RETRY_MS = 5e3;
+function classOf(edges) {
+  if (edges.some((edge) => edge.priority === "error")) return "urgent";
+  if (edges.some((edge) => edge.priority === "needs-input")) return "attention";
+  if (edges.some((edge) => edge.priority === "completed")) return "completed";
+  return null;
+}
+function deliveredClass(edges) {
+  return classOf(edges) ?? "completed";
+}
+function countByClass(edges) {
+  let urgent = 0;
+  let attention = 0;
+  let completed = 0;
+  for (const edge of edges) {
+    if (edge.priority === "error") urgent += 1;
+    else if (edge.priority === "needs-input") attention += 1;
+    else if (edge.priority === "completed") completed += 1;
+  }
+  return { urgent, attention, completed };
+}
+var WakeScheduler = class {
+  /** @param deps - injected clock, timers and delivery collaborators. */
+  constructor(deps) {
+    this.deps = deps;
+    this.timings = { ...DEFAULT_WAKE_TIMINGS, ...deps.timings };
+    this.lastWakeAt = deps.initial?.lastWakeAt ?? 0;
+    this.urgentTimes = [...deps.initial?.urgentTimes ?? []].filter((at) => Number.isFinite(at)).slice(-64);
+    this.batchTimes = [...deps.initial?.batchTimes ?? []].filter((at) => Number.isFinite(at)).slice(-64);
+  }
+  deps;
+  timings;
+  timer = null;
+  lastWakeAt = 0;
+  nextAt;
+  urgentTimes;
+  batchTimes;
+  failures = 0;
+  suppressed = 0;
+  lastSuppressedResetAt = 0;
+  error;
+  disposed = false;
+  delivering = false;
+  /** Force the next delivery as soon as possible (manual "now"). */
+  manual = false;
+  /**
+   * Recompute the next delivery after new edges (or time) arrived.
+   * @param now - injectable clock.
+   */
+  notify(now = this.deps.now()) {
+    this.reconcile(now, false);
+  }
+  /**
+   * Deliver as soon as the manager is idle, bypassing debounce and budget.
+   * Used by the panel's "立即汇总" button; a running manager defers the wake.
+   */
+  requestNow(now = this.deps.now()) {
+    if (this.disposed || !this.deps.isEnabled()) return;
+    this.reconcile(now, true);
+  }
+  /**
+   * Turn automatic wakeups on or off. Disabling cancels the pending timer.
+   * @param enabled - new opt-in value.
+   */
+  setEnabled(enabled) {
+    if (this.disposed) return;
+    if (!enabled) {
+      this.clearTimer();
+      this.nextAt = void 0;
+      this.error = void 0;
+      return;
+    }
+    this.reconcile(this.deps.now(), false);
+  }
+  /** Snapshot for the state view. */
+  status(now = this.deps.now()) {
+    const { edges } = this.deps.pending();
+    const counts = countByClass(edges);
+    this.trim(now);
+    return {
+      enabled: this.deps.isEnabled(),
+      pending: counts.urgent + counts.attention + counts.completed,
+      ...counts,
+      wakesThisHour: this.urgentTimes.length + this.batchTimes.length,
+      suppressed: this.suppressed,
+      ...this.lastWakeAt > 0 ? { lastWakeAt: this.lastWakeAt } : {},
+      ...this.nextAt === void 0 ? {} : { nextAt: this.nextAt },
+      ...this.error === void 0 ? {} : { error: this.error }
+    };
+  }
+  /** Persisted throttle state (hydrated again through `initial`). */
+  exportState() {
+    return {
+      ...this.lastWakeAt > 0 ? { lastWakeAt: this.lastWakeAt } : {},
+      urgentTimes: [...this.urgentTimes],
+      batchTimes: [...this.batchTimes]
+    };
+  }
+  /** Cancel the timer; the plugin unload path. */
+  dispose() {
+    this.disposed = true;
+    this.clearTimer();
+  }
+  /** Drop wake timestamps older than one hour. */
+  trim(now) {
+    const cutoff = now - HOUR_MS;
+    while (this.urgentTimes.length > 0 && this.urgentTimes[0] <= cutoff) this.urgentTimes.shift();
+    while (this.batchTimes.length > 0 && this.batchTimes[0] <= cutoff) this.batchTimes.shift();
+  }
+  /** Wakes used by one budget class in the rolling hour. */
+  used(kind, now) {
+    this.trim(now);
+    return kind === "completed" ? this.batchTimes.length : this.urgentTimes.length;
+  }
+  /** Budget of one class in the rolling hour. */
+  budget(kind) {
+    return kind === "completed" ? this.timings.batchBudgetPerHour : this.timings.urgentBudgetPerHour;
+  }
+  /** Present classes, highest severity first. */
+  presentClasses(edges) {
+    const classes = [];
+    if (edges.some((edge) => edge.priority === "error")) classes.push("urgent");
+    if (edges.some((edge) => edge.priority === "needs-input")) classes.push("attention");
+    if (edges.some((edge) => edge.priority === "completed")) classes.push("completed");
+    return classes;
+  }
+  /** First present class with remaining budget, or null when everything is capped. */
+  classWithBudget(edges, now) {
+    for (const kind of this.presentClasses(edges)) {
+      if (this.used(kind, now) < this.budget(kind)) return kind;
+    }
+    return null;
+  }
+  /** Delay before one class is delivered. */
+  delayFor(kind) {
+    if (kind === "urgent") return this.timings.urgentDelayMs;
+    if (kind === "attention") return this.timings.attentionDelayMs;
+    return this.timings.completedDelayMs;
+  }
+  /**
+   * Compute the next allowed delivery and arm the timer. Delivery runs inline
+   * when the computed time is already due.
+   * @param now - injectable clock.
+   * @param force - manual request: bypass debounce and budget.
+   */
+  reconcile(now, force) {
+    this.clearTimer();
+    this.manual = force;
+    if (this.disposed || !this.deps.isEnabled()) {
+      this.nextAt = void 0;
+      return;
+    }
+    const { edges } = this.deps.pending();
+    if (classOf(edges) === null) {
+      this.nextAt = void 0;
+      this.manual = false;
+      return;
+    }
+    if (this.delivering) {
+      this.nextAt = now + BUSY_RETRY_MS;
+      this.arm(BUSY_RETRY_MS);
+      return;
+    }
+    if (this.deps.hasManager !== void 0 && !this.deps.hasManager()) {
+      this.nextAt = void 0;
+      return;
+    }
+    if (!this.deps.canDeliver()) {
+      this.nextAt = now + BUSY_RETRY_MS;
+      this.arm(BUSY_RETRY_MS);
+      return;
+    }
+    const kind = force ? classOf(edges) : this.classWithBudget(edges, now);
+    if (kind === null) {
+      const oldest = [...this.urgentTimes, ...this.batchTimes].reduce(
+        (min, at2) => min === void 0 || at2 < min ? at2 : min,
+        void 0
+      );
+      const resetAt = (oldest === void 0 ? now + HOUR_MS : oldest + HOUR_MS) + 1;
+      if (this.lastSuppressedResetAt !== resetAt) {
+        this.lastSuppressedResetAt = resetAt;
+        this.suppressed += 1;
+      }
+      this.nextAt = resetAt;
+      this.arm(Math.max(1, resetAt - now));
+      return;
+    }
+    const at = force ? now : Math.max(now + this.delayFor(kind), this.lastWakeAt > 0 ? this.lastWakeAt + this.timings.minGapMs : 0);
+    this.nextAt = at;
+    if (at <= now) {
+      this.nextAt = void 0;
+      void this.fire(now, force);
+      return;
+    }
+    this.arm(at - now);
+  }
+  /** Arm the one timer, replacing any previous one. */
+  arm(delayMs) {
+    this.timer = this.deps.schedule(() => {
+      this.timer = null;
+      const fireAt = this.deps.now();
+      void this.fire(fireAt, this.manual);
+    }, Math.max(1, delayMs));
+  }
+  /** Cancel the one timer. */
+  clearTimer() {
+    if (this.timer !== null) {
+      this.deps.cancel(this.timer);
+      this.timer = null;
+    }
+  }
+  /**
+   * Deliver the pending bundle and acknowledge it only on success. The mux is
+   * acknowledged by the caller through {@link WakeSchedulerDeps.deliver}; a
+   * false result keeps the edges queued for the backoff retry.
+   * @param now - delivery time.
+   * @param force - manual request.
+   */
+  async fire(now, force) {
+    if (this.disposed || this.delivering) return;
+    if (!this.deps.isEnabled()) return;
+    if (this.deps.hasManager !== void 0 && !this.deps.hasManager()) {
+      this.nextAt = void 0;
+      return;
+    }
+    if (!this.deps.canDeliver()) {
+      this.nextAt = now + BUSY_RETRY_MS;
+      this.arm(BUSY_RETRY_MS);
+      return;
+    }
+    const pending = this.deps.pending();
+    if (classOf(pending.edges) === null) {
+      this.nextAt = void 0;
+      return;
+    }
+    if (!force && this.classWithBudget(pending.edges, now) === null) {
+      this.reconcile(now, false);
+      return;
+    }
+    this.delivering = true;
+    this.manual = false;
+    let delivered = false;
+    try {
+      delivered = await this.deps.deliver(pending.edges, pending.dropped);
+      if (this.disposed) return;
+      if (delivered) {
+        this.lastWakeAt = now;
+        const kind = deliveredClass(pending.edges);
+        if (kind === "completed") this.batchTimes.push(now);
+        else this.urgentTimes.push(now);
+        this.trim(now);
+        this.failures = 0;
+        this.error = void 0;
+        this.suppressed = 0;
+        this.lastSuppressedResetAt = 0;
+        this.deps.onDelivered?.(now, pending.edges);
+      } else {
+        this.failures += 1;
+        this.error = "DELIVERY_FAILED";
+        const backoff = Math.min(this.timings.maxRetryBackoffMs, this.timings.retryBackoffMs * 2 ** (this.failures - 1));
+        this.deps.onError?.(`manager digest delivery failed (attempt ${this.failures})`);
+        this.nextAt = now + backoff;
+        this.arm(backoff);
+      }
+    } finally {
+      this.delivering = false;
+    }
+    if (!this.disposed && delivered) this.reconcile(this.deps.now(), false);
+  }
+};
 
 // src/host/manager/tools.ts
 var LINE_OUTPUT = {
@@ -1300,7 +1612,6 @@ function managerToolDefinitions(context) {
 
 // src/host/manager/service.ts
 var MANAGER_SESSION_TITLE = "DSH \u7BA1\u7406\u53F0";
-var AUTO_WAKE_MIN_INTERVAL_MS = 6e4;
 var MANAGER_PROMPT_TIMEOUT_MS = 3e4;
 var MANAGER_SECTION_ORDER = 900;
 var MANAGER_CONTEXT_ORDER = 950;
@@ -1316,19 +1627,52 @@ var MANAGER_POLICY = [
   "The user may hand you a selection block; the durable selection is also visible",
   "below. Keep task notes short and evidence-based."
 ].join("\n");
+var WAKE_INSTRUCTION = [
+  "\u8BF7\u6309\u4F18\u5148\u7EA7\u5904\u7406\uFF1A\u62A5\u9519\u4E0E\u7B49\u5F85\u5904\u7406\u7684\u4F1A\u8BDD\u4F18\u5148\uFF1B\u666E\u901A\u5B8C\u6210\u53EF\u4EE5\u5408\u5E76\u6C47\u62A5\u3002",
+  "\u5904\u7406\u5B8C\u7528 update_task / report_progress \u8BB0\u5F55\u7ED3\u8BBA\uFF0C\u4E0D\u8981\u4E3A\u540C\u4E00\u6761\u53D8\u5316\u91CD\u590D\u5524\u9192\u3002"
+].join("\n");
 var ManagerService = class {
   /** @param deps - nested host context plus the durable tables. */
   constructor(deps) {
     this.deps = deps;
     this.state = deps.state.get(MANAGER_STATE_KEY) ?? emptyManagerState();
     this.managerSessionId = this.state.managerSessionId === void 0 ? void 0 : this.state.managerSessionId;
+    if (this.managerSessionId !== void 0) this.deps.mux.ignore(this.managerSessionId);
+    this.scheduler = new WakeScheduler({
+      now: () => this.now(),
+      schedule: (callback, delayMs) => {
+        const handle = setTimeout(callback, delayMs);
+        const timer = handle;
+        if (typeof timer.unref === "function") timer.unref();
+        return handle;
+      },
+      cancel: (handle) => {
+        clearTimeout(handle);
+      },
+      isEnabled: () => this.state.wakeEnabled,
+      hasManager: () => this.managerSessionId !== void 0,
+      canDeliver: () => this.managerSessionId !== void 0 && this.deps.ctx.agents.get(this.managerSessionId)?.status !== "running",
+      pending: () => this.deps.mux.pendingForWake(20),
+      deliver: async (edges, dropped) => await this.deliverDigest(edges, dropped),
+      onDelivered: () => {
+        this.persistWakeState();
+      },
+      onError: (message) => {
+        this.deps.warn(`dsh-session-board: ${message}`);
+      },
+      initial: {
+        ...this.state.lastWakeAt === void 0 ? {} : { lastWakeAt: this.state.lastWakeAt },
+        ...this.state.wakeUrgentTimes === void 0 ? {} : { urgentTimes: this.state.wakeUrgentTimes },
+        ...this.state.wakeBatchTimes === void 0 ? {} : { batchTimes: this.state.wakeBatchTimes }
+      }
+    });
   }
   deps;
   state;
   managerSessionId;
   provisioning;
   installed = /* @__PURE__ */ new Map();
-  lastWakeAt = 0;
+  scheduler;
   lastError;
   /** Current session id, when provisioned. */
   get sessionId() {
@@ -1341,7 +1685,7 @@ var ManagerService = class {
       ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId },
       selection: normalizeSelection(this.state.selection),
       tasks: this.taskViews(),
-      wakeEnabled: this.state.wakeEnabled,
+      wake: this.wakeStatus(),
       muxRevision: this.deps.mux.snapshot().revision,
       ...this.lastError === void 0 ? {} : { error: this.lastError }
     };
@@ -1361,7 +1705,10 @@ var ManagerService = class {
     this.provisioning ??= this.provision().finally(() => {
       this.provisioning = void 0;
     });
-    return this.provisioning;
+    return this.provisioning.then((result) => {
+      this.scheduler.notify();
+      return result;
+    });
   }
   /**
    * Install tools/prompt context on the manager Agent, whether it was just
@@ -1369,6 +1716,7 @@ var ManagerService = class {
    * @param agent - every published Agent.
    */
   installAgent(agent) {
+    if (agent.id === this.managerSessionId) this.deps.mux.ignore(this.managerSessionId);
     if (agent.id !== this.managerSessionId || this.installed.has(agent.id)) return;
     const disposers = [];
     try {
@@ -1403,8 +1751,9 @@ var ManagerService = class {
     this.installed.delete(agentId);
     dispose();
   }
-  /** Release every scoped registration; called on plugin unload. */
+  /** Release every scoped registration and cancel the wake timer; unload path. */
   dispose() {
+    this.scheduler.dispose();
     for (const dispose of [...this.installed.values()]) dispose();
     this.installed.clear();
   }
@@ -1462,24 +1811,71 @@ var ManagerService = class {
     return { task: this.deriveTask(next) };
   }
   /**
-   * Turn newly drained mux edges into at most one manager digest. The wake
-   * policy is deliberately conservative: opted-in, manager idle, one wake per
-   * minute, and edges only (never one prompt per event).
+   * Tell the wake scheduler that edges may have arrived (or time passed).
+   * The scheduler owns the timer, severity classes and hourly budgets.
    * @param now - injectable clock.
    */
   noteEdges(now = this.now()) {
-    if (!this.state.wakeEnabled) return;
+    this.scheduler.notify(now);
+  }
+  /** Re-arm after an Agent status flip (the manager becoming idle can release a wake). */
+  noteAgentStatus(agentId, status) {
+    if (agentId !== this.managerSessionId) return;
+    if (status === "idle") this.scheduler.notify();
+  }
+  /** Current auto-wake status for the panel. */
+  wakeStatus() {
+    return this.scheduler.status();
+  }
+  /**
+   * Enable/disable automatic wakeups or deliver one digest immediately.
+   * @param raw - untrusted `/manager/wake` body action.
+   * @returns the resulting wake status.
+   */
+  async wake(raw) {
+    const action = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw.action : void 0;
+    if (action === "enable") await this.setAutoWake(true);
+    else if (action === "disable") await this.setAutoWake(false);
+    else if (action === "now") this.scheduler.requestNow();
+    else throw new Error("wake.action must be enable, disable or now");
+    return this.wakeStatus();
+  }
+  /**
+   * One digest prompt. Edges are acknowledged only after the prompt succeeded,
+   * so a failure keeps them queued for the scheduler's backoff retry.
+   * @param edges - pending edges chosen by the scheduler.
+   * @param dropped - dropped-edge count to mention.
+   * @returns true when the manager prompt was accepted.
+   */
+  async deliverDigest(edges, dropped) {
     const sessionId = this.managerSessionId;
-    if (sessionId === void 0) return;
-    if (this.deps.ctx.agents.get(sessionId)?.status === "running") return;
-    if (now - this.lastWakeAt < AUTO_WAKE_MIN_INTERVAL_MS) return;
-    const digest = this.deps.mux.digest();
-    if (digest === "") return;
-    this.lastWakeAt = now;
-    this.prompt(sessionId, `[\u7CFB\u7EDF] ${digest}
+    if (sessionId === void 0) return false;
+    const digest = this.deps.mux.digest(edges, dropped);
+    if (digest === "") return false;
+    try {
+      await this.prompt(sessionId, `[\u7CFB\u7EDF] ${digest}
 
-\u8BF7\u67E5\u770B\u5F53\u524D\u72B6\u6001\u5E76\u7528\u5DE5\u5177\u5904\u7406\u6216\u5411\u7528\u6237\u6C47\u62A5\u3002`).catch(
-      (error) => this.deps.warn(`dsh-session-board: auto wake failed: ${describe(error)}`)
+${WAKE_INSTRUCTION}`);
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: auto wake failed: ${describe(error)}`);
+      return false;
+    }
+    this.deps.mux.acknowledge(edges.map((edge) => edge.key));
+    return true;
+  }
+  /** Persist throttle state after one successful digest (best effort). */
+  persistWakeState() {
+    const exported = this.scheduler.exportState();
+    const next = {
+      ...this.state,
+      ...exported.lastWakeAt === void 0 ? {} : { lastWakeAt: exported.lastWakeAt },
+      wakeUrgentTimes: exported.urgentTimes,
+      wakeBatchTimes: exported.batchTimes,
+      revision: this.state.revision + 1
+    };
+    this.state = next;
+    void this.deps.state.put(MANAGER_STATE_KEY, next).catch(
+      (error) => this.deps.warn(`dsh-session-board: wake state persist failed: ${describe(error)}`)
     );
   }
   /** The tool/prompt content projection installed on the manager Agent. */
@@ -1531,6 +1927,7 @@ var ManagerService = class {
       await this.deps.state.put(MANAGER_STATE_KEY, pending);
       this.state = pending;
       this.managerSessionId = sessionId;
+      this.deps.mux.ignore(sessionId);
       const created = await this.deps.ctx.sessionController.create({ sessionId, workspaceId: workspace.id });
       const createdId = created.sessionId;
       if (createdId !== sessionId) {
@@ -1542,6 +1939,7 @@ var ManagerService = class {
         await this.deps.state.put(MANAGER_STATE_KEY, corrected);
         this.state = corrected;
         this.managerSessionId = createdId;
+        this.deps.mux.ignore(createdId);
       }
       try {
         await this.deps.ctx.sessionController.rename({ sessionId: createdId, title: MANAGER_SESSION_TITLE });
@@ -1678,6 +2076,7 @@ var ManagerService = class {
     const next = { ...this.state, wakeEnabled: enabled, revision: this.state.revision + 1 };
     await this.deps.state.put(MANAGER_STATE_KEY, next);
     this.state = next;
+    this.scheduler.setEnabled(enabled);
     return next.wakeEnabled;
   }
   async prompt(sessionId, text) {
@@ -1761,7 +2160,20 @@ function createManagerRoutes(handlers) {
       }
     }
   };
-  return [stateRoute, selectionRoute, taskRoute];
+  const wakeRoute = {
+    path: MANAGER_WAKE_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      try {
+        return jsonResponse(200, { ok: true, ...await handlers.wake(await readJsonBody(request)) });
+      } catch (error) {
+        handlers.warn(`dsh-session-board: manager wake failed: ${describe2(error)}`);
+        return jsonResponse(400, { ok: false, error: "WAKE_INVALID" });
+      }
+    }
+  };
+  return [stateRoute, selectionRoute, taskRoute, wakeRoute];
 }
 
 // src/host/manager/wiring.ts
@@ -1798,6 +2210,7 @@ function startManager(options) {
       },
       selection: async (raw) => await service.writeSelection(raw),
       task: async (raw) => await service.task(readTaskRequest(raw)),
+      wake: async (raw) => ({ wake: await service.wake(raw) }),
       warn
     });
     for (const route of routes) {
@@ -1809,6 +2222,7 @@ function startManager(options) {
     });
     ctx.on("agent/status", ({ agent, status }) => {
       mux.agentStatus(agent.id, status);
+      service.noteAgentStatus(agent.id, status);
     });
     ctx.on("agent/created", ({ agent }) => {
       service.installAgent(agent);

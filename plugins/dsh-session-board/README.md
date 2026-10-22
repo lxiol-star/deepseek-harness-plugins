@@ -23,15 +23,19 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - **管理 Agent**：一个普通 DSH 会话（标题「DSH 管理台」，懒创建在工作区 `~/Documents/deepseek-harness/dsh-console`，可用环境变量 `DSH_SESSION_BOARD_MANAGER_DIR` 覆盖目录）。它可随时冷恢复，空闲不消耗 token；只有它拥有下面这些工具，普通会话看不到。
 - **管理工具**：`workspace_overview`、`workspace_sessions`、`session_status`、`read_selection`、`assign_task`、`list_tasks`、`update_task`、`report_progress`、`set_auto_wake`。
 - **任务板**：`assign_task` 在目标工作区新建会话、投递任务说明并登记任务；任务状态由会话事件派生（运行中 / 出错 / 等待），也可由管理 Agent 显式更新。抽屉里的任务行点击可直接打开对应会话。
-- **自动唤醒**：默认关闭。管理 Agent 用 `set_auto_wake` 打开后，宿主用 epoll 风格的事件多路复用器（`session/event` + `agent/status` → 全量状态 + 有界就绪队列）在管理员空闲时投递 digest，每分钟最多一次。
+- **自动唤醒（0.6.0 重做）**：默认关闭，可在抽屉底部「自动唤醒」行直接开关、查看待处理数量和「立即汇总」；管理 Agent 也能用 `set_auto_wake` 切换。宿主用事件多路复用器（`session/event` + `agent/status` → 会话状态 + 有界消息队列）配合一个真正的定时器投递 digest：
+  - **错误**（turn 失败 / 工具报错）约 3 秒去抖后唤醒，**等待处理**（aborted / blocked）约 12 秒，**普通完成**批量 45 秒汇总；单纯的 turn 开始等进度事件不唤醒。
+  - 每小时预算：错误/等待最多 20 次、完成最多 6 次；超预算时排队到窗口滚动，面板显示抑制次数。
+  - 投递成功才确认消费；失败会保留队列并按 15s→30s→…→120s 退避重试，不会静默丢失。
+  - 管理台自身的活动被排除，不会出现“自己唤醒自己”的循环；限制状态（上次/下次唤醒、计数）持久化，重启不重置。
 - **依赖**：需要宿主提供 `sessionController`、`workspaceRegistry`、`agents` 服务；缺失时只隐藏管理中心，原看板不受影响。管理会话沿用 profile 默认模型；未选模型时聊天会提示先选模型。
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.5.3.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.6.0.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.5.3.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.6.0.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

@@ -26,7 +26,9 @@ import type {
 import { MANAGER_NOTE_MAX, MANAGER_TITLE_MAX, normalizeSelection, previewText } from '../../shared/manager.ts'
 import { MANAGER_STATE_KEY, emptyManagerState } from './domain.ts'
 import type { ManagerStateRecord, ManagerTaskRecord } from './domain.ts'
-import type { EventMux, MuxSourceLevel } from './mux.ts'
+import type { EventMux, MuxEdge, MuxSourceLevel } from './mux.ts'
+import { WakeScheduler } from './wake.ts'
+import type { WakeStatus } from './wake.ts'
 import { managerToolDefinitions } from './tools.ts'
 
 /** KV table face used by the manager domain records. */
@@ -54,8 +56,6 @@ export interface ManagerServiceDeps {
 
 /** Manager session display title. */
 export const MANAGER_SESSION_TITLE = 'DSH 管理台'
-/** Minimum interval between automatic wakeups. */
-const AUTO_WAKE_MIN_INTERVAL_MS = 60_000
 /** Prompt call timeout for manager-side writes. */
 const MANAGER_PROMPT_TIMEOUT_MS = 30_000
 /** Prompt section/context order, above ordinary runtime context. */
@@ -76,6 +76,12 @@ const MANAGER_POLICY = [
   'below. Keep task notes short and evidence-based.',
 ].join('\n')
 
+/** Instruction appended to every automatic digest prompt. */
+const WAKE_INSTRUCTION = [
+  '请按优先级处理：报错与等待处理的会话优先；普通完成可以合并汇报。',
+  '处理完用 update_task / report_progress 记录结论，不要为同一条变化重复唤醒。',
+].join('\n')
+
 /** Prompt request shape recovered from the host service (type-only). */
 type PromptRequest = Parameters<Context['sessionController']['prompt']>[0]
 /** Request-id brand recovered from the same call. */
@@ -90,7 +96,7 @@ export class ManagerService {
   private managerSessionId: SessionId | undefined
   private provisioning: Promise<{ managerSessionId: string; managerWorkspaceId?: string }> | undefined
   private readonly installed = new Map<string, () => void>()
-  private lastWakeAt = 0
+  private readonly scheduler: WakeScheduler
   private lastError: string | undefined
 
   /** @param deps - nested host context plus the durable tables. */
@@ -99,6 +105,31 @@ export class ManagerService {
     this.managerSessionId = this.state.managerSessionId === undefined
       ? undefined
       : this.state.managerSessionId as SessionId
+    if (this.managerSessionId !== undefined) this.deps.mux.ignore(this.managerSessionId)
+    this.scheduler = new WakeScheduler({
+      now: () => this.now(),
+      schedule: (callback, delayMs) => {
+        const handle = setTimeout(callback, delayMs)
+        // A pending digest must not keep the host process alive on unload.
+        const timer = handle as unknown as { unref?: () => void }
+        if (typeof timer.unref === 'function') timer.unref()
+        return handle
+      },
+      cancel: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>) },
+      isEnabled: () => this.state.wakeEnabled,
+      hasManager: () => this.managerSessionId !== undefined,
+      canDeliver: () => this.managerSessionId !== undefined
+        && this.deps.ctx.agents.get(this.managerSessionId)?.status !== 'running',
+      pending: () => this.deps.mux.pendingForWake(20),
+      deliver: async (edges, dropped) => await this.deliverDigest(edges, dropped),
+      onDelivered: () => { this.persistWakeState() },
+      onError: (message) => { this.deps.warn(`dsh-session-board: ${message}`) },
+      initial: {
+        ...(this.state.lastWakeAt === undefined ? {} : { lastWakeAt: this.state.lastWakeAt }),
+        ...(this.state.wakeUrgentTimes === undefined ? {} : { urgentTimes: this.state.wakeUrgentTimes }),
+        ...(this.state.wakeBatchTimes === undefined ? {} : { batchTimes: this.state.wakeBatchTimes }),
+      },
+    })
   }
 
   /** Current session id, when provisioned. */
@@ -113,7 +144,7 @@ export class ManagerService {
       ...(this.state.managerWorkspaceId === undefined ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }),
       selection: normalizeSelection(this.state.selection),
       tasks: this.taskViews(),
-      wakeEnabled: this.state.wakeEnabled,
+      wake: this.wakeStatus(),
       muxRevision: this.deps.mux.snapshot().revision,
       ...(this.lastError === undefined ? {} : { error: this.lastError }),
     }
@@ -132,7 +163,10 @@ export class ManagerService {
       })
     }
     this.provisioning ??= this.provision().finally(() => { this.provisioning = undefined })
-    return this.provisioning
+    return this.provisioning.then((result) => {
+      this.scheduler.notify()
+      return result
+    })
   }
 
   /**
@@ -141,6 +175,7 @@ export class ManagerService {
    * @param agent - every published Agent.
    */
   installAgent(agent: Agent): void {
+    if (agent.id === this.managerSessionId) this.deps.mux.ignore(this.managerSessionId)
     if (agent.id !== this.managerSessionId || this.installed.has(agent.id)) return
     const disposers: Array<() => void> = []
     try {
@@ -177,8 +212,9 @@ export class ManagerService {
     dispose()
   }
 
-  /** Release every scoped registration; called on plugin unload. */
+  /** Release every scoped registration and cancel the wake timer; unload path. */
   dispose(): void {
+    this.scheduler.dispose()
     for (const dispose of [...this.installed.values()]) dispose()
     this.installed.clear()
   }
@@ -240,22 +276,76 @@ export class ManagerService {
   }
 
   /**
-   * Turn newly drained mux edges into at most one manager digest. The wake
-   * policy is deliberately conservative: opted-in, manager idle, one wake per
-   * minute, and edges only (never one prompt per event).
+   * Tell the wake scheduler that edges may have arrived (or time passed).
+   * The scheduler owns the timer, severity classes and hourly budgets.
    * @param now - injectable clock.
    */
   noteEdges(now = this.now()): void {
-    if (!this.state.wakeEnabled) return
+    this.scheduler.notify(now)
+  }
+
+  /** Re-arm after an Agent status flip (the manager becoming idle can release a wake). */
+  noteAgentStatus(agentId: string, status: 'idle' | 'running'): void {
+    if (agentId !== this.managerSessionId) return
+    if (status === 'idle') this.scheduler.notify()
+  }
+
+  /** Current auto-wake status for the panel. */
+  wakeStatus(): WakeStatus {
+    return this.scheduler.status()
+  }
+
+  /**
+   * Enable/disable automatic wakeups or deliver one digest immediately.
+   * @param raw - untrusted `/manager/wake` body action.
+   * @returns the resulting wake status.
+   */
+  async wake(raw: unknown): Promise<WakeStatus> {
+    const action = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as { action?: unknown }).action
+      : undefined
+    if (action === 'enable') await this.setAutoWake(true)
+    else if (action === 'disable') await this.setAutoWake(false)
+    else if (action === 'now') this.scheduler.requestNow()
+    else throw new Error('wake.action must be enable, disable or now')
+    return this.wakeStatus()
+  }
+
+  /**
+   * One digest prompt. Edges are acknowledged only after the prompt succeeded,
+   * so a failure keeps them queued for the scheduler's backoff retry.
+   * @param edges - pending edges chosen by the scheduler.
+   * @param dropped - dropped-edge count to mention.
+   * @returns true when the manager prompt was accepted.
+   */
+  private async deliverDigest(edges: readonly MuxEdge[], dropped: number): Promise<boolean> {
     const sessionId = this.managerSessionId
-    if (sessionId === undefined) return
-    if (this.deps.ctx.agents.get(sessionId)?.status === 'running') return
-    if (now - this.lastWakeAt < AUTO_WAKE_MIN_INTERVAL_MS) return
-    const digest = this.deps.mux.digest()
-    if (digest === '') return
-    this.lastWakeAt = now
-    this.prompt(sessionId, `[系统] ${digest}\n\n请查看当前状态并用工具处理或向用户汇报。`).catch(
-      error => this.deps.warn(`dsh-session-board: auto wake failed: ${describe(error)}`),
+    if (sessionId === undefined) return false
+    const digest = this.deps.mux.digest(edges, dropped)
+    if (digest === '') return false
+    try {
+      await this.prompt(sessionId, `[系统] ${digest}\n\n${WAKE_INSTRUCTION}`)
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: auto wake failed: ${describe(error)}`)
+      return false
+    }
+    this.deps.mux.acknowledge(edges.map(edge => edge.key))
+    return true
+  }
+
+  /** Persist throttle state after one successful digest (best effort). */
+  private persistWakeState(): void {
+    const exported = this.scheduler.exportState()
+    const next: ManagerStateRecord = {
+      ...this.state,
+      ...(exported.lastWakeAt === undefined ? {} : { lastWakeAt: exported.lastWakeAt }),
+      wakeUrgentTimes: exported.urgentTimes,
+      wakeBatchTimes: exported.batchTimes,
+      revision: this.state.revision + 1,
+    }
+    this.state = next
+    void this.deps.state.put(MANAGER_STATE_KEY, next).catch(
+      error => this.deps.warn(`dsh-session-board: wake state persist failed: ${describe(error)}`),
     )
   }
 
@@ -315,6 +405,7 @@ export class ManagerService {
       await this.deps.state.put(MANAGER_STATE_KEY, pending)
       this.state = pending
       this.managerSessionId = sessionId
+      this.deps.mux.ignore(sessionId)
       const created = await this.deps.ctx.sessionController.create({ sessionId, workspaceId: workspace.id })
       const createdId = created.sessionId
       if (createdId !== sessionId) {
@@ -326,6 +417,7 @@ export class ManagerService {
         await this.deps.state.put(MANAGER_STATE_KEY, corrected)
         this.state = corrected
         this.managerSessionId = createdId
+        this.deps.mux.ignore(createdId)
       }
       try {
         await this.deps.ctx.sessionController.rename({ sessionId: createdId, title: MANAGER_SESSION_TITLE })
@@ -478,6 +570,7 @@ export class ManagerService {
     const next: ManagerStateRecord = { ...this.state, wakeEnabled: enabled, revision: this.state.revision + 1 }
     await this.deps.state.put(MANAGER_STATE_KEY, next)
     this.state = next
+    this.scheduler.setEnabled(enabled)
     return next.wakeEnabled
   }
 

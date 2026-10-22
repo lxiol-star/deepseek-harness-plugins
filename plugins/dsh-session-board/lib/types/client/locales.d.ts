@@ -154,6 +154,13 @@ export declare const en: {
     readonly 'manager.workspaces': "Workspaces";
     readonly 'manager.sessions': "Sessions";
     readonly 'manager.tasks': "Tasks";
+    readonly 'manager.wake': "Automatic wakeups";
+    readonly 'manager.wakeEnable': "Enable wakeups";
+    readonly 'manager.wakeDisable': "Disable wakeups";
+    readonly 'manager.wakeNow': "Digest now";
+    readonly 'manager.wakeStatus': "Pending {pending} (error {urgent} / waiting {attention} / done {completed}) · {wakes} wakeups this hour";
+    readonly 'manager.wakeHint': "Errors wake after a few seconds, waiting sessions after a short pause, completions batch; the manager session is never woken by itself.";
+    readonly 'manager.wakeDeliveryFailed': "Last digest could not be delivered; the host will retry.";
     readonly 'manager.loading': "Loading the manager…";
     readonly 'manager.chatUnavailable': "The embedded manager chat is unavailable. Open the manager in the main window instead.";
     readonly 'manager.chatRetry': "Retry";

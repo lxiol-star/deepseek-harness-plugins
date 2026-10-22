@@ -231,6 +231,8 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
     if (snapshot.managerSessionId !== null) face.openSession(snapshot.managerSessionId)
   }, [face, snapshot.managerSessionId])
   const openTask = useCallback((sessionId: string) => { face.openSession(sessionId) }, [face])
+  const toggleWake = useCallback(() => { void manager.setWake(!snapshot.wake.enabled) }, [manager, snapshot.wake.enabled])
+  const wakeNow = useCallback(() => { void manager.wakeNow() }, [manager])
 
   if (!snapshot.open) return null
 
@@ -354,6 +356,31 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
                   ))}
                 </ul>
               )}
+          </section>
+          <section className="sb-manager-section sb-manager-wake">
+            <h2 className="sb-manager-section-title">{t('manager.wake')}</h2>
+            <div className="sb-manager-wake-actions">
+              <button type="button" className="sb-manager-btn" onClick={toggleWake}>
+                {t(snapshot.wake.enabled ? 'manager.wakeDisable' : 'manager.wakeEnable')}
+              </button>
+              <button
+                type="button"
+                className="sb-manager-btn"
+                disabled={!snapshot.wake.enabled || snapshot.wake.pending === 0}
+                onClick={wakeNow}
+              >
+                {t('manager.wakeNow')}
+              </button>
+            </div>
+            <p className="sb-manager-meta">{t('manager.wakeStatus', {
+              pending: snapshot.wake.pending,
+              urgent: snapshot.wake.urgent,
+              attention: snapshot.wake.attention,
+              completed: snapshot.wake.completed,
+              wakes: snapshot.wake.wakesThisHour,
+            })}</p>
+            {snapshot.wake.error !== undefined ? <p className="sb-manager-error">{t('manager.wakeDeliveryFailed')}</p> : null}
+            <p className="sb-manager-hint">{t('manager.wakeHint')}</p>
           </section>
           <footer className="sb-manager-selection">
             <div className="sb-manager-selection-row">

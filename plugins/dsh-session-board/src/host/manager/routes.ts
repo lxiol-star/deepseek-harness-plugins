@@ -6,9 +6,9 @@
  * the board's existing routes. Every handler answers `{ ok, ... }`, maps a
  * thrown Error to a contained 4xx/5xx, and never rejects past the boundary.
  */
-import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse } from '../../shared/manager.ts'
+import type { ManagerSelectionResponse, ManagerStateView, ManagerTaskResponse, ManagerWakeResponse } from '../../shared/manager.ts'
 import type { BoardFetchRoute } from '../routes.ts'
-import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH } from '../../shared/manager.ts'
+import { MANAGER_SELECTION_PATH, MANAGER_STATE_PATH, MANAGER_TASK_PATH, MANAGER_WAKE_PATH } from '../../shared/manager.ts'
 
 /** Route handlers, implemented by the plugin wiring over the manager service. */
 export interface ManagerRouteHandlers {
@@ -18,6 +18,8 @@ export interface ManagerRouteHandlers {
   selection(body: unknown): Promise<ManagerSelectionResponse>
   /** Create or update one task. */
   task(body: unknown): Promise<ManagerTaskResponse>
+  /** Enable/disable automatic wakeups or deliver one digest immediately. */
+  wake(body: unknown): Promise<ManagerWakeResponse>
   /** Contained warning sink. */
   warn(message: string): void
 }
@@ -89,5 +91,18 @@ export function createManagerRoutes(handlers: ManagerRouteHandlers): readonly Bo
       }
     },
   }
-  return [stateRoute, selectionRoute, taskRoute]
+  const wakeRoute: BoardFetchRoute = {
+    path: MANAGER_WAKE_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        return jsonResponse(200, { ok: true, ...(await handlers.wake(await readJsonBody(request))) })
+      } catch (error) {
+        handlers.warn(`dsh-session-board: manager wake failed: ${describe(error)}`)
+        return jsonResponse(400, { ok: false, error: 'WAKE_INVALID' })
+      }
+    },
+  }
+  return [stateRoute, selectionRoute, taskRoute, wakeRoute]
 }

@@ -30,6 +30,12 @@ export interface ManagerStateRecord {
   readonly revision: number
   /** Latest free-form progress line (report_progress without a task). */
   readonly lastProgress?: string
+  /** Epoch ms of the last delivered automatic digest. */
+  readonly lastWakeAt?: number
+  /** Urgent/attention wake timestamps in the rolling hour. */
+  readonly wakeUrgentTimes?: readonly number[]
+  /** Completion wake timestamps in the rolling hour. */
+  readonly wakeBatchTimes?: readonly number[]
 }
 
 /** Durable task row (same fields the wire view exposes). */
@@ -38,6 +44,13 @@ export type ManagerTaskRecord = ManagerTaskView
 /** Empty manager state used before the first mutation. */
 export function emptyManagerState(): ManagerStateRecord {
   return { selection: { workspaceIds: [], sessionIds: [] }, wakeEnabled: false, revision: 0 }
+}
+
+/** Read a bounded list of finite wake timestamps, or undefined when absent/corrupt. */
+function wakeTimes(value: unknown): readonly number[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const times = value.filter((at): at is number => typeof at === 'number' && Number.isFinite(at) && at > 0)
+  return times.slice(-64)
 }
 
 /** Normalize one stored manager record. */
@@ -57,6 +70,11 @@ export const managerStateSchema: RecordSchema<ManagerStateRecord> = {
       ...(typeof source.lastProgress === 'string' && source.lastProgress !== ''
         ? { lastProgress: source.lastProgress.slice(0, 2_000) }
         : {}),
+      ...(typeof source.lastWakeAt === 'number' && Number.isFinite(source.lastWakeAt) && source.lastWakeAt > 0
+        ? { lastWakeAt: source.lastWakeAt }
+        : {}),
+      ...(wakeTimes(source.wakeUrgentTimes) === undefined ? {} : { wakeUrgentTimes: wakeTimes(source.wakeUrgentTimes) as readonly number[] }),
+      ...(wakeTimes(source.wakeBatchTimes) === undefined ? {} : { wakeBatchTimes: wakeTimes(source.wakeBatchTimes) as readonly number[] }),
     }
   },
 }

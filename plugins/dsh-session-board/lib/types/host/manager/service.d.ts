@@ -3,6 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ManagerSelection, ManagerSelectionResponse, ManagerStateView, ManagerTaskRequest, ManagerTaskResponse } from '../../shared/manager.ts';
 import type { ManagerStateRecord, ManagerTaskRecord } from './domain.ts';
 import type { EventMux } from './mux.ts';
+import type { WakeStatus } from './wake.ts';
 /** KV table face used by the manager domain records. */
 export interface ManagerTable<V> {
     get(key: string): V | undefined;
@@ -36,7 +37,7 @@ export declare class ManagerService {
     private managerSessionId;
     private provisioning;
     private readonly installed;
-    private lastWakeAt;
+    private readonly scheduler;
     private lastError;
     /** @param deps - nested host context plus the durable tables. */
     constructor(deps: ManagerServiceDeps);
@@ -61,7 +62,7 @@ export declare class ManagerService {
     installAgent(agent: Agent): void;
     /** Drop one Agent's scoped registrations when it is disposed. */
     disposeAgent(agentId: string): void;
-    /** Release every scoped registration; called on plugin unload. */
+    /** Release every scoped registration and cancel the wake timer; unload path. */
     dispose(): void;
     /** Current durable selection. */
     selection(): ManagerSelection;
@@ -78,12 +79,31 @@ export declare class ManagerService {
      */
     task(request: ManagerTaskRequest): Promise<ManagerTaskResponse>;
     /**
-     * Turn newly drained mux edges into at most one manager digest. The wake
-     * policy is deliberately conservative: opted-in, manager idle, one wake per
-     * minute, and edges only (never one prompt per event).
+     * Tell the wake scheduler that edges may have arrived (or time passed).
+     * The scheduler owns the timer, severity classes and hourly budgets.
      * @param now - injectable clock.
      */
     noteEdges(now?: number): void;
+    /** Re-arm after an Agent status flip (the manager becoming idle can release a wake). */
+    noteAgentStatus(agentId: string, status: 'idle' | 'running'): void;
+    /** Current auto-wake status for the panel. */
+    wakeStatus(): WakeStatus;
+    /**
+     * Enable/disable automatic wakeups or deliver one digest immediately.
+     * @param raw - untrusted `/manager/wake` body action.
+     * @returns the resulting wake status.
+     */
+    wake(raw: unknown): Promise<WakeStatus>;
+    /**
+     * One digest prompt. Edges are acknowledged only after the prompt succeeded,
+     * so a failure keeps them queued for the scheduler's backoff retry.
+     * @param edges - pending edges chosen by the scheduler.
+     * @param dropped - dropped-edge count to mention.
+     * @returns true when the manager prompt was accepted.
+     */
+    private deliverDigest;
+    /** Persist throttle state after one successful digest (best effort). */
+    private persistWakeState;
     /** The tool/prompt content projection installed on the manager Agent. */
     private toolContext;
     /** Dynamic prompt context: selection, tasks and last progress line. */

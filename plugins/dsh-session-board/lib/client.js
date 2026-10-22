@@ -675,7 +675,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.3",
+      "data-session-board-version": "0.6.0",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -699,7 +699,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.3",
+      "data-session-board-version": "0.6.0",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1195,7 +1195,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.5.3",
+        "data-session-board-version": "0.6.0",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2234,6 +2234,8 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-chip[data-status='failed'],
 .sb-manager-chip[data-status='orphaned'] { color: var(--dsw-alias-state-error-primary); }
 
+.sb-manager-wake-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-manager-wake-actions .sb-manager-btn { flex: 0 0 auto; }
 .sb-manager-selection {
   flex: 0 0 auto;
   display: flex;
@@ -2861,6 +2863,13 @@ var NS = "session-board", en = {
   "manager.workspaces": "Workspaces",
   "manager.sessions": "Sessions",
   "manager.tasks": "Tasks",
+  "manager.wake": "Automatic wakeups",
+  "manager.wakeEnable": "Enable wakeups",
+  "manager.wakeDisable": "Disable wakeups",
+  "manager.wakeNow": "Digest now",
+  "manager.wakeStatus": "Pending {pending} (error {urgent} / waiting {attention} / done {completed}) \xB7 {wakes} wakeups this hour",
+  "manager.wakeHint": "Errors wake after a few seconds, waiting sessions after a short pause, completions batch; the manager session is never woken by itself.",
+  "manager.wakeDeliveryFailed": "Last digest could not be delivered; the host will retry.",
   "manager.loading": "Loading the manager\u2026",
   "manager.chatUnavailable": "The embedded manager chat is unavailable. Open the manager in the main window instead.",
   "manager.chatRetry": "Retry",
@@ -3103,6 +3112,13 @@ var NS = "session-board", en = {
   "manager.workspaces": "\u5DE5\u4F5C\u533A",
   "manager.sessions": "\u4F1A\u8BDD",
   "manager.tasks": "\u4EFB\u52A1",
+  "manager.wake": "\u81EA\u52A8\u5524\u9192",
+  "manager.wakeEnable": "\u5F00\u542F\u81EA\u52A8\u5524\u9192",
+  "manager.wakeDisable": "\u5173\u95ED\u81EA\u52A8\u5524\u9192",
+  "manager.wakeNow": "\u7ACB\u5373\u6C47\u603B",
+  "manager.wakeStatus": "\u5F85\u5904\u7406 {pending}\uFF08\u9519\u8BEF {urgent} / \u7B49\u5F85 {attention} / \u5B8C\u6210 {completed}\uFF09\xB7 \u672C\u5C0F\u65F6\u5DF2\u5524\u9192 {wakes} \u6B21",
+  "manager.wakeHint": "\u62A5\u9519\u51E0\u79D2\u5185\u5524\u9192\u3001\u7B49\u5F85\u5904\u7406\u7A0D\u540E\u5524\u9192\u3001\u666E\u901A\u5B8C\u6210\u6279\u91CF\u6C47\u603B\uFF1B\u7BA1\u7406\u53F0\u81EA\u8EAB\u7684\u6D3B\u52A8\u4E0D\u4F1A\u518D\u6B21\u5524\u9192\u81EA\u5DF1\u3002",
+  "manager.wakeDeliveryFailed": "\u4E0A\u6B21 digest \u6295\u9012\u5931\u8D25\uFF0C\u5BBF\u4E3B\u4F1A\u81EA\u52A8\u91CD\u8BD5\u3002",
   "manager.loading": "\u6B63\u5728\u52A0\u8F7D\u7BA1\u7406\u9762\u677F\u2026",
   "manager.chatUnavailable": "\u65E0\u6CD5\u5185\u5D4C\u7BA1\u7406\u4F1A\u8BDD\uFF0C\u8BF7\u5728\u4E3B\u754C\u9762\u6253\u5F00\u7BA1\u7406\u5458\u4F1A\u8BDD\u3002",
   "manager.chatRetry": "\u91CD\u8BD5",
@@ -4598,7 +4614,7 @@ function SessionBoardSettingsPage({ t, settings, wiki }) {
 }
 
 // src/shared/manager.ts
-var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_PATH = "/api/session-board/manager/selection", MANAGER_TASK_PATH = "/api/session-board/manager/task", MANAGER_TASK_STATUSES = [
+var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_PATH = "/api/session-board/manager/selection", MANAGER_TASK_PATH = "/api/session-board/manager/task", MANAGER_WAKE_PATH = "/api/session-board/manager/wake", MANAGER_TASK_STATUSES = [
   "pending",
   "assigned",
   "running",
@@ -4607,6 +4623,22 @@ var MANAGER_STATE_PATH = "/api/session-board/manager/state", MANAGER_SELECTION_P
   "failed",
   "orphaned"
 ], EMPTY_SELECTION = Object.freeze({ workspaceIds: [], sessionIds: [] });
+function parseManagerWakeStatus(value) {
+  if (typeof value != "object" || value === null || Array.isArray(value)) return null;
+  let source = value, count = (raw) => typeof raw == "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+  return typeof source.enabled != "boolean" ? null : {
+    enabled: source.enabled,
+    pending: count(source.pending),
+    urgent: count(source.urgent),
+    attention: count(source.attention),
+    completed: count(source.completed),
+    wakesThisHour: count(source.wakesThisHour),
+    suppressed: count(source.suppressed),
+    ...typeof source.lastWakeAt == "number" && Number.isFinite(source.lastWakeAt) ? { lastWakeAt: source.lastWakeAt } : {},
+    ...typeof source.nextAt == "number" && Number.isFinite(source.nextAt) ? { nextAt: source.nextAt } : {},
+    ...typeof source.error == "string" && source.error !== "" ? { error: source.error } : {}
+  };
+}
 function isManagerTaskStatus(value) {
   return typeof value == "string" && MANAGER_TASK_STATUSES.includes(value);
 }
@@ -4651,6 +4683,9 @@ var TASK_STATUS_KEYS = {
 
 // src/client/manager/controller.ts
 var MANAGER_STORE_KEY = "dsh.session-board.manager.v1", MANAGER_SELECTION_DEBOUNCE_MS = 450, MANAGER_POLL_MS = 4e3, MANAGER_REFERENCE_SOURCE = "sessionBoardManager";
+function emptyWakeStatus() {
+  return { enabled: !1, pending: 0, urgent: 0, attention: 0, completed: 0, wakesThisHour: 0, suppressed: 0 };
+}
 function initialState() {
   return {
     open: !1,
@@ -4662,7 +4697,7 @@ function initialState() {
     managerWorkspaceId: null,
     selection: { workspaceIds: [...EMPTY_SELECTION.workspaceIds], sessionIds: [...EMPTY_SELECTION.sessionIds] },
     tasks: [],
-    wakeEnabled: !1,
+    wake: emptyWakeStatus(),
     muxRevision: 0,
     sending: !1,
     syncing: !1,
@@ -4711,14 +4746,14 @@ function parseState(value) {
       let task = parseTask(raw);
       task !== null && tasks.push(task);
     }
-  let managerSessionId = stringOrNull2(record2.managerSessionId), managerWorkspaceId = stringOrNull2(record2.managerWorkspaceId), stateError = stringOrNull2(record2.error), revision = numberOrNull2(record2.muxRevision);
+  let managerSessionId = stringOrNull2(record2.managerSessionId), managerWorkspaceId = stringOrNull2(record2.managerWorkspaceId), stateError = stringOrNull2(record2.error), revision = numberOrNull2(record2.muxRevision), wake = parseManagerWakeStatus(record2.wake) ?? (record2.wakeEnabled === !0 ? { ...emptyWakeStatus(), enabled: !0 } : emptyWakeStatus());
   return {
     ...managerSessionId === null ? {} : { managerSessionId },
     ...managerWorkspaceId === null ? {} : { managerWorkspaceId },
     ...stateError === null ? {} : { error: stateError },
     selection: normalizeSelection(record2.selection),
     tasks,
-    wakeEnabled: record2.wakeEnabled === !0,
+    wake,
     muxRevision: revision ?? 0
   };
 }
@@ -4926,6 +4961,34 @@ var ManagerController = class {
     let task = { id: taskId };
     return patch.title !== void 0 && (task.title = patch.title), patch.workspaceId !== void 0 && (task.workspaceId = patch.workspaceId), patch.sessionId !== void 0 && (task.sessionId = patch.sessionId), patch.status !== void 0 && (task.status = patch.status), patch.note !== void 0 && (task.note = patch.note), this.writeTask({ action: "update", task });
   }
+  /**
+   * Enable or disable automatic wakeups through the host route.
+   * @param enabled - new opt-in value.
+   * @returns whether the host accepted the change.
+   */
+  async setWake(enabled) {
+    return await this.writeWake({ action: enabled ? "enable" : "disable" });
+  }
+  /**
+   * Ask the host for one digest as soon as the manager is idle.
+   * @returns whether the request was accepted.
+   */
+  async wakeNow() {
+    return await this.writeWake({ action: "now" });
+  }
+  /** One `/manager/wake` round trip; publishes the returned status. */
+  async writeWake(body) {
+    if (this.disposed) return !1;
+    try {
+      let payload = await postJson(MANAGER_WAKE_PATH, body);
+      if (payload.ok !== !0) throw new Error(failureCode(payload));
+      let wake = parseManagerWakeStatus(payload.wake);
+      if (wake === null) throw new Error("INVALID_RESPONSE");
+      return this.disposed || this.publish({ wake, ...this.state.error === "manager.errorWake" ? { error: null, errorDetail: null } : {} }), !0;
+    } catch (error) {
+      return this.disposed || this.publish({ error: "manager.errorWake", errorDetail: error instanceof Error ? error.message : "REQUEST_FAILED" }), !1;
+    }
+  }
   /** Release the retained Session, timers and subscribers. Terminal. */
   dispose() {
     this.disposed || (this.disposed = !0, this.stopPolling(), this.selectionTimer !== null && (globalThis.clearTimeout(this.selectionTimer), this.selectionTimer = null), this.releaseReference(), this.referencePromise = null, this.referencePromiseId = null, this.refreshPromise = null, this.listeners.clear());
@@ -5009,7 +5072,7 @@ var ManagerController = class {
       stateError: view.error ?? null,
       selection,
       tasks: [...view.tasks],
-      wakeEnabled: view.wakeEnabled,
+      wake: view.wake,
       muxRevision: view.muxRevision,
       ...nextSessionId !== this.state.managerSessionId ? { reference: null, chat: "idle", chatError: null } : {}
     });
@@ -5199,7 +5262,11 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
     snapshot.managerSessionId !== null && face.openSession(snapshot.managerSessionId);
   }, [face, snapshot.managerSessionId]), openTask = (0, import_react10.useCallback)((sessionId) => {
     face.openSession(sessionId);
-  }, [face]);
+  }, [face]), toggleWake = (0, import_react10.useCallback)(() => {
+    manager.setWake(!snapshot.wake.enabled);
+  }, [manager, snapshot.wake.enabled]), wakeNow = (0, import_react10.useCallback)(() => {
+    manager.wakeNow();
+  }, [manager]);
   if (!snapshot.open) return null;
   let chatReady = snapshot.reference !== null && typeof SessionProvider == "function" && typeof renderSlot == "function", chatFailed = snapshot.phase === "error" || snapshot.chat === "error" || snapshot.phase === "ready" && snapshot.managerSessionId === null;
   return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-root sb-manager", role: "complementary", "aria-label": t("manager.ariaDrawer"), "data-open": "true", children: [
@@ -5299,6 +5366,31 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
               ]
             }
           ) }, task.id)) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-wake", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.wake") }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-wake-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: toggleWake, children: t(snapshot.wake.enabled ? "manager.wakeDisable" : "manager.wakeEnable") }),
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "sb-manager-btn",
+                disabled: !snapshot.wake.enabled || snapshot.wake.pending === 0,
+                onClick: wakeNow,
+                children: t("manager.wakeNow")
+              }
+            )
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-meta", children: t("manager.wakeStatus", {
+            pending: snapshot.wake.pending,
+            urgent: snapshot.wake.urgent,
+            attention: snapshot.wake.attention,
+            completed: snapshot.wake.completed,
+            wakes: snapshot.wake.wakesThisHour
+          }) }),
+          snapshot.wake.error !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-error", children: t("manager.wakeDeliveryFailed") }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-hint", children: t("manager.wakeHint") })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("footer", { className: "sb-manager-selection", children: [
           /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-selection-row", children: [

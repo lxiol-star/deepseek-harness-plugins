@@ -192,7 +192,7 @@ describe('EventMux turn lifecycle', () => {
       mux.record('s1', turnEnd(0, 1, kind), 1_000)
       expect(levelOf(mux, 's1')?.status).toBe(status)
       expect(levelOf(mux, 's1')?.lastKind).toBe(kind)
-      expect(edgesOf(mux)[0]?.priority).toBe(status === 'error' ? 'error' : 'completed')
+      expect(edgesOf(mux)[0]?.priority).toBe(status === 'error' ? 'error' : status === 'waiting' ? 'needs-input' : 'completed')
     }
   })
 
@@ -385,28 +385,27 @@ describe('EventMux snapshot', () => {
   })
 })
 
-describe('EventMux edge drain', () => {
-  it('drains the edge list once', () => {
+describe('EventMux pending queue', () => {
+  it('reads without consuming and acknowledges only when asked', () => {
     const mux = new EventMux()
     mux.record('s1', turnStart(0), 0)
 
-    expect(mux.consumeEdges()).toHaveLength(1)
+    const pending = mux.pendingForWake()
+    expect(pending.edges).toHaveLength(1)
+    expect(mux.snapshot().edges).toHaveLength(1)
+    mux.acknowledge(pending.edges.map(edge => edge.key))
     expect(mux.snapshot().edges).toEqual([])
-    expect(mux.consumeEdges()).toEqual([])
+    expect(mux.pendingForWake().edges).toEqual([])
   })
 
   it('orders edges by priority, then newest first', () => {
-    // `needs-input` is a reserved rank: the live-only approval/interaction
-    // waterfalls are deliberately not subscribed by the mux, so no reachable
-    // durable event pushes that priority yet. This assertion covers every
-    // priority a durable event can currently emit.
     const mux = new EventMux()
     mux.record('s1', turnStart(0, 1), 100)
     mux.record('s2', turnEnd(0, 1, 'completed'), 200)
     mux.record('s3', toolResult(0, { reason: 'boom' }), 300)
     mux.record('s4', toolResult(0, { reason: 'bang' }), 400)
 
-    expect(mux.consumeEdges().map(edge => edge.key)).toEqual([
+    expect(mux.pendingForWake().edges.map(edge => edge.key)).toEqual([
       's4:tool-error:1:1',
       's3:tool-error:1:1',
       's2:turn-end:1',
@@ -414,33 +413,54 @@ describe('EventMux edge drain', () => {
     ])
   })
 
-  it('bounds the drain and clears the remainder', () => {
+  it('bounds the read and keeps the rest queued', () => {
     const mux = new EventMux()
     mux.record('s1', turnStart(100, 1), 100)
     mux.record('s1', turnStart(200, 2), 200)
     mux.record('s1', turnStart(300, 3), 300)
 
-    expect(mux.consumeEdges(2)).toHaveLength(2)
-    expect(mux.snapshot().edges).toEqual([])
+    const first = mux.pendingForWake(2)
+    expect(first.edges).toHaveLength(2)
+    mux.acknowledge(first.edges.map(edge => edge.key))
+    expect(mux.snapshot().edges).toHaveLength(1)
+  })
+})
+
+describe('EventMux ignore', () => {
+  it('drops the ignored source and never records it again', () => {
+    const mux = new EventMux()
+    mux.record('manager', turnEnd(0, 1, 'completed'), 1_000)
+    mux.record('s1', turnStart(0, 1), 1_000)
+    expect(mux.snapshot().sources).toHaveProperty('manager')
+
+    mux.ignore('manager')
+    expect(mux.isIgnored('manager')).toBe(true)
+    expect(mux.snapshot().sources).not.toHaveProperty('manager')
+    expect(mux.snapshot().edges.some(edge => edge.sourceId === 'manager')).toBe(false)
+
+    mux.record('manager', turnStart(0, 2), 2_000)
+    mux.agentStatus('manager', 'idle', 2_000)
+    expect(mux.snapshot().sources).not.toHaveProperty('manager')
+    expect(mux.snapshot().edges.some(edge => edge.sourceId === 'manager')).toBe(false)
   })
 })
 
 describe('EventMux digest', () => {
-  it('is empty when nothing is queued', () => {
-    expect(new EventMux().digest()).toBe('')
+  it('is empty without edges', () => {
+    expect(new EventMux().digest([])).toBe('')
   })
 
-  it('renders one line per drained edge and drains them', () => {
+  it('renders one line per pending edge without consuming them', () => {
     const mux = new EventMux()
     mux.record('s1', toolResult(0, { reason: 'boom' }), 1_000)
     mux.record('s1', turnEnd(0, 1, 'completed'), 2_000)
 
-    const digest = mux.digest()
+    const pending = mux.pendingForWake()
+    const digest = mux.digest(pending.edges, pending.dropped)
     expect(digest).toContain('[自动唤醒] 工作区/会话出现需要处理的变化：')
-    expect(digest).toContain('- [error] s1: tool error: boom')
-    expect(digest).toContain('- [completed] s1: turn 1 ended (completed)')
-    expect(mux.snapshot().edges).toEqual([])
-    expect(mux.digest()).toBe('')
+    expect(digest).toContain('- [错误] s1: tool error: boom')
+    expect(digest).toContain('- [完成] s1: turn 1 ended (completed)')
+    expect(mux.snapshot().edges).toHaveLength(2)
   })
 
   it('notes how many low-priority edges a bounded queue dropped', () => {
@@ -448,7 +468,9 @@ describe('EventMux digest', () => {
     fillProgressEdges(mux, 's1', MUX_LIMITS.perSource + 1)
 
     expect(mux.stats().dropped).toBe(1)
-    expect(mux.digest()).toContain(`（有 1 条低优先级事件因队伍上限被丢弃）`)
+    const pending = mux.pendingForWake()
+    expect(pending.dropped).toBe(1)
+    expect(mux.digest(pending.edges, pending.dropped)).toContain('（另有 1 条低优先级事件因队列上限被丢弃）')
   })
 })
 
@@ -507,7 +529,9 @@ describe('EventMux bounds', () => {
     expect(stats.revision).toBe(mux.snapshot().revision)
     expect(edgesOf(mux)).toHaveLength(stats.edges)
 
-    expect(mux.consumeEdges(Number.MAX_SAFE_INTEGER)).toHaveLength(MUX_LIMITS.global)
+    const pending = mux.pendingForWake(Number.MAX_SAFE_INTEGER)
+    expect(pending.edges).toHaveLength(MUX_LIMITS.global)
+    mux.acknowledge(pending.edges.map(edge => edge.key))
     expect(mux.stats()).toEqual({
       sources,
       edges: 0,
