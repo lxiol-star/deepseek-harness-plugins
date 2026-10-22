@@ -1,7 +1,7 @@
 /** Locale dictionaries for the reasoning-effort model control and settings rows. */
 
 /** Namespace registered with DSH's client locale service. */
-export const NS = 'reasoning-effort'
+export const NS = 'whale-effort'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
@@ -78,13 +78,31 @@ export const zh = {
   'yaml.valueComment': '值 = 端点自己的写法；没写的档位视为不支持',
   'yaml.compatComment': '端点需要时才加 compat（见上面的开关说明），例如：',
   'settings.effort.title': '推理强度滑块',
-  'settings.effort.description': '在模型菜单中显示推理强度滑块和动态辐射特效，档位随当前模型自动适配',
+  'settings.effort.description': '在模型菜单中显示推理强度滑块、鲸鱼娘滑块与科幻特效；档位随当前模型自动适配',
   'settings.effort.aria': '启用推理强度滑块',
-  'settings.chibi.title': '大肥鱼滑块',
-  'settings.chibi.description': '用大肥鱼替换滑块按钮',
-  'settings.chibi.aria': '启用大肥鱼滑块',
+  'settings.chibi.title': '鲸鱼娘滑块',
+  'settings.chibi.description': '用鲸鱼娘（大肥鱼）替换滑块按钮',
+  'settings.chibi.aria': '启用鲸鱼娘滑块',
   'settings.enabled': '启用',
   'settings.disabled': '停用',
+  'effort.ultra': 'Ultra',
+  'effort.ultra.description': 'Ultra 会钉住当前模型的最高真实档，并注入最大严格性策略',
+  'effort.lightning': '闪电模式',
+  'effort.lightning.description': '父 Agent 只做编排，把工作派给子代理（英文策略注入，默认关闭）',
+  'effort.lightning.aria': '切换闪电模式',
+  'effort.rate': '子代理 tok/s',
+  'effort.rate.title': '本会话子代理合计的 token 产出速率',
+  'effort.rate.none': '暂无子代理吞吐',
+  'effort.policy': '注入策略',
+  'effort.policy.none': '当前没有注入策略',
+  'effort.turbo.unavailable': '宿主状态不可用：Ultra、闪电与读数暂不可用',
+  'effort.turbo.failed': '状态保存失败，已回退',
+  'settings.skin.title': '特效皮肤',
+  'settings.skin.description': '选择滑条的科幻特效皮肤（默认流体）',
+  'settings.skin.aria': '选择滑条特效皮肤',
+  'skin.holo': '全息能量',
+  'skin.chrome': '液态金属',
+  'skin.fluid': '流体',
 } satisfies Record<string, string>
 
 /** Locale key union for the plugin namespace. */
@@ -165,18 +183,36 @@ export const en = {
   'yaml.valueComment': 'value = the spelling that endpoint uses; a level you leave out counts as unsupported',
   'yaml.compatComment': 'Add compat only when the endpoint needs it (see the switches above), for example:',
   'settings.effort.title': 'Reasoning effort slider',
-  'settings.effort.description': 'Show the reasoning-effort slider and dynamic radiation effect in the model menu; levels adapt to the current model automatically',
+  'settings.effort.description': 'Show the reasoning-effort slider, the whale-girl thumb and the sci-fi effects in the model menu; levels adapt to the current model automatically',
   'settings.effort.aria': 'Enable reasoning effort slider',
-  'settings.chibi.title': 'Big Fat Fish slider',
-  'settings.chibi.description': 'Replace the slider thumb with the Big Fat Fish',
-  'settings.chibi.aria': 'Enable Big Fat Fish slider',
+  'settings.chibi.title': 'Whale-girl slider',
+  'settings.chibi.description': 'Replace the slider thumb with the whale girl (Big Fat Fish)',
+  'settings.chibi.aria': 'Enable the whale-girl slider',
   'settings.enabled': 'Enabled',
   'settings.disabled': 'Disabled',
+  'effort.ultra': 'Ultra',
+  'effort.ultra.description': 'Ultra pins the highest real level of the current model and injects a maximum-rigor policy',
+  'effort.lightning': 'Lightning mode',
+  'effort.lightning.description': 'The parent agent only orchestrates and delegates the work (English policy injection, default off)',
+  'effort.lightning.aria': 'Toggle lightning mode',
+  'effort.rate': 'Subagent tok/s',
+  'effort.rate.title': 'Combined token throughput of this session’s subagents',
+  'effort.rate.none': 'No subagent throughput yet',
+  'effort.policy': 'Injected policy',
+  'effort.policy.none': 'No policy is injected right now',
+  'effort.turbo.unavailable': 'Host state unavailable: Ultra, lightning and the readout are disabled',
+  'effort.turbo.failed': 'Could not save the state; reverted',
+  'settings.skin.title': 'Effect skin',
+  'settings.skin.description': 'Pick the sci-fi skin used by the slider (default: fluid)',
+  'settings.skin.aria': 'Choose the slider effect skin',
+  'skin.holo': 'Hologram',
+  'skin.chrome': 'Liquid metal',
+  'skin.fluid': 'Fluid',
 } satisfies Record<ReasoningEffortLocaleKey, string>
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    'reasoning-effort': ReasoningEffortLocaleKey
+    'whale-effort': ReasoningEffortLocaleKey
   }
 }
 

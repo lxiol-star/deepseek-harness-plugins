@@ -1,6 +1,10 @@
 /**
  * Session-scoped model and reasoning-effort control for the DSH composer model seat.
  *
+ * Merged control: the native model selector's effort pane renders the
+ * whale-girl slider with the sci-fi energy skins, the appended Ultra tier,
+ * the lightning orchestration toggle and the live subagent tok/s readout.
+ *
  * The control deliberately follows DSH's own session model-selection contract:
  * `sessions.models()` supplies the exact current route and its adapter-owned
  * effort metadata; `sessions.selectModel()` submits the complete selection for
@@ -8,7 +12,7 @@
  * current model exposes — their count and order are the adapter's, never
  * assumed here.
  *
- * @module dsh-reasoning-effort/client
+ * @module dsh-whale-effort/client
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
@@ -39,10 +43,31 @@ import { wrapNativeSelector } from './native-selector.js'
 import {
   clampIndex,
   currentModel,
+  displayIndexFor,
+  displayLevels,
+  effortIdForDisplay,
   effortIndex,
+  isUltraIndex,
   selectEffort,
   sliderLevels,
 } from './effort-selection.js'
+import {
+  BoltToggle,
+  EffectsRail,
+  PolicyChip,
+  RateReadout,
+} from './effects/index.js'
+import { EFFECTS_CSS } from './effects/css.js'
+import { SKINS, type Skin } from './effects/skins.js'
+import {
+  EMPTY_TURBO,
+  makeTurboService,
+  RPC_CHANNEL,
+  skinStore,
+  type HostRpc,
+  type TurboService,
+  type TurboSnapshot,
+} from './turbo.js'
 // Agent briefs inlined as text at build time; the copied document picks one by
 // the active locale.
 import agentTutorialEn from './agent-tutorial.en.md'
@@ -53,12 +78,8 @@ type ReRpcResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: { code: string; message: string } }
 
-interface HostRpc {
-  call(channel: string, endpoint: string, payload?: unknown): Promise<unknown>
-}
-
-/** Channel the Host half registers its guidance endpoints on. */
-const ADAPT_CHANNEL = '/dsh-reasoning-effort'
+/** Module-level Host transport shared by the settings row (no session seat there). */
+let turboService: TurboService | null = null
 
 /** One guidance result from the Host half. */
 interface AdaptGuidance {
@@ -197,7 +218,7 @@ function makeAdaptationService(rpc: HostRpc | undefined): AdaptationService | nu
   const listeners = new Set<() => void>()
   const call = async <T,>(endpoint: string, payload?: unknown): Promise<T | null> => {
     try {
-      const result = (await rpc.call(ADAPT_CHANNEL, endpoint, payload)) as ReRpcResult<T>
+      const result = (await rpc.call(RPC_CHANNEL, endpoint, payload)) as ReRpcResult<T>
       return result.ok ? result.value : null
     } catch {
       return null
@@ -255,6 +276,10 @@ interface ModelSeatInjectedProps {
   readonly load: () => void
   readonly select: (selection: ModelSelection) => Promise<boolean>
   readonly adapt: AdaptationService | null
+  /** Session the native seat belongs to; absent on the fallback composer seat. */
+  readonly sessionId?: SessionId
+  /** Host transport for Ultra/lightning state and the fleet sample. */
+  readonly turbo: TurboService | null
   /** Rules document for the active locale, read at copy time. */
   readonly agentTutorial: () => string
 }
@@ -263,9 +288,9 @@ type ModelSeatProps = ModelSeatInjectedProps & PropsLocale<typeof NS>
 
 const SLOT = 'conversation.input.model'
 const SETTINGS_SLOT = 'settings.general.item'
-const ENABLED_STORAGE_KEY = 'dsh-reasoning-effort.enabled'
-const LEGACY_ENABLED_STORAGE_KEY = '@dsh-external/dsh-reasoning-effort.enabled'
-const CHIBI_THUMB_STORAGE_KEY = 'dsh-reasoning-effort.chibi-thumb'
+const ENABLED_STORAGE_KEY = 'dsh-whale-effort.enabled'
+const LEGACY_ENABLED_STORAGE_KEY = 'dsh-reasoning-effort.enabled'
+const CHIBI_THUMB_STORAGE_KEY = 'dsh-whale-effort.chibi-thumb'
 export const inject = ['slots', 'sessions', 'modelDirectories', 'connection', 'locale', 'remote', 'remote.session']
 
 function readEnabledPreference(): boolean {
@@ -333,129 +358,51 @@ const chibiThumbStore = {
   },
 }
 
-interface RadiationState {
-  progress: number
-  dragging: boolean
+/** Full-scale token rate that maps to maximum glow (visual only; the readout stays exact). */
+const RATE_FULL_SCALE = 20000
+/** Poll period for the fleet sample while the effort pane is open. */
+const TURBO_POLL_MS = 1000
+/** Consecutive transport failures after which the chrome stops polling. */
+const TURBO_MAX_FAILURES = 3
+
+interface EffortSliderProps {
+  directory: ModelDirectory
+  t: ReasoningEffortTranslate
+  locked?: boolean
+  sessionId?: SessionId
+  turbo: TurboService | null
 }
 
-function drawRadiation(
-  context: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  time: number,
-  state: RadiationState,
-): void {
-  const origin = state.progress * width
-  const isDark = document.body.hasAttribute('data-ds-dark-theme')
-  const cell = 4
-  const speed = state.dragging ? 2.8 : 1
-
-  context.clearRect(0, 0, width, height)
-  if (origin <= 0) return
-
-  context.save()
-  context.beginPath()
-  context.rect(0, 0, origin, height)
-  context.clip()
-
-  for (let x = 0; x < origin; x += cell) {
-    const delta = x + cell * 0.5 - origin
-    const distance = Math.abs(delta)
-    const phaseA = distance / 10 - time * 0.0074 * speed
-    const phaseB = distance / 23 - time * 0.0041 * speed + 1.7
-    const phaseC = distance / 40 - time * 0.0022 * speed + 3.4
-    const sinA = Math.max(0, Math.sin(phaseA))
-    const sinB = Math.max(0, Math.sin(phaseB))
-    const sinC = Math.max(0, Math.sin(phaseC))
-    const waveA = Math.pow(sinA, 2.6)
-    const waveB = Math.pow(sinB, 3.2)
-    const waveC = Math.pow(sinC, 4)
-    const crest = Math.pow(sinA, 15) + Math.pow(sinB, 18) * 0.78
-    const wave = Math.min(1, waveA * 0.76 + waveB * 0.58 + waveC * 0.32)
-    const trail = 0.38 + 0.62 * Math.exp(-distance / Math.max(55, width * 0.72))
-    const pillar = Math.pow(Math.max(0, Math.sin(x / 20 + time * 0.0016)), 3) * 0.27
-    const columnEnergy = trail * (wave * 1.04 + pillar + crest * 0.32)
-
-    if (columnEnergy > 0.012) {
-      const nearness = Math.max(0, 1 - distance / Math.max(1, width * 0.78))
-      const red = isDark
-        ? Math.round(42 + 124 * nearness + 75 * wave)
-        : Math.round(28 + 58 * nearness + 15 * wave)
-      const green = isDark
-        ? Math.round(56 + 58 * nearness + 44 * crest)
-        : Math.round(88 + 72 * nearness + 30 * crest)
-      const blue = isDark
-        ? Math.round(175 + 72 * nearness + 8 * wave)
-        : Math.round(182 + 62 * nearness)
-      const alpha = isDark
-        ? Math.min(0.88, columnEnergy * 0.72)
-        : Math.min(0.62, columnEnergy * 0.54)
-      context.fillStyle = `rgba(${red}, ${green}, ${blue}, ${alpha})`
-      context.fillRect(x, 0, cell - 1, height)
-    }
-
-    for (let y = 0; y < height; y += cell) {
-      const deltaY = y + cell * 0.5 - height * 0.5
-      const radial = Math.hypot(delta / 38, deltaY / 11)
-      const halo = Math.exp(-radial * 0.96) * 1.08
-      const verticalShape = 0.58 + 0.42 * Math.cos((deltaY / height) * Math.PI)
-      const grain = 0.72 + 0.28 * Math.sin(x * 0.73 + y * 1.31 + time * 0.006)
-      const alpha = Math.min(0.96, (columnEnergy * 0.88 + halo + crest * 0.19) * verticalShape * grain)
-      if (alpha < 0.035) continue
-
-      const hot = Math.max(0, 1 - radial / 2.4)
-      const red = isDark
-        ? Math.round(54 + 148 * hot + 42 * wave + 35 * crest)
-        : Math.round(25 + 72 * hot + 12 * wave)
-      const green = isDark
-        ? Math.round(68 + 78 * hot + 46 * crest)
-        : Math.round(98 + 72 * hot + 24 * crest)
-      const blue = isDark
-        ? Math.round(186 + 64 * hot)
-        : Math.round(194 + 56 * hot)
-      context.fillStyle = `rgba(${red}, ${green}, ${blue}, ${isDark ? alpha : alpha * 0.72})`
-      context.fillRect(x, y, cell - 1, cell - 1)
-    }
-  }
-
-  for (let i = 0; i < 14; i += 1) {
-    const travel = (time * (state.dragging ? 0.16 : 0.065) * (0.78 + (i % 5) * 0.09) + i * 23) % Math.max(30, origin + 64)
-    const particleX = origin - travel
-    if (particleX < -24 || particleX > width + 16) continue
-    const particleY = 3 + ((i * 13 + Math.sin(time * 0.003 + i) * 5) % Math.max(7, height - 6))
-    const length = 4 + (i % 4) * 4 + (state.dragging ? 6 : 0)
-    const alpha = 0.28 + (i % 5) * 0.1
-    const streak = context.createLinearGradient(particleX, 0, particleX + length, 0)
-    streak.addColorStop(0, isDark ? 'rgba(72,118,255,0)' : 'rgba(24,94,184,0)')
-    streak.addColorStop(0.68, isDark ? `rgba(112,135,255,${alpha})` : `rgba(36,108,202,${alpha * 0.72})`)
-    streak.addColorStop(1, isDark ? `rgba(236,222,255,${Math.min(1, alpha + 0.26)})` : `rgba(103,175,248,${Math.min(0.82, alpha + 0.18)})`)
-    context.fillStyle = streak
-    context.fillRect(particleX, particleY, length, i % 3 === 0 ? 2 : 1)
-  }
-
-  const glow = context.createRadialGradient(origin, height / 2, 0, origin, height / 2, 24)
-  glow.addColorStop(0, isDark ? 'rgba(255,255,255,.82)' : 'rgba(255,255,255,.86)')
-  glow.addColorStop(0.14, isDark ? 'rgba(183,190,255,.54)' : 'rgba(162,210,255,.48)')
-  glow.addColorStop(0.44, isDark ? 'rgba(103,74,255,.28)' : 'rgba(37,112,207,.22)')
-  glow.addColorStop(1, isDark ? 'rgba(86,31,210,0)' : 'rgba(25,91,181,0)')
-  context.fillStyle = glow
-  context.fillRect(origin - 26, 0, 52, height)
-  context.restore()
-}
-
-function EffortSlider({ directory, t, locked = false }: { directory: ModelDirectory; t: ReasoningEffortTranslate; locked?: boolean }) {
+/**
+ * Reasoning-effort slider: the model's real levels plus the appended Ultra tier.
+ *
+ * Ultra is presentation-only — committing it writes the model's highest real
+ * effort id — while the Host half remembers the session's Ultra/lightning
+ * choice and the fleet throughput sampled for its subagents.
+ */
+function EffortSlider({ directory, t, locked = false, sessionId, turbo }: EffortSliderProps) {
   const directoryState = useSyncExternalStore(
     (notify) => directory.store.subscribe(notify),
     () => directory.store.getSnapshot(),
   )
   const levels = sliderLevels(directoryState)
+  const display = displayLevels(levels)
+  const count = display.length
+  const skin = useSyncExternalStore(skinStore.subscribe, skinStore.getSnapshot)
+  const available = directoryState.current !== null && count >= 2
   const [effort, setEffort] = useState(directoryState.current?.reasoningEffort ?? '')
-  const [preview, setPreview] = useState(Math.max(0, effortIndex(levels, directoryState.current?.reasoningEffort)))
+  const [preview, setPreview] = useState(Math.max(0, displayIndexFor(levels, directoryState.current?.reasoningEffort, false)))
   const [committing, setCommitting] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [turboNotice, setTurboNotice] = useState<string | null>(null)
+  const [lightning, setLightning] = useState(false)
+  const [turboState, setTurboState] = useState<TurboSnapshot>(EMPTY_TURBO)
+  const [turboUnavailable, setTurboUnavailable] = useState(turbo === null)
+  const ultraModeRef = useRef(false)
+  const levelsRef = useRef(levels)
+  levelsRef.current = levels
   const chibiThumb = useSyncExternalStore(chibiThumbStore.subscribe, chibiThumbStore.getSnapshot)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const committedRef = useRef(directoryState.current?.reasoningEffort ?? '')
   const committingRef = useRef(false)
@@ -465,6 +412,7 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
   const pointerActiveRef = useRef(false)
   const activePointerIdRef = useRef<number | null>(null)
   const gestureCatalogRef = useRef('')
+  const hydratedRef = useRef(false)
   const catalogKey = JSON.stringify([
     directoryState.current?.provider,
     directoryState.current?.model,
@@ -474,21 +422,36 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
   const globalPointerMoveRef = useRef<((event: PointerEvent) => void) | null>(null)
   const globalPointerEndRef = useRef<((event: PointerEvent) => void) | null>(null)
   const globalPointerCancelRef = useRef<((event: PointerEvent) => void) | null>(null)
-  const radiationRef = useRef<RadiationState>({ progress: 0, dragging: false })
-  const redrawRef = useRef<(() => void) | null>(null)
-  const available = directoryState.current !== null && levels.length >= 2
   const busy = locked || committing || directoryState.status === 'selecting' || directoryState.status === 'loading' || directoryState.pending !== null
   const error = localError ?? directoryState.error
+
+  const [, setUltraModeState] = useState(false)
+  /** Ultra mode is UI state plus the Host-side flag; keep the ref in step with React state. */
+  const setUltraMode = useCallback((next: boolean) => {
+    ultraModeRef.current = next
+    setUltraModeState(next)
+  }, [])
 
   useEffect(() => {
     if (!available || committingRef.current || draggingRef.current) return
     const next = directoryState.current?.reasoningEffort ?? ''
-    const index = Math.max(0, effortIndex(levels, next))
+    const topId = levels[levels.length - 1]?.id
+    const index = ultraModeRef.current && topId !== undefined && next === topId
+      ? levels.length
+      : Math.max(0, effortIndex(levels, next))
     committedRef.current = next
     previewRef.current = index
     setEffort(next)
     setPreview(index)
-  }, [available, levels, directoryState, committing, dragging])
+    // A previous model's Ultra selection cannot survive a route change: the
+    // real MAX id differs per model, so the Host flag must stop injecting.
+    if (ultraModeRef.current && (topId === undefined || next !== topId)) {
+      setUltraMode(false)
+      if (turbo !== null && sessionId !== undefined) {
+        void turbo.update({ session: String(sessionId), ultra: false })
+      }
+    }
+  }, [available, levels, directoryState, committing, dragging, setUltraMode, turbo, sessionId])
 
   useEffect(() => () => {
     selectionAbortRef.current?.abort()
@@ -508,68 +471,62 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
 
   useEffect(() => {
     previewRef.current = preview
-    radiationRef.current.progress = effortIndex(levels, effort) >= 0 ? preview / (levels.length - 1) : 0
-    redrawRef.current?.()
-  }, [preview, levels, effort])
+  }, [preview])
 
   useEffect(() => {
-    radiationRef.current.dragging = dragging
-    redrawRef.current?.()
+    draggingRef.current = dragging
   }, [dragging])
 
+  // Restore the session's Ultra/lightning choice, then keep the fleet sample
+  // fresh while the pane stays open. Failures are silent and bounded: after
+  // three dropped calls the chrome disappears instead of hammering the Host.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (canvas === null) return
-    const context = canvas.getContext('2d')
-    if (context === null) return
-
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-    let width = 1
-    let height = 1
-    let frame = 0
-
-    const resize = () => {
-      const bounds = canvas.getBoundingClientRect()
-      const ratio = Math.min(window.devicePixelRatio || 1, 2)
-      width = Math.max(1, bounds.width)
-      height = Math.max(1, bounds.height)
-      canvas.width = Math.max(1, Math.round(width * ratio))
-      canvas.height = Math.max(1, Math.round(height * ratio))
-      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+    if (turbo === null || sessionId === undefined) {
+      setTurboUnavailable(turbo === null)
+      return
     }
-
-    const draw = (time = performance.now()) => {
-      drawRadiation(context, width, height, time, radiationRef.current)
+    let cancelled = false
+    let failures = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async () => {
+      const snapshot = await turbo.state(sessionId)
+      if (cancelled) return
+      if (snapshot === null) {
+        failures += 1
+        if (failures >= TURBO_MAX_FAILURES) {
+          setTurboUnavailable(true)
+          return
+        }
+      } else {
+        failures = 0
+        setTurboUnavailable(false)
+        setTurboState(snapshot)
+        if (!hydratedRef.current) {
+          hydratedRef.current = true
+          setLightning(snapshot.lightning)
+          const topId = levelsRef.current[levelsRef.current.length - 1]?.id
+          const current = directory.store.getSnapshot().current?.reasoningEffort
+          if (snapshot.ultra && topId !== undefined && current === topId) {
+            // Restore the Ultra display index, not just the flag: the persisted
+            // session sits on the real MAX effort and the appended tier is what
+            // the user last chose.
+            setUltraMode(true)
+            previewRef.current = levelsRef.current.length
+            setPreview(levelsRef.current.length)
+          } else if (snapshot.ultra && topId !== undefined) {
+            // The route changed under the persisted flag; stop injecting.
+            void turbo.update({ session: String(sessionId), ultra: false })
+          }
+        }
+      }
+      timer = setTimeout(() => { void tick() }, TURBO_POLL_MS)
     }
-
-    const loop = (time: number) => {
-      draw(time)
-      frame = window.requestAnimationFrame(loop)
-    }
-
-    const redraw = () => {
-      if (reducedMotion.matches) draw()
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      resize()
-      draw()
-    })
-    const themeObserver = new MutationObserver(() => draw())
-    resizeObserver.observe(canvas)
-    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
-    redrawRef.current = redraw
-    resize()
-    draw()
-    if (!reducedMotion.matches) frame = window.requestAnimationFrame(loop)
-
+    timer = setTimeout(() => { void tick() }, Math.round(TURBO_POLL_MS / 2))
     return () => {
-      window.cancelAnimationFrame(frame)
-      resizeObserver.disconnect()
-      themeObserver.disconnect()
-      redrawRef.current = null
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
     }
-  }, [])
+  }, [turbo, sessionId, directory, setUltraMode])
 
   const rollback = useCallback(() => {
     const input = inputRef.current
@@ -578,12 +535,13 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
       input.releasePointerCapture(pointerId)
     }
     const previous = committedRef.current
-    previewRef.current = Math.max(0, effortIndex(levels, previous))
+    const index = displayIndexFor(levels, previous, ultraModeRef.current)
+    previewRef.current = Math.max(0, index)
     pointerActiveRef.current = false
     activePointerIdRef.current = null
     draggingRef.current = false
     setEffort(previous)
-    setPreview(Math.max(0, effortIndex(levels, previous)))
+    setPreview(Math.max(0, index))
     setDragging(false)
   }, [levels])
 
@@ -598,22 +556,38 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
     if (pointerActiveRef.current) cancelChangedGesture()
   }, [cancelChangedGesture])
 
+  const toggleLightning = useCallback(() => {
+    if (turbo === null || sessionId === undefined || busy) return
+    const next = !lightning
+    setTurboNotice(null)
+    setLightning(next)
+    void turbo.update({ session: String(sessionId), lightning: next }).then((value) => {
+      if (value !== null) return
+      setLightning(!next)
+      setTurboNotice(t('effort.turbo.failed'))
+    })
+  }, [turbo, sessionId, lightning, busy, t])
+
   const commit = useCallback(async (raw: number) => {
     if (committingRef.current || busy || directoryState.current === null) return
-    const index = clampIndex(raw, levels.length)
-    const next = levels[index]?.id
+    const index = clampIndex(raw, count)
+    const next = effortIdForDisplay(levels, index)
     if (next === undefined) return
     const target = {
       provider: directoryState.current.provider,
       model: directoryState.current.model,
       reasoningEffort: next,
     }
+    const wantsUltra = isUltraIndex(levels, index)
+    const previousUltra = ultraModeRef.current
     const operation = new AbortController()
     selectionAbortRef.current = operation
     committingRef.current = true
     setDragging(false)
     setCommitting(true)
     setLocalError(null)
+    setTurboNotice(null)
+    setUltraMode(wantsUltra)
     previewRef.current = index
     setPreview(index)
     setEffort(next)
@@ -621,12 +595,20 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
     try {
       const confirmed = await selectEffort(directory, target, operation.signal, t)
       if (selectionAbortRef.current !== operation) return
-      const confirmedIndex = effortIndex(sliderLevels(confirmed), next)
+      const confirmedIndex = displayIndexFor(sliderLevels(confirmed), next, wantsUltra)
       committedRef.current = next
       previewRef.current = confirmedIndex
       setEffort(next)
       setPreview(confirmedIndex)
+      if (wantsUltra !== previousUltra && turbo !== null && sessionId !== undefined) {
+        void turbo.update({ session: String(sessionId), ultra: wantsUltra }).then((value) => {
+          if (value !== null) return
+          setUltraMode(previousUltra)
+          setTurboNotice(t('effort.turbo.failed'))
+        })
+      }
     } catch (cause) {
+      setUltraMode(previousUltra)
       if (!operation.signal.aborted) {
         setLocalError(cause instanceof Error ? cause.message : String(cause))
       }
@@ -639,7 +621,7 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
         if (!operation.signal.aborted) setCommitting(false)
       }
     }
-  }, [directory, directoryState.current, levels, busy, t])
+  }, [directory, directoryState.current, levels, count, busy, t, setUltraMode, turbo, sessionId])
 
   useEffect(() => {
     if (selectionAbortRef.current?.signal.aborted) {
@@ -653,10 +635,10 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
 
   const rawFromPointer = (input: HTMLInputElement, clientX: number) => {
     const bounds = input.getBoundingClientRect()
-    if (bounds.width <= 0 || levels.length < 2) return previewRef.current
+    if (bounds.width <= 0 || count < 2) return previewRef.current
     return Math.max(
       0,
-      Math.min(levels.length - 1, (clientX - bounds.left) / bounds.width * (levels.length - 1)),
+      Math.min(count - 1, (clientX - bounds.left) / bounds.width * (count - 1)),
     )
   }
 
@@ -734,16 +716,16 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (busy || committingRef.current) return
-    const current = clampIndex(Number(event.currentTarget.value), levels.length)
+    const current = clampIndex(Number(event.currentTarget.value), count)
     let target: number | undefined
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown' || event.key === 'PageDown') {
       target = Math.max(0, current - 1)
     } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'PageUp') {
-      target = Math.min(levels.length - 1, current + 1)
+      target = Math.min(count - 1, current + 1)
     } else if (event.key === 'Home') {
       target = 0
     } else if (event.key === 'End') {
-      target = levels.length - 1
+      target = count - 1
     }
     if (target === undefined) return
     event.preventDefault()
@@ -752,37 +734,58 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
 
   if (!available) return null
 
-  const count = levels.length
-  const selectedIndex = effortIndex(levels, effort)
-  const effortName = levels[selectedIndex]?.name ?? (effort || t('model.defaultEffort'))
+  const selectedIndex = clampIndex(preview, count)
+  const selectedDisplay = display[selectedIndex]
+  const selectedUltra = isUltraIndex(levels, selectedIndex)
+  const effortName = selectedUltra
+    ? t('effort.ultra')
+    : selectedDisplay?.name ?? (effort || t('model.defaultEffort'))
   const savedEffort = directoryState.current?.reasoningEffort
-  const notice = !dragging && !committing && effortIndex(levels, savedEffort) < 0
+  const notice = !dragging && !committing && !selectedUltra && effortIndex(levels, savedEffort) < 0
     ? savedEffort === undefined ? t('effort.unset') : t('effort.unsupported', { effort: savedEffort })
     : null
-  const isTop = selectedIndex === count - 1
-  const progress = selectedIndex >= 0 ? preview / (count - 1) * 100 : 0
-  const style = { '--re-progress': `${progress}%` } as CSSProperties
-  const title = error === null
-    ? t('effort.title', { effort: effortName })
-    : t('effort.failed', { error })
+  const isTop = selectedIndex >= levels.length - 1
+  const progress = count >= 2 ? selectedIndex / (count - 1) * 100 : 0
+  const style = {
+    '--re-progress': `${progress}%`,
+    // EffectsRail's geometry reads the knob inset: the chibi thumb clamps at
+    // 10px while the round thumb clamps at 14px (see styles.ts).
+    '--we-inset': chibiThumb ? '10px' : '14px',
+  } as CSSProperties
+  const title = selectedUltra
+    ? t('effort.ultra.description')
+    : error === null
+      ? t('effort.title', { effort: effortName })
+      : t('effort.failed', { error })
+  const turboAvailable = turbo !== null && !turboUnavailable
+  const normalizedRate = Math.min(1, turboState.rate / RATE_FULL_SCALE)
+  const policyText = turboState.policy
 
   return (
     <>
       {notice === null ? null : <div className="re-model-status" role="status">{notice}</div>}
       <div
-        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}`}
+        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}${selectedUltra ? ' is-ultra' : ''}`}
         title={title}
       >
         <div
           className="re-effort-slider"
           data-top={isTop ? 'true' : undefined}
+          data-ultra={selectedUltra ? 'true' : undefined}
+          data-lightning={lightning ? 'true' : undefined}
+          data-we-skin={skin}
           style={style}
         >
           <div className="re-effort-track" aria-hidden="true" />
-          <div className="re-effort-fx" aria-hidden="true" hidden={selectedIndex < 0}>
-            <canvas ref={canvasRef} className="re-effort-canvas" />
-            <span className="re-effort-flare" />
-          </div>
+          <EffectsRail
+            progress={progress / 100}
+            dragging={dragging}
+            skin={skin}
+            ultra={selectedUltra}
+            lightning={lightning}
+            rate={normalizedRate}
+            top={isTop}
+          />
           <input
             ref={inputRef}
             className="re-effort-input"
@@ -822,12 +825,33 @@ function EffortSlider({ directory, t, locked = false }: { directory: ModelDirect
           {selectedIndex < 0 ? null : <span className="re-effort-knob" aria-hidden="true" />}
         </div>
         <div className="re-effort-ticks" aria-hidden="true">
-          {levels.map((level, index) => (
-            <span key={level.id} className={`re-effort-tick${index === selectedIndex ? ' is-selected' : ''}`}
-              style={{ left: `${index / (count - 1) * 100}%` }} title={level.name}>·</span>
+          {display.map((level, index) => (
+            <span key={level.id} className={`re-effort-tick${index === selectedIndex ? ' is-selected' : ''}${level.ultra ? ' is-ultra' : ''}`}
+              style={{ left: `${index / Math.max(1, count - 1) * 100}%` }} title={level.ultra ? t('effort.ultra') : level.name}>{level.ultra ? 'Ultra' : '·'}</span>
           ))}
         </div>
         <div className="re-effort-name" role="status" aria-live="polite">{effortName}</div>
+        {turboAvailable ? (
+          <div className="re-effort-turbo" style={{ '--we-rate': normalizedRate } as CSSProperties}>
+            <BoltToggle
+              on={lightning}
+              disabled={busy}
+              label={t('effort.lightning.aria')}
+              onToggle={toggleLightning}
+            />
+            <RateReadout
+              total={turboState.rate}
+              generating={turboState.generating || turboState.agents > 0}
+              label={t('effort.rate')}
+            />
+          </div>
+        ) : null}
+        {turboNotice === null ? null : <div className="re-effort-turbo-note" role="status">{turboNotice}</div>}
+        {policyText === '' ? null : (
+          <div className="re-effort-policy">
+            <PolicyChip text={policyText} title={t('effort.policy')} expandLabel={t('effort.policy')} />
+          </div>
+        )}
         {error === null ? null : <span className="re-effort-sr" role="status">{error}</span>}
       </div>
     </>
@@ -842,6 +866,8 @@ function AdvancedModelSelect({
   load,
   select,
   adapt,
+  sessionId,
+  turbo,
   agentTutorial,
   t,
   embedded = false,
@@ -997,7 +1023,7 @@ function AdvancedModelSelect({
       ) : null}
       {levels.length >= 2 ? (
         <div className="re-advanced">
-          <EffortSlider directory={controller} t={t} locked={locked} />
+          <EffortSlider directory={controller} t={t} locked={locked} sessionId={sessionId} turbo={turbo} />
         </div>
       ) : null}
       {showGuidance ? (
@@ -1275,32 +1301,96 @@ function ChibiThumbSetting({ t }: PropsLocale<typeof NS>) {
   )
 }
 
+/** Localized labels for the three energy skins. */
+const SKIN_LABEL_KEYS: Record<Skin, ReasoningEffortLocaleKey> = {
+  holo: 'skin.holo',
+  chrome: 'skin.chrome',
+  fluid: 'skin.fluid',
+}
+
+/**
+ * Settings row that selects the slider's energy skin.
+ *
+ * The choice is applied instantly (local store) and persisted on the Host; a
+ * failed write rolls the local store back so the next render matches the Host.
+ */
+function SkinSetting({ t }: PropsLocale<typeof NS>) {
+  const sliderEnabled = useSyncExternalStore(enabledStore.subscribe, enabledStore.getSnapshot)
+  const skin = useSyncExternalStore(skinStore.subscribe, skinStore.getSnapshot)
+  const [busy, setBusy] = useState(false)
+  const choose = (next: Skin) => {
+    if (!sliderEnabled || busy || next === skin) return
+    const previous = skin
+    skinStore.set(next)
+    if (turboService === null) return
+    setBusy(true)
+    void turboService.update({ skin: next }).then((value) => {
+      setBusy(false)
+      if (value === null) skinStore.set(previous)
+    })
+  }
+  return (
+    <div className="re-setting-row">
+      <div className="re-setting-copy">
+        <div className="re-setting-title">{t('settings.skin.title')}</div>
+        <div className="re-setting-description">{t('settings.skin.description')}</div>
+      </div>
+      <div className="re-setting-control">
+        <div className="re-skin-group" role="radiogroup" aria-label={t('settings.skin.aria')}>
+          {SKINS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={skin === option}
+              disabled={!sliderEnabled || busy}
+              className={`re-skin-choice${skin === option ? ' is-active' : ''}`}
+              onClick={() => choose(option)}
+            >
+              {t(SKIN_LABEL_KEYS[option])}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function apply(ctx: ClientContext) {
   const modelDirectories = ctx.get('modelDirectories') as ModelDirectoryResolver | undefined
   if (modelDirectories === undefined) return
 
   const connection = ctx.get('connection') as { rpc?: HostRpc } | undefined
   const adapt = makeAdaptationService(connection?.rpc)
+  const turbo = makeTurboService(connection?.rpc)
+  turboService = turbo
+  // The persisted skin lives on the Host; the local cache only wins until the
+  // first answer arrives (and when the Host half is absent).
+  if (turbo !== null) {
+    void turbo.state().then((snapshot) => {
+      if (snapshot !== null) skinStore.set(snapshot.skin)
+    })
+  }
   if (adapt !== null) {
-    ctx.effect(() => ctx.remote.$on('settings/document-updated', adapt.invalidate), 'reasoning-effort: settings updates')
-    ctx.effect(() => ctx.remote.$on('llm/adapters-updated', adapt.invalidate), 'reasoning-effort: adapter updates')
-    ctx.effect(() => ctx.remote.$on('credentials/record-updated', adapt.invalidate), 'reasoning-effort: credential updates')
-    ctx.effect(() => ctx.remote.$on('credentials/reference-updated', adapt.invalidate), 'reasoning-effort: credential reference updates')
+    ctx.effect(() => ctx.remote.$on('settings/document-updated', adapt.invalidate), 'whale-effort: settings updates')
+    ctx.effect(() => ctx.remote.$on('llm/adapters-updated', adapt.invalidate), 'whale-effort: adapter updates')
+    ctx.effect(() => ctx.remote.$on('credentials/record-updated', adapt.invalidate), 'whale-effort: credential updates')
+    ctx.effect(() => ctx.remote.$on('credentials/reference-updated', adapt.invalidate), 'whale-effort: credential reference updates')
     ctx.on('connection/reset', adapt.invalidate)
   }
   const sessions = ctx.get('sessions') as { subagentAddress(sessionId: SessionId): unknown } | undefined
   if (sessions === undefined) return
   const locale = ctx.get('locale') as LocaleRuntimeLike | undefined
 
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'reasoning-effort: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'whale-effort: dictionaries')
 
   ctx.effect(() => {
     const style = document.createElement('style')
-    style.dataset.plugin = 'dsh-reasoning-effort'
-    style.textContent = CSS
+    style.dataset.plugin = 'dsh-whale-effort'
+    style.textContent = CSS + EFFECTS_CSS
     document.head.appendChild(style)
     return () => style.remove()
-  }, 'reasoning-effort: styles')
+  }, 'whale-effort: styles')
 
   ctx.effect(() => {
     const syncStorage = (event: StorageEvent) => {
@@ -1312,19 +1402,26 @@ export function apply(ctx: ClientContext) {
     }
     window.addEventListener('storage', syncStorage)
     return () => window.removeEventListener('storage', syncStorage)
-  }, 'reasoning-effort: preference sync')
+  }, 'whale-effort: preference sync')
 
   ctx.slots.inject(SETTINGS_SLOT, () =>
     ctx.slots.register(
-      { name: SETTINGS_SLOT, id: 'reasoning-effort-enabled', order: 15, locale: NS },
+      { name: SETTINGS_SLOT, id: 'whale-effort-enabled', order: 15, locale: NS },
       ReasoningEffortSetting,
     ),
   )
 
   ctx.slots.inject(SETTINGS_SLOT, () =>
     ctx.slots.register(
-      { name: SETTINGS_SLOT, id: 'reasoning-effort-chibi-thumb', order: 16, locale: NS },
+      { name: SETTINGS_SLOT, id: 'whale-effort-chibi-thumb', order: 16, locale: NS },
       ChibiThumbSetting,
+    ),
+  )
+
+  ctx.slots.inject(SETTINGS_SLOT, () =>
+    ctx.slots.register(
+      { name: SETTINGS_SLOT, id: 'whale-effort-skin', order: 17, locale: NS },
+      SkinSetting,
     ),
   )
 
@@ -1338,6 +1435,8 @@ export function apply(ctx: ClientContext) {
         select: (selection: ModelSelection) => canSelect()
           ? controller.select(selection).then(result => result.ok, () => false) : Promise.resolve(false),
         adapt,
+        sessionId: sessionId as SessionId,
+        turbo,
         agentTutorial: () => locale?.getLocale().active === 'zh' ? agentTutorialZh : agentTutorialEn,
       }
     }

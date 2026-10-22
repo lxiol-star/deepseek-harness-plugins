@@ -19,7 +19,7 @@
  * absent block lets the adapter read the endpoint address, which is right for
  * an unrecognized endpoint and for a recognized vendor alike.
  *
- * @module dsh-reasoning-effort/knowledge
+ * @module dsh-whale-effort/host/knowledge
  */
 
 /** One selectable level declaration: display level -> wire value. */

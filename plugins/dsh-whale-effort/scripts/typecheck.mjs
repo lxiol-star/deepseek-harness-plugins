@@ -21,7 +21,8 @@
  *
  * pnpm intentionally does not hoist workspace packages to the repo root, so
  * Node resolution cannot find them from a bare checkout; reading the manifests
- * is what makes `@deepseek-ai/dsh-session/types` and friends resolve exactly.
+ * is what makes `@deepseek-ai/dsh-api-session-controller/types` and friends
+ * resolve exactly.
  *
  * Nothing is written inside the repository (the generated config goes to the OS
  * temp directory) and no network access is required. `paths` is used for
@@ -217,7 +218,7 @@ for (const specifier of collectSpecifiers()) {
   if (specifier === name) paths[`${name}/*`] = [`${dirname(target)}/*`]
 }
 
-const temporary = mkdtempSync(join(tmpdir(), 'dsh-session-board-'))
+const temporary = mkdtempSync(join(tmpdir(), 'dsh-whale-effort-'))
 const generated = join(temporary, 'tsconfig.json')
 const declarations = process.argv.includes('--declarations')
 writeFileSync(generated, `${JSON.stringify({

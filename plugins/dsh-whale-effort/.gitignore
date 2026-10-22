@@ -1,0 +1,17 @@
+# Dependencies and packaging residue
+node_modules/
+*.tgz
+*.log
+*.tmp
+*.bak
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local build/test residue that must never be committed
+.client-build/
+coverage/

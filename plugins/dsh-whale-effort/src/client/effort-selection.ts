@@ -132,3 +132,63 @@ export async function selectEffort(
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
   return waitForSelection(directory, target, signal, t, timeoutMs)
 }
+
+/** Display-only tier appended after the model's real levels. */
+export const ULTRA_DISPLAY_ID = 'ultra'
+
+/** One entry of the slider's display scale: a real level or the appended Ultra tier. */
+export interface DisplayLevel {
+  readonly id: string
+  readonly name: string
+  readonly ultra: boolean
+}
+
+/**
+ * Build the display scale: the model's real levels plus a trailing Ultra entry.
+ *
+ * Ultra is presentation-only. Committing it writes the model's highest real
+ * effort id (see {@link effortIdForDisplay}); it never reaches the model
+ * directory as an effort value of its own.
+ * @param levels - the model's real effort levels, in directory order.
+ * @returns the display scale; identical to `levels` when fewer than two exist.
+ */
+export function displayLevels(levels: readonly EffortLevel[]): readonly DisplayLevel[] {
+  const real = levels.map((level) => ({ id: level.id, name: level.name, ultra: false }))
+  if (levels.length < 2) return real
+  return [...real, { id: ULTRA_DISPLAY_ID, name: 'Ultra', ultra: true }]
+}
+
+/** Whether the display scale carries the appended Ultra tier. */
+export function hasUltra(levels: readonly EffortLevel[]): boolean {
+  return levels.length >= 2
+}
+
+/**
+ * Map a persisted real effort id (plus the session's Ultra flag) to a display index.
+ * @param levels - the model's real effort levels.
+ * @param id - the session's committed real effort id.
+ * @param ultra - whether the session is in Ultra mode.
+ * @returns the display index, or -1 when the id is not in the scale.
+ */
+export function displayIndexFor(levels: readonly EffortLevel[], id: string | undefined, ultra: boolean): number {
+  const index = effortIndex(levels, id)
+  if (index < 0) return -1
+  return ultra && hasUltra(levels) && index === levels.length - 1 ? levels.length : index
+}
+
+/**
+ * Resolve the real effort id a display index commits.
+ * @param levels - the model's real effort levels.
+ * @param index - a display index (0 .. displayLevels(levels).length - 1).
+ * @returns the real effort id, or undefined when the index is out of range.
+ */
+export function effortIdForDisplay(levels: readonly EffortLevel[], index: number): string | undefined {
+  const count = displayLevels(levels).length
+  if (index < 0 || index >= count) return undefined
+  return index === levels.length && hasUltra(levels) ? levels[levels.length - 1]?.id : levels[index]?.id
+}
+
+/** Whether a display index is the appended Ultra tier. */
+export function isUltraIndex(levels: readonly EffortLevel[], index: number): boolean {
+  return hasUltra(levels) && index === levels.length
+}

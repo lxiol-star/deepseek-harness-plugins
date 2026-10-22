@@ -107,8 +107,15 @@ function buildClient(binary) {
 }
 
 mkdirSync(lib, { recursive: true })
+// A failed earlier run must not leave a half-written bundle behind.
+for (const stale of [join(lib, 'index.js.tmp'), join(lib, 'client.js.tmp'), join(lib, 'client.raw.cjs')]) {
+  rmSync(stale, { force: true })
+}
 // Strict checking runs before any artifact is replaced.
 run(process.execPath, [join(root, 'scripts/typecheck.mjs')])
+// Drop stale declarations so the committed lib/ tree matches a fresh build;
+// only done after the strict pass, so a failing typecheck leaves lib/ intact.
+rmSync(join(lib, 'types'), { recursive: true, force: true })
 run(process.execPath, [join(root, 'scripts/typecheck.mjs'), '--declarations'])
 const binary = resolveEsbuild()
 buildHost(binary)
