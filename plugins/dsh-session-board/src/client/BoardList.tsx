@@ -84,7 +84,11 @@ export function BoardList({
   onOpenCoordinator,
 }: BoardListProps): ReactElement {
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
-  if (total === 0) return <div className="sb-empty">{t(emptyKey)}</div>
+  // A project tree may hold branches without cards yet; the empty hint only
+  // applies when there is no workspace hierarchy to show either.
+  const hasProjectNodes = grouping === 'tree'
+    && Object.values(workspaceMeta ?? {}).some(info => info.projectKey !== undefined)
+  if (total === 0 && !hasProjectNodes) return <div className="sb-empty">{t(emptyKey)}</div>
 
   if (grouping !== 'status') {
     const renderNode = (node: WorkspaceNode): ReactElement => {

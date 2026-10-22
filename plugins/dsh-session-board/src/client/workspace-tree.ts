@@ -159,6 +159,23 @@ function projectNodes(groups: readonly BoardGroup[], meta: Readonly<Record<strin
     }
     project.leaves.push({ bucket, branch: info.branch ?? '' })
   }
+  // Branches without a session yet still belong in the tree: the project node
+  // is also the entry point for opening its coordinator session.
+  for (const info of Object.values(meta)) {
+    const projectKey = info.projectKey
+    if (projectKey === undefined) continue
+    const alreadyListed = buckets.some(bucket => bucket.workspaceId === info.workspaceId)
+    if (alreadyListed) continue
+    let project = projects.get(projectKey)
+    if (project === undefined) {
+      project = { key: projectKey, title: info.projectLabel ?? projectKey.split('/').pop() ?? projectKey, remote: info.remote ?? projectKey, leaves: [] }
+      projects.set(projectKey, project)
+    }
+    project.leaves.push({
+      bucket: { key: info.workspaceId, title: info.title, path: info.path, workspaceId: info.workspaceId, entries: [] },
+      branch: info.branch ?? '',
+    })
+  }
   const projectRoots: WorkspaceNode[] = [...projects.values()]
     .sort((a, b) => a.title.localeCompare(b.title) || a.key.localeCompare(b.key))
     .map(project => {

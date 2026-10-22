@@ -250,6 +250,15 @@ function projectNodes(groups, meta) {
     let project = projects.get(projectKey);
     project === void 0 && (project = { key: projectKey, title: info.projectLabel ?? projectKey.split("/").pop() ?? projectKey, remote: info.remote ?? projectKey, leaves: [] }, projects.set(projectKey, project)), project.leaves.push({ bucket, branch: info.branch ?? "" });
   }
+  for (let info of Object.values(meta)) {
+    let projectKey = info.projectKey;
+    if (projectKey === void 0 || buckets.some((bucket) => bucket.workspaceId === info.workspaceId)) continue;
+    let project = projects.get(projectKey);
+    project === void 0 && (project = { key: projectKey, title: info.projectLabel ?? projectKey.split("/").pop() ?? projectKey, remote: info.remote ?? projectKey, leaves: [] }, projects.set(projectKey, project)), project.leaves.push({
+      bucket: { key: info.workspaceId, title: info.title, path: info.path, workspaceId: info.workspaceId, entries: [] },
+      branch: info.branch ?? ""
+    });
+  }
   return [...[...projects.values()].sort((a, b) => a.title.localeCompare(b.title) || a.key.localeCompare(b.key)).map((project) => {
     let children = project.leaves.sort((a, b) => a.bucket.title.localeCompare(b.bucket.title) || a.branch.localeCompare(b.branch)).map(({ bucket, branch }) => ({
       key: `tree-workspace:${bucket.key}`,
@@ -614,7 +623,8 @@ function BoardList({
   workspaceMeta,
   onOpenCoordinator
 }) {
-  if (groups.reduce((sum, group) => sum + group.entries.length, 0) === 0) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
+  let total = groups.reduce((sum, group) => sum + group.entries.length, 0), hasProjectNodes = grouping === "tree" && Object.values(workspaceMeta ?? {}).some((info) => info.projectKey !== void 0);
+  if (total === 0 && !hasProjectNodes) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
   if (grouping !== "status") {
     let renderNode = (node) => {
       let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), header = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": t("a11y.groupCount", { group: title, count: node.count }), children: [
@@ -740,7 +750,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.0",
+      "data-session-board-version": "0.8.1",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -764,7 +774,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.0",
+      "data-session-board-version": "0.8.1",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1264,7 +1274,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.0",
+        "data-session-board-version": "0.8.1",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",

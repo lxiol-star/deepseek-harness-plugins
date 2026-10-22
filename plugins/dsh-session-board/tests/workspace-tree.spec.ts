@@ -57,6 +57,20 @@ describe('workspace tree', () => {
     expect(project?.count).toBe(2)
   })
 
+  it('keeps branches without sessions in the project tree', () => {
+    const metaWithIdle = {
+      ...meta,
+      wd: {
+        workspaceId: 'wd', title: 'i-ai-gw-idle', path: '/repo/i-ai-gw-idle', branch: 'feat/idle',
+        projectKey: 'git.zyql.com/it-eff-lab/i-ai-gw', projectLabel: 'i-ai-gw', remote: 'git@git.zyql.com:it-eff-lab/i-ai-gw.git',
+      },
+    }
+    const roots = buildWorkspaceNodes(groups, true, metaWithIdle)
+    const project = roots.find(node => node.kind === 'project')
+    expect(project?.children.map(child => child.title)).toContain('i-ai-gw-idle')
+    expect(project?.children.find(child => child.title === 'i-ai-gw-idle')?.count).toBe(0)
+  })
+
   it('keeps non-git workspaces in the path fallback tree', () => {
     const roots = buildWorkspaceNodes(groups, true, meta)
     const pathRoot = roots.find(node => node.kind !== 'project')
