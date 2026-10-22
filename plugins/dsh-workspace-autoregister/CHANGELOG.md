@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- **项目根自动注册**：当被收录的工作区是项目仓库内的嵌套 worktree（如 `<repo>/.worktrees/<branch>`）时，同时把主检出根目录注册为父工作区，让原生侧栏「按工作区树」自动把分支嵌到项目节点下；父节点不创建会话。同级 worktree（`../repo-branch`）不触发，避免制造无意义的父行。
+- 新增配置 `registerProjectRoot`（默认 `true`）可关闭该行为；git 探测 2.5s 超时、失败静默降级，且不阻塞首个空白会话创建。
+- 测试补充真实 git 仓库/worktree 场景（嵌套注册、同级不注册、开关关闭、路径规范化），共 41 项。
+
 ## 0.1.1
 
 - A Workspace's `HANDOFF.md` (configurable) is sent as the first message of the auto-created Session, so the new chat starts with the scaffolding conversation's handoff.

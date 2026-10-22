@@ -18,8 +18,15 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFile, readdir } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { execFile } from 'node:child_process'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
+
+/** Git inspection timeout; a slow/missing git must not delay registration. */
+const GIT_TIMEOUT_MS = 2_500
 
 /** Plugin name registered with the Loader. */
 export const name = 'workspace-autoregister'
@@ -36,6 +43,7 @@ const DEFAULT_CONFIG = {
   createSession: true,
   skipSessionDirectory: true,
   scanAncestors: 3,
+  registerProjectRoot: true,
   sendHandoff: true,
   handoffFile: 'HANDOFF.md',
   handoffMaxBytes: 32768,
@@ -87,7 +95,7 @@ export const Config = {
         requiredDirectories: [...DEFAULT_CONFIG.requiredDirectories],
       }
       const issues = []
-      const knownFields = new Set(['enabled', 'createSession', 'skipSessionDirectory', 'scanAncestors', 'sendHandoff', 'handoffFile', 'handoffMaxBytes', ...CONFIG_NAME_FIELDS])
+      const knownFields = new Set(['enabled', 'createSession', 'skipSessionDirectory', 'scanAncestors', 'registerProjectRoot', 'sendHandoff', 'handoffFile', 'handoffMaxBytes', ...CONFIG_NAME_FIELDS])
       for (const key of Object.keys(input)) {
         if (!knownFields.has(key)) issues.push({ message: `unknown config field '${key}'`, path: [key] })
       }
@@ -104,6 +112,11 @@ export const Config = {
         if (typeof input.skipSessionDirectory !== 'boolean') {
           issues.push({ message: 'skipSessionDirectory must be a boolean', path: ['skipSessionDirectory'] })
         } else config.skipSessionDirectory = input.skipSessionDirectory
+      }
+      if ('registerProjectRoot' in input) {
+        if (typeof input.registerProjectRoot !== 'boolean') {
+          issues.push({ message: 'registerProjectRoot must be a boolean', path: ['registerProjectRoot'] })
+        } else config.registerProjectRoot = input.registerProjectRoot
       }
       if ('scanAncestors' in input) {
         const ancestors = input.scanAncestors
@@ -286,6 +299,41 @@ async function readHandoff(workspacePath, settings) {
 }
 
 /**
+ * Find the main checkout that owns a nested git worktree.
+ *
+ * A worktree created under its repository (e.g. `<repo>/.worktrees/<branch>`)
+ * shares the main checkout's `--git-common-dir`; the parent path is what the
+ * native sidebar's "Workspace Tree" grouping needs to nest the branch under
+ * the project. A sibling worktree (`../repo-branch`) has the same common dir
+ * but no path prefix, so it returns undefined and is left alone.
+ *
+ * @param directory - a Workspace-shaped directory.
+ * @returns the main checkout root, or undefined when not nested in one.
+ */
+export async function nestedProjectRoot(directory) {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', directory, 'rev-parse', '--git-common-dir'], {
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    })
+    const raw = stdout.trim()
+    if (raw === '') return undefined
+    const common = resolve(await realpath(directory), raw)
+    if (basename(common) !== '.git') return undefined
+    const root = dirname(common)
+    const canonical = await realpath(directory).catch(() => directory)
+    if (root === canonical || root === '/' || root === '') return undefined
+    const rel = relative(root, canonical)
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return undefined
+    const info = await stat(root)
+    return info.isDirectory() ? root : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Install the workspace scanner on the Host context.
  * @param ctx - plugin context carrying `workspaceRegistry` and, when composed, `sessionController`.
  * @param config - validated row config; defaults apply when omitted.
@@ -358,6 +406,28 @@ export function apply(ctx, config) {
   }
 
   /**
+   * Register the main checkout that encloses a nested worktree, so the native
+   * Workspace Tree grouping can show the branch under its project. The root
+   * gets no first Session: it is only a structural parent row.
+   * @param directory - newly matched nested Workspace directory.
+   */
+  const registerProjectRoot = async (directory) => {
+    if (settings.registerProjectRoot !== true || disposed) return
+    const root = await nestedProjectRoot(directory)
+    if (root === undefined || known.has(root)) return
+    const existing = await registry.resolveByPath(root)
+    if (existing !== undefined) {
+      known.add(existing.path)
+      known.add(root)
+      return
+    }
+    const workspace = await registry.create(root)
+    known.add(workspace.path)
+    known.add(root)
+    ctx.logger.info('dsh-workspace-autoregister: added project root workspace %s for %s', workspace.path, directory)
+  }
+
+  /**
    * Register one directory and prepare its first Session.
    *
    * `registry.create` silently reuses an existing record, so the Session is
@@ -374,6 +444,7 @@ export function apply(ctx, config) {
       if (existing !== undefined) {
         known.add(existing.path)
         known.add(directory)
+        await registerProjectRoot(directory).catch(error => warn(`could not add project root for ${directory}`, error))
         return
       }
       const workspace = await registry.create(directory)
@@ -381,8 +452,12 @@ export function apply(ctx, config) {
       known.add(directory)
       if (disposed) return
       ctx.logger.info('dsh-workspace-autoregister: added workspace %s', workspace.path)
-      if (workspace.sessionIds.length > 0) return
-      await createFirstSession(workspace)
+      // Git probing is a subprocess; start it alongside the first Session so a
+      // slow or missing git never delays making the new Workspace usable. The
+      // structural parent row is best-effort and awaited only for ordering.
+      const rootTask = registerProjectRoot(directory).catch(error => warn(`could not add project root for ${directory}`, error))
+      if (workspace.sessionIds.length === 0) await createFirstSession(workspace)
+      await rootTask
     }).catch(error => warn(`could not add workspace ${directory}`, error))
     return registrationTail
   }

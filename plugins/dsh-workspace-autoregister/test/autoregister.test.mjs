@@ -11,9 +11,10 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import {
   apply,
@@ -23,6 +24,7 @@ import {
   inject,
   matchesWorkspaceSignature,
   name as pluginName,
+  nestedProjectRoot,
 } from '../lib/index.js'
 
 const WAIT_TIMEOUT_MS = 2000
@@ -38,6 +40,7 @@ const EXPECTED_DEFAULT_CONFIG = {
   createSession: true,
   skipSessionDirectory: true,
   scanAncestors: 3,
+  registerProjectRoot: true,
   sendHandoff: true,
   handoffFile: 'HANDOFF.md',
   handoffMaxBytes: 32768,
@@ -280,6 +283,7 @@ test('Config.validate keeps every provided value', () => {
     createSession: false,
     skipSessionDirectory: false,
     scanAncestors: 0,
+    registerProjectRoot: false,
     sendHandoff: false,
     handoffFile: 'HANDOFF.md',
     handoffMaxBytes: 1024,
@@ -293,6 +297,7 @@ test('Config.validate keeps every provided value', () => {
     createSession: false,
     skipSessionDirectory: false,
     scanAncestors: 0,
+    registerProjectRoot: false,
     sendHandoff: false,
     handoffFile: 'HANDOFF.md',
     handoffMaxBytes: 1024,
@@ -315,6 +320,7 @@ test('Config.validate reports invalid values with issue paths', () => {
     [{ scanAncestors: -1 }, 'scanAncestors', 'scanAncestors must be an integer between 0 and 8'],
     [{ scanAncestors: 9 }, 'scanAncestors', 'scanAncestors must be an integer between 0 and 8'],
     [{ scanAncestors: 1.5 }, 'scanAncestors', 'scanAncestors must be an integer between 0 and 8'],
+    [{ registerProjectRoot: 'yes' }, 'registerProjectRoot', 'registerProjectRoot must be a boolean'],
     [{ promptFiles: [''] }, 'promptFiles', 'promptFiles must be an array of non-empty strings'],
     [{ promptFiles: 'AGENTS.md' }, 'promptFiles', 'promptFiles must be an array of non-empty strings'],
     [{ requiredFiles: [1] }, 'requiredFiles', 'requiredFiles must be an array of non-empty strings'],
@@ -982,4 +988,98 @@ test('tool results without absolute paths do not touch the registry', async t =>
   assert.deepEqual(harness.registryCalls.resolve, [])
   assert.deepEqual(harness.registryCalls.create, [])
   assert.deepEqual(harness.loggerCalls.warn, [])
+})
+
+/** Whether this machine can run the git-backed grouping tests. */
+function hasGit() {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Run git in a scratch repository, failing the test on a real error. */
+function git(cwd, args) {
+  return execFileSync('git', ['-C', cwd, ...args], { stdio: 'ignore' })
+}
+
+/** Create a committed git project so worktrees can be added. */
+async function createGitProject(root, name) {
+  const repo = join(root, name)
+  await mkdir(repo, { recursive: true })
+  git(repo, ['init', '-q'])
+  await writeFile(join(repo, 'README.md'), '# project\n')
+  git(repo, ['add', 'README.md'])
+  git(repo, ['-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-q', '-m', 'init'])
+  return repo
+}
+
+/** Create a worktree and fill the workspace signature inside it. */
+async function createWorktree(repo, path, branch) {
+  await mkdir(dirname(path), { recursive: true })
+  git(repo, ['worktree', 'add', '-q', path, '-b', branch])
+  await writeFile(join(path, 'AGENTS.local.md'), '# prompt\n')
+  await mkdir(join(path, 'plans'), { recursive: true })
+  await mkdir(join(path, 'reports'), { recursive: true })
+  return path
+}
+
+test('nestedProjectRoot finds the main checkout of a worktree inside it', async t => {
+  if (!hasGit()) return t.skip('git unavailable')
+  const root = await createTempRoot(t)
+  const repo = await createGitProject(root, 'project')
+  const worktree = await createWorktree(repo, join(repo, '.worktrees', 'feat-a'), 'feat-a')
+  assert.equal(await nestedProjectRoot(worktree), await realpath(repo))
+  assert.equal(await nestedProjectRoot(repo), undefined)
+  const sibling = await createWorktree(repo, join(root, 'sibling-wt'), 'feat-b')
+  assert.equal(await nestedProjectRoot(sibling), undefined)
+})
+
+test('registers the main checkout when a nested worktree is added', async t => {
+  if (!hasGit()) return t.skip('git unavailable')
+  const root = await createTempRoot(t)
+  const repo = await createGitProject(root, 'project')
+  const worktree = await createWorktree(repo, join(repo, '.worktrees', 'feat-a'), 'feat-a')
+  const harness = createHarness({ services: { sessionController: createSessionControllerRecorder() } })
+  apply(harness.ctx, validatedConfig())
+
+  const canonicalRepo = await realpath(repo)
+  harness.fire(toolExec({ path: worktree }))
+  await waitFor(() => harness.workspacesByPath.has(worktree) && harness.workspacesByPath.has(canonicalRepo), 'nested worktree and project root')
+  assert.ok(harness.registryCalls.create.includes(worktree))
+  assert.ok(harness.registryCalls.create.includes(canonicalRepo))
+  const sessions = harness.ctx.get('sessionController')
+  assert.equal(sessions.calls.length, 1, 'only the branch workspace gets a first Session')
+})
+
+test('does not register a project root for sibling worktrees', async t => {
+  if (!hasGit()) return t.skip('git unavailable')
+  const root = await createTempRoot(t)
+  const repo = await createGitProject(root, 'project')
+  const sibling = await createWorktree(repo, join(root, 'sibling-wt'), 'feat-b')
+  const harness = createHarness({ services: { sessionController: createSessionControllerRecorder() } })
+  apply(harness.ctx, validatedConfig())
+
+  const canonicalRepo = await realpath(repo)
+  harness.fire(toolExec({ path: sibling }))
+  await waitFor(() => harness.workspacesByPath.has(sibling), 'sibling worktree registration')
+  await flushEventLoop()
+  assert.equal(harness.workspacesByPath.has(canonicalRepo), false)
+})
+
+test('registerProjectRoot=false leaves the project root alone', async t => {
+  if (!hasGit()) return t.skip('git unavailable')
+  const root = await createTempRoot(t)
+  const repo = await createGitProject(root, 'project')
+  const worktree = await createWorktree(repo, join(repo, '.worktrees', 'feat-a'), 'feat-a')
+  const harness = createHarness({ services: { sessionController: createSessionControllerRecorder() } })
+  apply(harness.ctx, validatedConfig({ registerProjectRoot: false }))
+
+  const canonicalRepo = await realpath(repo)
+  harness.fire(toolExec({ path: worktree }))
+  await waitFor(() => harness.workspacesByPath.has(worktree), 'worktree registration')
+  await flushEventLoop()
+  assert.equal(harness.workspacesByPath.has(canonicalRepo), false)
 })

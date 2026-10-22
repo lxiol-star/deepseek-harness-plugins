@@ -4,7 +4,7 @@
 >
 > 适用范围：`dsh-session-board`（本仓库主力插件）、`dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`。
 >
-> 最后更新：2026-10-22（`dsh-session-board` 0.8.2、`dsh-hide-empty-workspaces` 0.3.6、`dsh-workspace-autoregister` 0.1.1、`dsh-think-bounce-pet` 0.1.1）。
+> 最后更新：2026-10-22（`dsh-session-board` 0.8.2、`dsh-hide-empty-workspaces` 0.3.6、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
 >
 > 阅读顺序：§0 是可直接粘贴给新会话的**交接提示词**；§1–§4 是现状与插件地图；§5–§6 是开发/发布闭环；§7–§12 是规则、排障、权威索引、风险与命令卡。
 
@@ -22,7 +22,7 @@
 - main 与 origin 同步；四个插件都已发布 Release：
   - dsh-session-board 0.8.2（最新）：会话看板 + 批量归档提炼（Wiki 引擎自包含、设置页可配）+ 「管理中心」常驻管理 Agent + 项目树（按 git origin 归并多分支工作区）+ 项目协调会话（项目级派任务/会话间消息/worker 回报）+「仅归档」动作/视图。
   - dsh-hide-empty-workspaces 0.3.6：侧栏视图切换（进行中 / 已归档 / 工作空间）、归档按工作区分组、空白会话宽限期、设置页。
-  - dsh-workspace-autoregister 0.1.1：Host-only，自动把新工作区目录注册进列表；0.1.1 起会把工作区里的 HANDOFF.md 作为自动创建会话的第一条消息（交接提示词）。
+  - dsh-workspace-autoregister 0.1.2：Host-only，自动把新工作区目录注册进列表；0.1.1 起把 HANDOFF.md 作为首个会话消息；0.1.2 起嵌套 worktree 会同时注册项目根，原生「按工作区树」可按路径归组。
   - dsh-think-bounce-pet 0.1.1：收录的上游构建产物，无本地 src，只在需要时打补丁。
 - 先跑通闭环：cd plugins/dsh-session-board && DSH_REPO=<DSH 源码检出> npm run check
   （2026-10-22 基线：40 个 spec 文件 / 538 个用例全绿）。
@@ -44,7 +44,7 @@
 近期待办（§10）
 1. 管理面板：mux 增量 SSE（当前 4s 轮询）、面板化自动唤醒预算/开关、needs-input 从 durable approval/asked|decided 派生、面板列出没有会话的空工作区、管理目录改走 Config。
 2. Wiki 引擎：本地模式与内置模式的边界回归、provider 配置（~/.wikibar/config.json）、Python 3 + zstandard/zstd 平台覆盖。
-3. dsh-workspace-autoregister 的 README/USAGE 还停在 0.1.0，未记录 0.1.1 的 HANDOFF.md 首消息能力，下次发版时补齐。
+3. dsh-workspace-autoregister 的 README/USAGE 已随 0.1.2 补齐 HANDOFF.md 首消息与项目根注册说明。
 4. 平台覆盖：Windows/Linux 未系统验证；正式版 App 与 Dev3 的客户端组合差异要在正式版实测一次。
 
 任务要求：先读 §1–§4 定位代码；按 §5 改代码并验证；按 §6 发布；完成后报告改了哪个插件、版本、验证命令与结果、Release 状态。不要替用户删数据、不要改 profile 或手写 profile 文件。
@@ -60,7 +60,7 @@
 | --- | --- | --- | --- |
 | `dsh-session-board` | Host + Client（React） | 0.5.1 | 主力插件：看板/全屏浮层、归档与提炼、自包含 Wiki 引擎与设置、管理中心（常驻管理 Agent 面板）；本文件大部分内容围绕它 |
 | `dsh-hide-empty-workspaces` | 仅 Client（手写 `lib/client.js`，无 `src/`、无构建） | 0.3.6 | 原生侧栏视图切换（进行中/已归档/工作空间）、归档按工作区分组、空白会话宽限期、设置页 |
-| `dsh-workspace-autoregister` | 仅 Host（手写 `lib/index.js`，无构建） | 0.1.1 | 监听成功工具调用的参数，把新出现的工作区目录登记进列表、建首个空白会话，并把工作区 `HANDOFF.md` 作为该会话第一条消息 |
+| `dsh-workspace-autoregister` | 仅 Host（手写 `lib/index.js`，无构建） | 0.1.2 | 监听成功工具调用的参数，把新出现的工作区目录登记进列表、建首个空白会话、注入 `HANDOFF.md`；嵌套 worktree 同时注册项目主检出根，供原生工作区树归组 |
 | `dsh-think-bounce-pet` | 上游构建产物 | 0.1.1 | 收录社区插件（MIT），仓库里没有上游 `src/`，只在需要时打补丁/加回归测试 |
 
 插件目录规范：`plugins/<npm 包名>/`，各自声明 `version`、入口、依赖、README、CHANGELOG。发布物是各插件独立的 `.tgz`，**版本号和 tag 按插件独立**（`dsh-session-board-v0.5.1` 这种格式）。`dsh-session-board` 有 TS 源码与构建步骤；另外两个手写 JS 插件直接维护 `lib/`，`check` 只有 Node 测试（见 §5）。
@@ -464,7 +464,7 @@ Dev3 这类 dev 构建带 CDP：渲染进程 `--remote-debugging-port=9262`、Ho
 ### 5.4 手写 JS 插件（hide-empty / autoregister / think-bounce）
 
 - **`dsh-hide-empty-workspaces`**：没有 `src/`、没有构建步骤，直接编辑 `lib/client.js` / `lib/index.js`；测试是 `node test/client.smoke.mjs` 与 `node test/host.smoke.mjs`（jsdom 冒烟），发布前再装进 Dev2/Dev3 实际点一遍视图切换。
-- **`dsh-workspace-autoregister`**：没有构建步骤，直接编辑 `lib/index.js`；测试 `node --test test/autoregister.test.mjs`（37 个用例）。改完同样要在 Dev3 里真实 scaffold 一个目录验证注册+首个会话；0.1.1 起还会把工作区 `HANDOFF.md` 作为首个会话消息。
+- **`dsh-workspace-autoregister`**：没有构建步骤，直接编辑 `lib/index.js`；测试 `node --test test/autoregister.test.mjs`（41 个用例）。改完同样要在 Dev3 里真实 scaffold 一个目录验证注册+首个会话；0.1.1 起还会把工作区 `HANDOFF.md` 作为首个会话消息。
 - **`dsh-think-bounce-pet`**：上游构建产物；补丁直接改 `lib/`，回归测试用仓库内脚本（见插件 README）。
 - 这三个插件发布时同样走 §6（版本递增、CHANGELOG、tag、Release、SHA256SUMS），但没有 `npm run check`；用各自的 Node 测试 + 实机验证代替。
 

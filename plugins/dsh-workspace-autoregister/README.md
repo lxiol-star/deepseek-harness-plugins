@@ -20,8 +20,9 @@ DeepSeek Harness 社区插件：在会话里新建的工作区目录会被自动
 2. 每次工具调用结束后，`tools/result` 给出该调用的参数和结果。插件只处理成功结束的调用（`result.isError === true` 的调用直接忽略），然后从参数中收集绝对路径候选：以 `/` 开头的字符串参数本身，以及更长的字符串（例如 bash 命令）里出现的绝对路径片段。
 3. 对每个候选路径，检查候选目录本身及其最多 `scanAncestors` 层父目录（默认 3 层）。判断依据只有目录列表：文件名命中 `promptFiles` 中至少一个、同时包含 `requiredFiles` 的全部文件、以及 `requiredDirectories` 的全部子目录；不读取任何文件内容。
 4. 命中后先调用 `ctx.workspaceRegistry.resolveByPath(path)`：已注册的目录直接跳过；未注册的调用 `ctx.workspaceRegistry.create(path)` 写入权威 Workspace registry。这与 GUI 新增工作区走的是同一组 registry 调用（先解析、后创建），新工作区标题默认取目录名。注册完成后，打开的侧栏通过 registry 的实时 feed 看到新行，无需点击。
-5. 若 `createSession` 为 `true` 且宿主组装了 `sessionController` 服务，接着调用 `sessionController.create({ workspaceId })` 创建第一个空白会话，并把会话挂到该工作区；这和使用 GUI 新建工作区后连接空白会话是同一个 Host 命令。
-6. 任何失败（registry 调用被拒绝、建会话失败等）都只写 `warn` 日志，监听器本身不会抛错；目录不可读则视为“不匹配”，静默跳过。成功收录会写一条 `info` 日志，格式为 `dsh-workspace-autoregister: added workspace <路径>`，日志前缀统一为 `dsh-workspace-autoregister:`。
+5. 若被收录目录是项目仓库内的嵌套 worktree（`git rev-parse --git-common-dir` 指向主检出、且路径位于主检出之下），先把主检出根目录也注册为父工作区（不建会话）；这样原生侧栏「按工作区树」会按路径把分支嵌到项目节点下。同级 worktree 不触发，`registerProjectRoot: false` 可关闭。
+6. 若 `createSession` 为 `true` 且宿主组装了 `sessionController` 服务，接着调用 `sessionController.create({ workspaceId })` 创建第一个空白会话，并把会话挂到该工作区；这和使用 GUI 新建工作区后连接空白会话是同一个 Host 命令。
+7. 任何失败（registry 调用被拒绝、建会话失败等）都只写 `warn` 日志，监听器本身不会抛错；目录不可读则视为“不匹配”，静默跳过。成功收录会写一条 `info` 日志，格式为 `dsh-workspace-autoregister: added workspace <路径>`，日志前缀统一为 `dsh-workspace-autoregister:`。
 
 ## 安装
 
@@ -37,10 +38,10 @@ dsh plugin --profile desktop add /absolute/path/to/deepseek-harness-plugins/plug
 
 ### tgz 发布包
 
-从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-workspace-autoregister-0.1.0.tgz`；或在插件目录执行 `npm pack --ignore-scripts` 自行打包，再把生成的 tgz 交给插件管理器：
+从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-workspace-autoregister-0.1.2.tgz`；或在插件目录执行 `npm pack --ignore-scripts` 自行打包，再把生成的 tgz 交给插件管理器：
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-workspace-autoregister-0.1.0.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-workspace-autoregister-0.1.2.tgz
 ```
 
 也可以在 **设置 → 插件 → 添加插件** 里选择本地 tgz 文件。
@@ -70,6 +71,7 @@ dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh
 | `createSession` | boolean | `true` | 收录成功后是否创建首个空白会话。`false` 时只注册工作区。 |
 | `skipSessionDirectory` | boolean | `true` | 是否跳过“与当前会话工作目录相同”的候选目录，避免把正在使用的项目再次注册；工作目录未知时不跳过。 |
 | `scanAncestors` | integer（`0`–`8`） | `3` | 每个候选目录向上检查的父目录层数。默认 3 表示检查候选目录本身 + 最多 3 层父目录。 |
+| `registerProjectRoot` | boolean | `true` | 当被收录目录是项目仓库内的嵌套 worktree 时，同时把主检出根目录注册为父工作区，供原生「按工作区树」归组。 |
 
 ### `cordis.patch.yml` 覆写示例
 

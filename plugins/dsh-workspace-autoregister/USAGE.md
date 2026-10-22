@@ -27,17 +27,17 @@ dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh
 
 ### 方式 B：Release 安装包
 
-下载 <https://github.com/lxiol-star/deepseek-harness-plugins/releases/download/dsh-workspace-autoregister-v0.1.0/dsh-workspace-autoregister-0.1.0.tgz>，
+下载 <https://github.com/lxiol-star/deepseek-harness-plugins/releases/download/dsh-workspace-autoregister-v0.1.0/dsh-workspace-autoregister-0.1.2.tgz>，
 在插件管理器里选择「本地包」，或：
 
 ```sh
-dsh plugin --profile desktop add /绝对路径/dsh-workspace-autoregister-0.1.0.tgz
+dsh plugin --profile desktop add /绝对路径/dsh-workspace-autoregister-0.1.2.tgz
 ```
 
 SHA256（对应 `SHA256SUMS-0.1.0` 发布资产）：
 
 ```text
-9da7f042f164cd05bf6e1afa654aa35af609a80fd5ce8fa224a6b5c8d6161b71  dsh-workspace-autoregister-0.1.0.tgz
+9da7f042f164cd05bf6e1afa654aa35af609a80fd5ce8fa224a6b5c8d6161b71  dsh-workspace-autoregister-0.1.2.tgz
 ```
 
 ### 方式 C：本地目录（开发用，link 安装）
@@ -114,6 +114,7 @@ mkdir -p "$W"/{docs,scripts,plans,reports}
 | `requiredDirectories` | string[] | `['plans', 'reports']` | 必须全部存在。 |
 | `createSession` | boolean | `true` | 收录后是否创建首个空白会话。 |
 | `skipSessionDirectory` | boolean | `true` | 跳过与当前会话工作目录相同的候选目录（避免把正在用的项目再注册一次）。 |
+| `registerProjectRoot` | boolean | `true` | 嵌套 worktree 收录时自动把项目主检出注册为父工作区（原生工作区树归组用）。 |
 | `scanAncestors` | integer（0–8） | `3` | 候选路径向上检查的父目录层数。 |
 
 覆写示例（桌面端：`~/.dsh/profiles/desktop/cordis.patch.yml`）：
