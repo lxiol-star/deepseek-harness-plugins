@@ -37,6 +37,7 @@ def log_line(event, detail=''):
     if not LOG_PATH:
         return
     try:
+        os.makedirs(os.path.dirname(LOG_PATH) or '.', exist_ok=True)
         with open(LOG_PATH, 'a', encoding='utf-8') as stream:
             stamp = datetime.now().isoformat(timespec='seconds')
             stream.write('%s\t%s\t%s\n' % (stamp, event, detail.replace('\n', ' ⏎ ')[:6000]))
@@ -206,8 +207,8 @@ def scope(args, archive):
         if children <= selected:
             break
         selected |= children
-        if len(selected) > 50:
-            raise ValueError('INVALID_SELECTION')
+        if len(selected) > 200:
+            raise ValueError('SCOPE_TOO_LARGE')
     pending = list(dict.fromkeys(requested + sorted(selected - set(requested))))
     ordered = []
     missing = []
@@ -491,7 +492,7 @@ if __name__ == '__main__':
         log_line('fatal', traceback.format_exc())
         code = str(error) if str(error) in (
             'SELECTION_MISMATCH', 'INVALID_RESULT', 'INVALID_SELECTION', 'SCHEMA_UNAVAILABLE',
-            'ENGINE_UNAVAILABLE', 'STATE_UNAVAILABLE',
+            'ENGINE_UNAVAILABLE', 'STATE_UNAVAILABLE', 'SCOPE_TOO_LARGE',
         ) else ('ENGINE_UNAVAILABLE' if isinstance(error, (ImportError, FileNotFoundError)) else 'WORKFLOW_UNAVAILABLE')
         REAL_STDOUT.write(json.dumps({'error': code, 'detail': detail[:400]}, ensure_ascii=False) + '\n')
         raise SystemExit(1)

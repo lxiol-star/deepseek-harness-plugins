@@ -119,6 +119,7 @@ export declare const en: {
     readonly 'batch.result': "Copied {archived} · unchanged {skipped} · empty {empty} · failed {failed}";
     readonly 'batch.error': "Archive failed. Your selection is kept.";
     readonly 'batch.error.INVALID_SELECTION': "The selection became invalid. Select sessions again and preview before confirming.";
+    readonly 'batch.error.SCOPE_TOO_LARGE': "The selected Sessions expand to more than 200 with their children. Archive them in smaller batches.";
     readonly 'batch.error.HOST_OUTDATED': "This window has newer plugin code than the running Harness host. Quit and reopen Harness completely, then try again.";
     readonly 'batch.error.ARCHIVE_UNAVAILABLE': "Wiki archiver unavailable or timed out. Some pages may already exist; preview again before retrying.";
     readonly 'batch.error.INVALID_RESULT': "The archiver returned an invalid result.";

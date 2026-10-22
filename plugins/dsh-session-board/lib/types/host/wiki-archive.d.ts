@@ -70,8 +70,15 @@ export declare function resolveSynthesisProvider(home: string): string;
 /** Provider used when the user file names none; matches the Wiki skill's default. */
 export declare const DEFAULT_SYNTHESIS_PROVIDER = "stepx-terra";
 export declare function resolveDshHome(configured: string | undefined, fromEnv: string | undefined): string | null;
-/** Explicit IDs only; never a selector fragment or a shell command. */
-export declare function validateWikiIds(raw: unknown): string[];
+/**
+ * Validate explicit IDs only; never a selector fragment or a shell command.
+ * @param raw - untrusted id list.
+ * @param max - largest accepted list; the user selection and the expanded
+ * scope have different limits ({@link MAX_ARCHIVE_SELECTION} vs
+ * {@link MAX_ARCHIVE_SCOPE}).
+ * @returns the de-duplicated ids.
+ */
+export declare function validateWikiIds(raw: unknown, max?: number): string[];
 /** Preview is read-only. A short-lived, single-use token authorizes a fixed set. */
 export declare function createWikiArchiver(options?: WikiArchiverOptions): WikiArchiver;
 export {};

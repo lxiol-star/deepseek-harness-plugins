@@ -49,6 +49,11 @@ describe('Wiki archival safety', () => {
     for (const id of ['a,b', 'a b', '../x', '-x', '', '.','..']) expect(() => validateWikiIds([id])).toThrow('INVALID_SELECTION')
     expect(() => validateWikiIds([])).toThrow()
     expect(() => validateWikiIds(Array(51).fill('id'))).toThrow()
+    // The user selection keeps its 50 cap; the expanded scope has a larger one.
+    const many = (count: number): string[] => Array.from({ length: count }, (_, index) => `session-${index}`)
+    expect(validateWikiIds(many(50))).toHaveLength(50)
+    expect(validateWikiIds(many(200), 200)).toHaveLength(200)
+    expect(() => validateWikiIds(many(201), 200)).toThrow('INVALID_SELECTION')
   })
   it('archives against ~/.dsh when a GUI launch carries no DSH_HOME', async () => {
     const saved = process.env.DSH_HOME
@@ -297,6 +302,41 @@ describe('plugin-selected synthesis model', () => {
     const result = await f.service.commit((await f.service.preview(['id'])).token)
     expect(result.archived).toBe(1)
     expect(result.workflow?.synthesis[0]).toMatchObject({ status: 'failed', error: 'PARSE_ERROR' })
+  })
+})
+
+describe('expanded scope limits', () => {
+  /**
+   * One archiver whose scope always returns `expandedCount` sessions for the
+   * single requested id, so the preview exercises the expanded scope path.
+   * @param expandedCount - entries the mocked bridge returns.
+   * @returns the service and the ids it will report.
+   */
+  function expandedFixture(expandedCount: number) {
+    const ids = ['id', ...Array.from({ length: expandedCount - 1 }, (_, index) => `child-${index}`)]
+    const execute = vi.fn(async (args: readonly string[]) => ({ stdout: output(requestedIds(args), args.includes('--dry-run')) }))
+    const run = async (operation: string) => operation === 'scope'
+      ? {
+        entries: ids.map((session, index) => ({ session, source: `source/${session}`, parent: index === 0 ? null : 'id', role: index === 0 ? 'main' : 'child', evidence: index === 0 ? 'selected session header' : 'parentSession', snapshot: false })),
+        missing: [],
+      }
+      : operation === 'synthesize' ? { status: 'skipped', pages: [] } : { status: 'updated' }
+    const service = createWikiArchiver({ workflow: run, home: '/test', dshHome: '/test/.dsh', execute })
+    return { service, ids }
+  }
+
+  it('previews an expanded scope past the old 50 boundary', async () => {
+    const { service } = expandedFixture(60)
+    const plan = await service.preview(['id'])
+    expect(plan.summary.selected).toBe(60)
+    expect(plan.summary.results).toHaveLength(60)
+    service.close()
+  })
+
+  it('reports SCOPE_TOO_LARGE instead of a misleading invalid selection', async () => {
+    const { service } = expandedFixture(201)
+    await expect(service.preview(['id'])).rejects.toThrow('SCOPE_TOO_LARGE')
+    service.close()
   })
 })
 

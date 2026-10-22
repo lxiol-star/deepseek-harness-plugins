@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
+import { parseArchiveScope, parseWikiWorkflow, parseArchiveSummary, MAX_ARCHIVE_SCOPE, MAX_ARCHIVE_SELECTION, type ArchiveScope, type SynthesisResult, type ArchivePreview, type ArchiveSummary } from '../shared/archive.ts'
 import type { SynthesisModelSelection } from '../shared/synthesis.ts'
 import { DEFAULT_WIKI_CONFIG } from '../shared/wiki.ts'
 import { appendWikiLog, buildWikiRuntime, type WikiRuntime } from './wiki-config.ts'
@@ -103,9 +103,16 @@ export function resolveDshHome(configured: string | undefined, fromEnv: string |
   }
 }
 
-/** Explicit IDs only; never a selector fragment or a shell command. */
-export function validateWikiIds(raw: unknown): string[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ARCHIVE_SELECTION || raw.some(id => typeof id !== 'string' || !SAFE_ID.test(id) || id === '.' || id === '..')) {
+/**
+ * Validate explicit IDs only; never a selector fragment or a shell command.
+ * @param raw - untrusted id list.
+ * @param max - largest accepted list; the user selection and the expanded
+ * scope have different limits ({@link MAX_ARCHIVE_SELECTION} vs
+ * {@link MAX_ARCHIVE_SCOPE}).
+ * @returns the de-duplicated ids.
+ */
+export function validateWikiIds(raw: unknown, max: number = MAX_ARCHIVE_SELECTION): string[] {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > max || raw.some(id => typeof id !== 'string' || !SAFE_ID.test(id) || id === '.' || id === '..')) {
     throw new WikiArchiveError('INVALID_SELECTION')
   }
   return [...new Set(raw as string[])]
@@ -320,8 +327,19 @@ export function createWikiArchiver(options: WikiArchiverOptions = {}): WikiArchi
   return {
     preview: async (raw) => exclusive(async () => {
       const requested = validateWikiIds(raw)
-      const scope = parseArchiveScope(await workflow('scope', JSON.stringify(requested), controller.signal))
-      const ids = validateWikiIds(scope.entries.map(entry => entry.session))
+      const rawScope = await workflow('scope', JSON.stringify(requested), controller.signal)
+      // Check the raw entry count first: the scope parser rejects an oversized
+      // list as "invalid", which used to surface as a misleading selection error.
+      const rawEntries = typeof rawScope === 'object' && rawScope !== null ? (rawScope as { entries?: unknown }).entries : undefined
+      if (Array.isArray(rawEntries) && rawEntries.length > MAX_ARCHIVE_SCOPE) {
+        throw new WikiArchiveError('SCOPE_TOO_LARGE', `the selected Sessions expand to ${rawEntries.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`)
+      }
+      const scope = parseArchiveScope(rawScope)
+      const expanded = scope.entries.map(entry => entry.session)
+      if (expanded.length > MAX_ARCHIVE_SCOPE) {
+        throw new WikiArchiveError('SCOPE_TOO_LARGE', `the selected Sessions expand to ${expanded.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`)
+      }
+      const ids = validateWikiIds(expanded, MAX_ARCHIVE_SCOPE)
       if (requested.some(id => !ids.includes(id))) throw new WikiArchiveError('SELECTION_MISMATCH')
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key)
       // Dropped/cancelled previews must not permanently exhaust the map.

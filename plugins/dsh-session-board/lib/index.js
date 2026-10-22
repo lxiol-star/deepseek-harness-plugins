@@ -1962,6 +1962,7 @@ import { promisify as promisify2 } from "node:util";
 
 // src/shared/archive.ts
 var MAX_ARCHIVE_SELECTION = 50;
+var MAX_ARCHIVE_SCOPE = 200;
 var WIKI_WORKFLOW_CAPABILITY = 2;
 var WIKI_ARCHIVE_PATH = "/api/session-board/wiki-archive";
 function parseArchiveSummary(raw) {
@@ -1982,7 +1983,7 @@ function parseArchiveSummary(raw) {
     if (r.page !== void 0 && typeof r.page !== "string") throw new Error("Invalid archive page");
     return { session: r.session, source: r.source, action: r.action, ...r.page === void 0 ? {} : { page: r.page } };
   });
-  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SELECTION) throw new Error("Inconsistent archive rows");
+  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SCOPE) throw new Error("Inconsistent archive rows");
   const totals = results.reduce((n, row) => {
     const key = row.action === "would-archive" || row.action === "archived" ? "archived" : row.action;
     n[key]++;
@@ -2001,7 +2002,7 @@ function safeRawPage(raw) {
 }
 function parseArchiveScope(raw) {
   const scope = record(raw);
-  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SELECTION || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
+  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SCOPE || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
   const entries = scope.entries.map((item) => {
     const row = record(item);
     if (typeof row.session !== "string" || typeof row.source !== "string" || row.parent !== null && typeof row.parent !== "string" || !["main", "child"].includes(String(row.role)) || typeof row.evidence !== "string" || typeof row.snapshot !== "boolean") throw new Error("Invalid scope row");
@@ -2168,8 +2169,8 @@ function resolveDshHome(configured, fromEnv) {
     return null;
   }
 }
-function validateWikiIds(raw) {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ARCHIVE_SELECTION || raw.some((id) => typeof id !== "string" || !SAFE_ID.test(id) || id === "." || id === "..")) {
+function validateWikiIds(raw, max = MAX_ARCHIVE_SELECTION) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > max || raw.some((id) => typeof id !== "string" || !SAFE_ID.test(id) || id === "." || id === "..")) {
     throw new WikiArchiveError("INVALID_SELECTION");
   }
   return [...new Set(raw)];
@@ -2374,8 +2375,17 @@ function createWikiArchiver(options = {}) {
   return {
     preview: async (raw) => exclusive(async () => {
       const requested = validateWikiIds(raw);
-      const scope = parseArchiveScope(await workflow("scope", JSON.stringify(requested), controller.signal));
-      const ids = validateWikiIds(scope.entries.map((entry) => entry.session));
+      const rawScope = await workflow("scope", JSON.stringify(requested), controller.signal);
+      const rawEntries = typeof rawScope === "object" && rawScope !== null ? rawScope.entries : void 0;
+      if (Array.isArray(rawEntries) && rawEntries.length > MAX_ARCHIVE_SCOPE) {
+        throw new WikiArchiveError("SCOPE_TOO_LARGE", `the selected Sessions expand to ${rawEntries.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`);
+      }
+      const scope = parseArchiveScope(rawScope);
+      const expanded = scope.entries.map((entry) => entry.session);
+      if (expanded.length > MAX_ARCHIVE_SCOPE) {
+        throw new WikiArchiveError("SCOPE_TOO_LARGE", `the selected Sessions expand to ${expanded.length} with their children; the limit is ${MAX_ARCHIVE_SCOPE}`);
+      }
+      const ids = validateWikiIds(expanded, MAX_ARCHIVE_SCOPE);
       if (requested.some((id) => !ids.includes(id))) throw new WikiArchiveError("SELECTION_MISMATCH");
       for (const [key, value] of previews) if (value.expiresAt <= now()) previews.delete(key);
       if (previews.size >= 20) previews.delete(previews.keys().next().value);

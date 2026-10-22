@@ -28,10 +28,10 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.5.1.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.5.2.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.5.1.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.5.2.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。
@@ -84,7 +84,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.5.1.tgz
 ### 操作流程
 
 1. 勾选会话，点击“预览归档与提炼”。
-2. 预览核对精确会话 ID、源路径、明确的 `parentSession` 父子归属，以及缺失子会话和进行中快照。仅扫描当前实际 `DSH_HOME`，总范围最多 50 个。
+2. 预览核对精确会话 ID、源路径、明确的 `parentSession` 父子归属，以及缺失子会话和进行中快照。仅扫描当前实际 `DSH_HOME`；一次最多勾选 50 个会话，连同它们的子会话最多 200 个（超过会提示分批归档）。
 3. “确认归档并提炼”授权原文归档及向所选模型或 provider 发送脱敏后的归档文本。取消不写原文、不调用模型。
 4. 每条会话单独执行内置 `wiki-archive.py --exact-session <完整ID> --full --json`，要求精确命中一个来源。
 5. 提炼按上一节的两条路径之一执行；提炼前再次检查可识别凭证；SKIP 视为正常结论。

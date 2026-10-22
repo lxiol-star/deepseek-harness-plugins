@@ -675,7 +675,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.1",
+      "data-session-board-version": "0.5.2",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -699,7 +699,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.5.1",
+      "data-session-board-version": "0.5.2",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1195,7 +1195,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.5.1",
+        "data-session-board-version": "0.5.2",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2346,7 +2346,7 @@ function parseArchiveSummary(raw) {
     if (r.page !== void 0 && typeof r.page != "string") throw new Error("Invalid archive page");
     return { session: r.session, source: r.source, action: r.action, ...r.page === void 0 ? {} : { page: r.page } };
   });
-  if (results.length !== v.selected || results.length > 50) throw new Error("Inconsistent archive rows");
+  if (results.length !== v.selected || results.length > 200) throw new Error("Inconsistent archive rows");
   let totals = results.reduce((n, row) => {
     let key = row.action === "would-archive" || row.action === "archived" ? "archived" : row.action;
     return n[key]++, n;
@@ -2364,7 +2364,7 @@ function safeRawPage(raw) {
 }
 function parseArchiveScope(raw) {
   let scope = record(raw);
-  if (!Array.isArray(scope.entries) || scope.entries.length > 50 || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
+  if (!Array.isArray(scope.entries) || scope.entries.length > 200 || !Array.isArray(scope.missing)) throw new Error("Invalid scope");
   let entries = scope.entries.map((item) => {
     let row = record(item);
     if (typeof row.session != "string" || typeof row.source != "string" || row.parent !== null && typeof row.parent != "string" || !["main", "child"].includes(String(row.role)) || typeof row.evidence != "string" || typeof row.snapshot != "boolean") throw new Error("Invalid scope row");
@@ -2817,6 +2817,7 @@ var NS = "session-board", en = {
   "batch.result": "Copied {archived} \xB7 unchanged {skipped} \xB7 empty {empty} \xB7 failed {failed}",
   "batch.error": "Archive failed. Your selection is kept.",
   "batch.error.INVALID_SELECTION": "The selection became invalid. Select sessions again and preview before confirming.",
+  "batch.error.SCOPE_TOO_LARGE": "The selected Sessions expand to more than 200 with their children. Archive them in smaller batches.",
   "batch.error.HOST_OUTDATED": "This window has newer plugin code than the running Harness host. Quit and reopen Harness completely, then try again.",
   "batch.error.ARCHIVE_UNAVAILABLE": "Wiki archiver unavailable or timed out. Some pages may already exist; preview again before retrying.",
   "batch.error.INVALID_RESULT": "The archiver returned an invalid result.",
@@ -3054,6 +3055,7 @@ var NS = "session-board", en = {
   "batch.result": "\u5DF2\u590D\u5236 {archived} \xB7 \u672A\u53D8\u5316 {skipped} \xB7 \u7A7A\u4F1A\u8BDD {empty} \xB7 \u5931\u8D25 {failed}",
   "batch.error": "\u5F52\u6863\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u9009\u62E9\u3002",
   "batch.error.INVALID_SELECTION": "\u9009\u62E9\u5DF2\u5931\u6548\u3002\u8BF7\u91CD\u65B0\u52FE\u9009\u4F1A\u8BDD\uFF0C\u5E76\u5148\u9884\u89C8\u518D\u786E\u8BA4\u3002",
+  "batch.error.SCOPE_TOO_LARGE": "\u9009\u4E2D\u7684\u4F1A\u8BDD\u8FDE\u540C\u5B50\u4F1A\u8BDD\u8D85\u8FC7 200 \u4E2A\uFF0C\u8BF7\u5206\u6279\u5F52\u6863\u3002",
   "batch.error.HOST_OUTDATED": "\u5F53\u524D\u7A97\u53E3\u7684\u63D2\u4EF6\u4EE3\u7801\u6BD4\u6B63\u5728\u8FD0\u884C\u7684 Harness \u5BBF\u4E3B\u65B0\u3002\u8BF7\u5B8C\u5168\u9000\u51FA\u5E76\u91CD\u65B0\u6253\u5F00 Harness \u540E\u91CD\u8BD5\u3002",
   "batch.error.ARCHIVE_UNAVAILABLE": "\u672C\u5730\u5F52\u6863\u811A\u672C\u4E0D\u53EF\u7528\u6216\u8D85\u65F6\u3002\u90E8\u5206\u9875\u9762\u53EF\u80FD\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u65B0\u9884\u89C8\u540E\u91CD\u8BD5\u3002",
   "batch.error.INVALID_RESULT": "\u5F52\u6863\u811A\u672C\u8FD4\u56DE\u4E86\u65E0\u6548\u7ED3\u679C\u3002",

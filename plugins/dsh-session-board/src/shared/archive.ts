@@ -50,6 +50,13 @@ export interface ArchivePreview {
 
 export const MAX_ARCHIVE_SELECTION = 50
 /**
+ * Cap for the expanded scope: the selected Sessions plus every archived child
+ * discovered through `parentSession` / subagent catalogs. Selecting 25 Sessions
+ * whose trees contain 30 children stays a sane batch; the old single 50 cap
+ * rejected it with a misleading "selection is invalid" message.
+ */
+export const MAX_ARCHIVE_SCOPE = 200
+/**
  * Capability level the browser half requires from the running host half.
  *
  * 2 adds the configurable self-contained Wiki engine, the `wiki-config` route
@@ -80,7 +87,7 @@ export function parseArchiveSummary(raw: unknown): ArchiveSummary {
     if (r.page !== undefined && typeof r.page !== 'string') throw new Error('Invalid archive page')
     return { session: r.session, source: r.source, action: r.action as ArchiveRow['action'], ...(r.page === undefined ? {} : { page: r.page as string }) }
   })
-  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SELECTION) throw new Error('Inconsistent archive rows')
+  if (results.length !== v.selected || results.length > MAX_ARCHIVE_SCOPE) throw new Error('Inconsistent archive rows')
   const totals = results.reduce((n, row) => {
     const key = row.action === 'would-archive' || row.action === 'archived' ? 'archived' : row.action
     n[key]++
@@ -100,7 +107,7 @@ function safeRawPage(raw: unknown): string {
 }
 export function parseArchiveScope(raw: unknown): ArchiveScope {
   const scope = record(raw)
-  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SELECTION || !Array.isArray(scope.missing)) throw new Error('Invalid scope')
+  if (!Array.isArray(scope.entries) || scope.entries.length > MAX_ARCHIVE_SCOPE || !Array.isArray(scope.missing)) throw new Error('Invalid scope')
   const entries = scope.entries.map((item: unknown): ScopeEntry => {
     const row = record(item)
     if (typeof row.session !== 'string' || typeof row.source !== 'string' || (row.parent !== null && typeof row.parent !== 'string') || !['main', 'child'].includes(String(row.role)) || typeof row.evidence !== 'string' || typeof row.snapshot !== 'boolean') throw new Error('Invalid scope row')

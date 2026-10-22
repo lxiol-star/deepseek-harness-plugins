@@ -52,6 +52,13 @@ export interface ArchivePreview {
 }
 export declare const MAX_ARCHIVE_SELECTION = 50;
 /**
+ * Cap for the expanded scope: the selected Sessions plus every archived child
+ * discovered through `parentSession` / subagent catalogs. Selecting 25 Sessions
+ * whose trees contain 30 children stays a sane batch; the old single 50 cap
+ * rejected it with a misleading "selection is invalid" message.
+ */
+export declare const MAX_ARCHIVE_SCOPE = 200;
+/**
  * Capability level the browser half requires from the running host half.
  *
  * 2 adds the configurable self-contained Wiki engine, the `wiki-config` route
