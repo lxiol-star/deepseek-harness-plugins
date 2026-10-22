@@ -1,7 +1,7 @@
 <div align="center">
 
 <!--
-  截图占位：下列图片由 verifier 在隔离的 DSH 实例中生成后提交到 assets/readme/。
+  截图：下列图片取自 Harness Dev2（DSH 0.2.1-rc.2）实测界面，已提交到 assets/readme/。
   assets/ 不随 npm 包发布（package.json 的 files 只含 lib/ 与文档）。
   hero.png      —— README 顶部主图：原生模型入口 + 推理等级滑条 + 鲸鱼娘滑块
   panes-dark.png / panes-light.png —— 深色 / 浅色主题下的推理等级面板
@@ -35,7 +35,7 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 
 ## 截图
 
-<!-- 截图占位：文件由 verifier 生成后提交到 assets/readme/，此处引用即生效。 -->
+以下截图取自 Harness Dev2（DSH `0.2.1-rc.2`）的实测界面：深色与浅色主题、三套能量皮肤都是真实渲染，未加标注。
 
 | 深色主题 | 浅色主题 |
 | --- | --- |
@@ -124,6 +124,52 @@ github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.0&path:/plugins
 
 前两个开关只保存在当前浏览器；特效皮肤保存在全局偏好中，Ultra 与闪电状态按会话保存在本机（见下方「数据与隐私」）。
 
+## 插件配置（cordis.patch.yml）
+
+插件行的 `config` 支持两个**可选**字段，都可以省略，且不影响滑条本身；修改后需重启 DSH 生效。
+
+### entries（可选）
+
+自定义模型的知识库条目数组，用于给「目录读不到档位」的自定义模型生成配置指引。合法条目与内置知识库一起参与匹配：更具体的 `provider` / `model` 优先，同等具体程度时用户条目优先；**格式不合法的条目会被逐条忽略**，不会让插件加载失败。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `id` | 是 | 条目标识，字符串。 |
+| `provider` | 是 | provider 路由名，字符串；`*` 匹配任意路由。 |
+| `model` | 是 | 模型 id，字符串；`*` 匹配任意字符串。 |
+| `note` | 是 | 原样展示在指引里的说明文字，字符串。 |
+| `efforts` | 是 | 档位 → 端点取值的映射。键是 DSH 档位（`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`），值是端点接受的字符串；值写 `null` 时生成只有键、不带取值的声明（例如 `off`）。 |
+| `compat` | 否 | 只识别 `thinkingFormat`（字符串）与 `supportsReasoningEffort`（布尔），会原样写进生成的 YAML；其它键当前被忽略。 |
+
+> `compat` 只对 `openai-completions` 路由有意义；不要给可能匹配其它协议的路由写 `compat`，否则生成的片段可能让那条路由解析失败。
+
+示例（Profile 中对应插件行的 `config`）：
+
+```yaml
+- insert:
+    - id: dsh-whale-effort
+      name: dsh-whale-effort
+      config:
+        entries:
+          - id: my-model
+            provider: "my-provider"
+            model: "my-model-id"
+            note: 端点文档给出的档位映射
+            efforts:
+              low: "low"
+              high: "high"
+            compat:
+              thinkingFormat: "openai"
+              supportsReasoningEffort: true
+        statePath: "/absolute/path/to/dsh-home"
+```
+
+### statePath（可选）
+
+状态 JSON 的路径覆盖，字符串。以 `.json` 结尾时按**文件路径**使用；其它值按 **DSH home 目录**使用，实际文件为 `<目录>/storages/dsh-whale-effort.json`。支持 `~` 展开；省略时按 `$DSH_HOME` → `~/.dsh` 解析（见「数据与隐私」）。
+
+例如 `statePath: "/absolute/path/to/dsh-home"` 会在 `/absolute/path/to/dsh-home/storages/dsh-whale-effort.json` 读写状态。
+
 ## 兼容性
 
 | 项目 | 说明 |
@@ -132,6 +178,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.0&path:/plugins
 | Node.js | `^22.19.0 || >=24.0.0`（仅开发构建需要；插件运行时不安装依赖）。 |
 | 模型 | 滑块需要模型目录公开至少 2 个推理档位；Ultra 需要模型存在真实 MAX 档。 |
 | 宿主接口 | 依赖 DSH 客户端服务（slots / locale / sessions / 模型目录）与 Host 的 `connection` / `webServer`；纯终端 profile 不加载客户端半。 |
+| 实测 | 已在 macOS Harness Dev2（DSH `0.2.1-rc.2`，2026-10-23）实测：滑条 / Ultra / 闪电 / 皮肤 / 设置页 / 原生菜单回归。 |
 | 平台 | 主要在 macOS 验证；Windows / Linux 与独立 Web 部署未系统验证。 |
 | 共存 | 不要与上游 `dsh-reasoning-effort` / `dsh-effort-slider` 同时安装。 |
 
@@ -140,7 +187,7 @@ DSH 的客户端插件 API 属于 RC 阶段，宿主升级后需重新验证；�
 ## 数据与隐私
 
 - **不发起任何外部网络请求**，没有遥测、统计上报或远程配置。
-- 唯一持久化文件：`$DSH_HOME/storages/dsh-whale-effort.json`（`$DSH_HOME` 解析顺序：显式配置 → 环境变量 `DSH_HOME` → `~/.dsh`）。内容为版本号、当前皮肤，以及最多 40 个最近活跃会话的 `{ lightning, ultra }`；采用临时文件 + rename 原子替换，损坏的记录按缺省值归一化，不会让插件加载失败。
+- 唯一持久化文件：`$DSH_HOME/storages/dsh-whale-effort.json`（`$DSH_HOME` 解析顺序：显式配置 → 环境变量 `DSH_HOME` → `~/.dsh`；可用插件配置的 `statePath` 覆盖路径，见「插件配置」）。内容为版本号、当前皮肤，以及最多 40 个最近活跃会话的 `{ lightning, ultra }`；采用临时文件 + rename 原子替换，损坏的记录按缺省值归一化，不会让插件加载失败。
 - 策略文本只追加到**被跟踪会话**（按会话 id 精确过滤）的下一步模型请求，文本不变时不重复注入；tok/s 只在本机内存中从会话事件流统计，不落盘、不上报。
 - Host 与 Client 只通过一条本机回环路由 `POST /dsh-whale-effort/<endpoint>` 通信；该路由自己调用 DSH 连接的 `requestRejection` 做 Host/Origin 与浏览器会话校验，不注册未鉴权路由。
 
@@ -183,8 +230,10 @@ npm pack --ignore-scripts
 ## 已知限制
 
 - Ultra 与闪电是提示词层控制，不增加算力、不改变模型能力；闪电模式的多智能体开销约为单 agent 的 15 倍。
-- 子代理 tok/s 只统计当前进程中仍被跟踪的会话后代；归档、重启或已脱离跟踪的子代理不计入，没有数据时整块隐藏，不显示估计值。
-- 策略注入在开关变化后的下一步生效，并不改写已发送的请求；按会话 id 过滤、文本去重。
+- **Ultra 只是显示层的一格**：选中 Ultra 时写入会话的仍是模型真实最高档（MAX）的 id，原生触发器（输入框旁的「推理等级」行）继续显示真实档位名（例如 Max），会话目录里不会出现 `ultra` id；Ultra 只体现在插件面板与注入的严格性策略上。
+- 子代理 tok/s 只统计当前进程中仍被跟踪的会话后代；归档、重启或已脱离跟踪的子代理不计入。读数需要真实的子代理产出，没有数据时整块隐藏（不显示估计值），单 agent 会话通常看不到读数。
+- 策略注入在开关变化后的下一步生效，并不改写已发送的请求；按会话 id 过滤、文本去重。实机验证只覆盖 `session/policy` 返回的策略正文与面板联动，真正写入模型请求的注入与两步去重由离线测试覆盖，尚未在实机会合中消耗模型额度验证。
 - 滑块依赖模型目录的 `reasoning.efforts`；目录没有档位或只有一档时按原生行为处理，插件不伪造档位。
+- **未设置推理强度时滑条从第一档开始**：会话的 effort 未设置（继承 provider 默认）时，滑条显示第一个真实档位（显示为 `Off`）并给出「未指定推理强度，点击或拖动滑条设置」提示，而原生根行仍显示「推理等级 Default」。这是继承自上游 A 的行为，不是错误。
 - 安装或升级后必须完全退出并重开 DSH，否则可能出现「新 Client 配旧 Host」。
 - DSH 客户端插件 API 处于 RC 阶段：宿主升级、官方模型选择器改版都可能影响注入点，升级后请重新验证。

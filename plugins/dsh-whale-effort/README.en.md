@@ -1,9 +1,9 @@
 <div align="center">
 
 <!--
-  Screenshot placeholders: the verifier generates these images in an isolated
-  DSH instance and commits them under assets/readme/. assets/ is not published
-  (package.json "files" ships lib/ plus the documentation only).
+  Screenshots: the images below come from the live Harness Dev2 UI
+  (DSH 0.2.1-rc.2) and are committed under assets/readme/. assets/ is not
+  published (package.json "files" ships lib/ plus the documentation only).
   hero.png      — README hero: native model entry + effort slider + chibi thumb
   panes-dark.png / panes-light.png — effort pane in dark / light theme
   skins.png     — holo / chrome / fluid energy skins
@@ -36,7 +36,7 @@ DSH exposes reasoning effort as a dropdown by default. This plugin keeps the nat
 
 ## Screenshots
 
-<!-- Screenshot placeholders: the verifier commits the generated files under assets/readme/. -->
+The screenshots below were captured from the live Harness Dev2 UI (DSH `0.2.1-rc.2`): the dark and light panes and the three energy skins are real renders, with no annotations.
 
 | Dark theme | Light theme |
 | --- | --- |
@@ -125,6 +125,52 @@ Three options live under **Settings → General settings**:
 
 The first two switches live in the current browser only; the effect skin is a global preference, while Ultra and lightning state are stored per session on this machine (see "Data and privacy").
 
+## Plugin configuration (cordis.patch.yml)
+
+The plugin row's `config` accepts two **optional** fields. Both may be omitted and neither affects the slider itself; changes take effect after a DSH restart.
+
+### entries (optional)
+
+An array of knowledge-base entries for custom models, used to generate configuration guidance when the directory cannot see the model's levels. Valid entries participate alongside the built-in knowledge base: a more specific `provider` / `model` match wins, and a user entry wins on a tie; **malformed entries are ignored one by one** and never fail plugin load.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | Yes | Entry identifier, string. |
+| `provider` | Yes | Provider route name, string; `*` matches any route. |
+| `model` | Yes | Model id, string; `*` matches any string. |
+| `note` | Yes | Free-form explanation shown verbatim in the guidance, string. |
+| `efforts` | Yes | Map of level to endpoint wire value. Keys are DSH levels (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`); values are the strings the endpoint accepts. A `null` value emits the key without a value (for example `off`). |
+| `compat` | No | Only `thinkingFormat` (string) and `supportsReasoningEffort` (boolean) are read and written verbatim into the generated YAML; other keys are currently ignored. |
+
+> `compat` is only meaningful on `openai-completions` routes. Do not set it on an entry whose pattern can also match another protocol; the generated snippet could make that route fail to parse.
+
+Example (`config` on the matching plugin row in the profile):
+
+```yaml
+- insert:
+    - id: dsh-whale-effort
+      name: dsh-whale-effort
+      config:
+        entries:
+          - id: my-model
+            provider: "my-provider"
+            model: "my-model-id"
+            note: Level mapping from the endpoint documentation
+            efforts:
+              low: "low"
+              high: "high"
+            compat:
+              thinkingFormat: "openai"
+              supportsReasoningEffort: true
+        statePath: "/absolute/path/to/dsh-home"
+```
+
+### statePath (optional)
+
+A string overriding where the state JSON lives. A value ending in `.json` is used as the file path; any other value is treated as a DSH home directory and the file becomes `<dir>/storages/dsh-whale-effort.json`. `~` is expanded; when omitted the path resolves as `$DSH_HOME` → `~/.dsh` (see "Data and privacy").
+
+For example, `statePath: "/absolute/path/to/dsh-home"` reads and writes `/absolute/path/to/dsh-home/storages/dsh-whale-effort.json`.
+
 ## Compatibility
 
 | Item | Notes |
@@ -133,6 +179,7 @@ The first two switches live in the current browser only; the effect skin is a gl
 | Node.js | `^22.19.0 \|\| >=24.0.0` (build-time only; the plugin installs no runtime dependencies). |
 | Models | The slider needs at least two levels in the model directory; Ultra needs a real MAX level. |
 | Host interfaces | Uses DSH client services (slots / locale / sessions / model directory) plus the host's `connection` / `webServer`; terminal-only profiles do not load the client half. |
+| Live verification | Tested in Harness Dev2 on macOS (DSH `0.2.1-rc.2`, 2026-10-23): slider / Ultra / lightning / skins / settings page / native-menu regression. |
 | Platforms | Verified mainly on macOS; Windows / Linux and standalone Web deployments are not systematically verified. |
 | Coexistence | Do not install alongside the upstream `dsh-reasoning-effort` / `dsh-effort-slider`. |
 
@@ -141,7 +188,7 @@ The DSH client plugin API is still a release candidate: re-verify after host upg
 ## Data and privacy
 
 - **No outbound network requests at all** — no telemetry, no analytics, no remote configuration.
-- The only persisted file is `$DSH_HOME/storages/dsh-whale-effort.json` (`$DSH_HOME` resolves as explicit configuration → `DSH_HOME` environment variable → `~/.dsh`). It holds a version number, the current skin and `{ lightning, ultra }` for at most the 40 most recently touched sessions; it is replaced atomically through a temp file + rename, and malformed records are normalized to defaults instead of failing plugin load.
+- The only persisted file is `$DSH_HOME/storages/dsh-whale-effort.json` (`$DSH_HOME` resolves as explicit configuration → `DSH_HOME` environment variable → `~/.dsh`; the plugin configuration's `statePath` can override it, see "Plugin configuration"). It holds a version number, the current skin and `{ lightning, ultra }` for at most the 40 most recently touched sessions; it is replaced atomically through a temp file + rename, and malformed records are normalized to defaults instead of failing plugin load.
 - Policy text is appended only to the **tracked session's** next model request (filtered strictly by session id) and only when the resolved text changed; tok/s is computed in process memory from session events only and is never written to disk or reported anywhere.
 - Host and client communicate through one loopback route, `POST /dsh-whale-effort/<endpoint>`; the route applies the DSH connection's `requestRejection` fence (Host/Origin and browser-session validation) and registers no unauthenticated route.
 
@@ -184,8 +231,10 @@ The bolt SVG path comes from [Feather Icons](https://github.com/feathericons/fea
 ## Known limitations
 
 - Ultra and lightning are prompt-layer controls: they add no compute and change no model capability; lightning's multi-agent overhead is roughly 15× a single agent.
-- Subagent tok/s only counts descendants of the tracked session within the current process; archived, restarted or no-longer-tracked subagents are excluded, and with no data the block hides instead of showing an estimate.
-- Policy injection takes effect on the next step after a switch changes; it never rewrites requests already sent, filters strictly by session id and deduplicates identical text.
+- **Ultra is a display-only stop**: selecting Ultra still submits the model's real highest level (MAX) id. The native trigger (the "Reasoning effort" row next to the composer) keeps showing the real level name (for example Max), and the session directory never contains an `ultra` id; Ultra only appears in the plugin pane and in the injected rigor policy.
+- Subagent tok/s only counts descendants of the tracked session within the current process; archived, restarted or no-longer-tracked subagents are excluded. The readout needs real subagent traffic; with no data the block hides instead of showing an estimate, so single-agent sessions usually show no readout.
+- Policy injection takes effect on the next step after a switch changes; it never rewrites requests already sent, filters strictly by session id and deduplicates identical text. Live verification covered the `session/policy` text and its UI wiring; the actual `agent/pre-step` injection and two-step dedupe are covered by offline tests and were not exercised in a live turn (that would have spent model quota).
 - The slider depends on the model directory's `reasoning.efforts`; with no levels or a single level the plugin falls back to the host's behavior and never fabricates levels.
+- **With no effort set, the slider starts at the first real level**: when the session's effort is unset (inheriting the provider default), the slider shows the first real level (displayed as `Off`) together with the notice "Reasoning effort is not specified; click or drag the slider to set it", while the native root row still says "Reasoning effort Default". This is inherited upstream-A behavior, not a defect.
 - After install or upgrade you must fully quit and reopen DSH, otherwise a new client can run against an old host.
 - The DSH client plugin API is in the RC stage: host upgrades or changes to the official model selector may affect the injection point; re-verify after upgrading.
