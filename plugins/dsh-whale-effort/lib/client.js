@@ -1054,7 +1054,14 @@ function mapNativeTree(node, transform) {
 }
 function wrapNativeSelector(Native, renderPanel) {
   return function(props) {
-    let [effort, setEffort] = (0, import_react.useState)(!1), panelRef = (0, import_react.useRef)(null), native = Native(props), menuOpen = !1, output = mapNativeTree(native, (element) => {
+    let [effort, setEffort] = (0, import_react.useState)(!1), panelRef = (0, import_react.useRef)(null), effortRowRef = (0, import_react.useRef)(null), openEffortPane = (row) => {
+      effortRowRef.current = row, setEffort(!0);
+    }, restoreMenuFocus = () => {
+      queueMicrotask(() => {
+        let row = effortRowRef.current;
+        row !== null && row.isConnected && row.focus();
+      });
+    }, native = Native(props), menuOpen = !1, output = mapNativeTree(native, (element) => {
       if (element.props["aria-label"] !== props.t("menu.aria") || !Array.isArray(element.props.children)) return element;
       let panes = element.props.children;
       if (panes.length !== 3) return element;
@@ -1064,16 +1071,16 @@ function wrapNativeSelector(Native, renderPanel) {
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "re-native-pane", ref: panelRef, tabIndex: -1, onBlur: (event) => {
           event.relatedTarget === null && event.stopPropagation();
         }, onKeyDown: (event) => {
-          (event.key === "Escape" || event.key === "Tab" && event.shiftKey && event.target === event.currentTarget) && (event.preventDefault(), event.stopPropagation(), setEffort(!1));
+          (event.key === "Escape" || event.key === "Tab" && event.shiftKey && event.target === event.currentTarget) && (event.preventDefault(), event.stopPropagation(), setEffort(!1), restoreMenuFocus());
         }, children: renderPanel(props) })
       );
       let root = panes[0];
       if (!(0, import_react.isValidElement)(root) || !Array.isArray(root.props.children)) return element;
       let [modelRow, effortRow] = root.props.children;
       if (!(0, import_react.isValidElement)(modelRow)) return element;
-      let row = (0, import_react.isValidElement)(effortRow) ? (0, import_react.cloneElement)(effortRow, { onClick: () => setEffort(!0) }) : (0, import_react.cloneElement)(
+      let row = (0, import_react.isValidElement)(effortRow) ? (0, import_react.cloneElement)(effortRow, { onClick: (event) => openEffortPane(event.currentTarget) }) : (0, import_react.cloneElement)(
         modelRow,
-        { key: "reasoning-effort", ref: null, disabled: props.locked, onClick: () => setEffort(!0) },
+        { key: "reasoning-effort", ref: null, disabled: props.locked, onClick: (event) => openEffortPane(event.currentTarget) },
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: props.t("menu.effort") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: "\u203A" })
       );
@@ -1089,7 +1096,7 @@ function wrapNativeSelector(Native, renderPanel) {
       }, (0, import_react.cloneElement)(root, {}, modelRow, row), panes[1], panes[2]);
     });
     return (0, import_react.useLayoutEffect)(() => {
-      menuOpen ? effort && panelRef.current?.focus() : setEffort(!1);
+      menuOpen ? effort && panelRef.current?.focus() : (setEffort(!1), effortRowRef.current = null);
     }, [menuOpen, effort]), output;
   };
 }
