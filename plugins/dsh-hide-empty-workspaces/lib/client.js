@@ -68,7 +68,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.8'
+    const VERSION = '0.3.9'
     /**
      * Desktop shell detection: the packaged app serves the GUI from the
      * custom `dsh-app://` scheme. Reloading that page after plugin files
@@ -1092,7 +1092,36 @@ window.__ModuleLoader__.load({
           }
           try {
             const graph = await fetchLatestPluginGraph()
+            // Reconcile alone is a no-op when the Host graph still carries the
+            // revisions this page booted with (or when a plugin's existing tab
+            // kept an old React instance). Force a real remount of every
+            // third-party client plugin: remove them from a copy of the graph,
+            // sync that, then sync the real graph back. Core @deepseek-ai rows
+            // stay mounted (tearing them down would destabilize the shell),
+            // and this plugin itself is excluded so the settings tab survives.
+            const thirdParty = graph.entries
+              .map(entry => entry.id)
+              .filter(id => typeof id === 'string' && id !== '' && !id.startsWith('@deepseek-ai/') && id !== 'dsh-hide-empty-workspaces')
+            if (thirdParty.length > 0) {
+              const reloaded = new Set(thirdParty)
+              const stripped = {
+                ...graph,
+                entries: graph.entries.filter(entry => !reloaded.has(entry.id)),
+                batches: Array.isArray(graph.batches)
+                  ? graph.batches.map(batch => ({
+                    ...batch,
+                    entries: Array.isArray(batch.entries) ? batch.entries.filter(id => !reloaded.has(id)) : batch.entries,
+                  }))
+                  : graph.batches,
+              }
+              await modules.entries.sync(stripped)
+            }
             await modules.entries.sync(graph)
+            const failures = modules.entries.state?.getSnapshot?.().failures ?? []
+            const failed = failures.filter(failure => thirdParty.includes(failure.id))
+            if (failed.length > 0) {
+              throw new Error(failed.map(failure => `${failure.id}: ${failure.message}`).join('；'))
+            }
           } catch (error) {
             if (desktopShell()) throw error
             window.location.reload()

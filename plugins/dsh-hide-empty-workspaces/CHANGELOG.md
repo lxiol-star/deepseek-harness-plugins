@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9
+
+- 「重新加载客户端插件」改为**强制重挂载第三方插件**：先从 Host 最新 graph 中移除 `dsh-*` 客户端插件并 sync（卸载旧 React 实例），再把真实 graph sync 回来（重新挂载），最后检查 `entries.state.failures`。这样已经打开的旧标签页（例如 better-sidebar 的编辑器 path 栏）也会重建，不再出现“按钮说已重新加载但界面仍是旧代码”。
+- 核心 `@deepseek-ai/*` 插件与设置页自身不参与重挂载，避免把 shell 拆掉；失败原因会显示在设置页。
+- 仍然不刷新页面、不重启、不中断会话。
+
 ## 0.3.8
 
 - 设置页「刷新页面」改为**「重新加载客户端插件」**：通过 `/plugins/events` 读取 Host 最新的 client-module graph，再用 `modules.entries.sync()` 原地 reconcile 客户端插件；**不刷新页面、不重启应用、不中断会话**。插件更新后不必再 Cmd+Q。
