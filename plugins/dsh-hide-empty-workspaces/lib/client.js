@@ -68,7 +68,24 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.6'
+    const VERSION = '0.3.7'
+    /**
+     * Desktop shell detection: the packaged app serves the GUI from the
+     * custom `dsh-app://` scheme. Reloading that page after plugin files
+     * changed can boot against a stale client-module manifest and fail the
+     * whole app, so the settings page must send desktop users to a full
+     * quit/reopen instead of `location.reload()`.
+     * @returns true when running inside the DSH desktop shell.
+     */
+    function desktopShell() {
+      try {
+        return globalThis.location?.protocol === 'dsh-app:'
+          || globalThis.dshDesktop?.protocolVersion === 1
+      } catch {
+        return false
+      }
+    }
+
     /** Sidebar views, in segment order. */
     const MODES = ['active', 'archived', 'workspaces']
     /** View shown on a fresh profile. */
@@ -89,7 +106,7 @@ window.__ModuleLoader__.load({
       hostVersion: '服务端（已加载）',
       installedVersion: '磁盘（已安装）',
       unknown: '未知',
-      staleClient: '客户端 bundle 已过期：刷新页面即可加载新客户端。',
+      staleClient: '客户端 bundle 已过期：网页端刷新页面即可；桌面端请完全退出并重开 DSH。',
       staleHost: '服务端仍是旧版本：需要完全退出应用后重新打开。',
       upToDate: '已安装版本与已加载版本一致。',
       flags: '开关',
@@ -100,6 +117,7 @@ window.__ModuleLoader__.load({
       actions: '操作',
       reapply: '重新应用',
       reload: '刷新页面',
+      reloadDesktopHint: '桌面端不要刷新页面：插件文件更新后刷新可能因启动清单未同步而启动失败。请完全退出并重开 DSH（⌘Q）。',
       refreshVersions: '重新检查版本',
       diagnostics: '诊断',
       loadError: '读取版本失败',
@@ -139,7 +157,7 @@ window.__ModuleLoader__.load({
       hostVersion: 'Host (loaded)',
       installedVersion: 'On disk (installed)',
       unknown: 'Unknown',
-      staleClient: 'The client bundle is stale: reload the page to load the new client.',
+      staleClient: 'The client bundle is stale: reload the page on web; on desktop fully quit and reopen DSH.',
       staleHost: 'The host still runs an old version: fully quit and reopen the app.',
       upToDate: 'Loaded versions match the installed package.',
       flags: 'Options',
@@ -150,6 +168,7 @@ window.__ModuleLoader__.load({
       actions: 'Actions',
       reapply: 'Re-apply',
       reload: 'Reload page',
+      reloadDesktopHint: 'Desktop: do not reload the page after a plugin update — the boot manifest can be stale and the whole app may fail to start. Fully quit and reopen DSH (⌘Q).',
       refreshVersions: 'Check versions again',
       diagnostics: 'Diagnostics',
       loadError: 'Failed to read versions',
@@ -400,7 +419,10 @@ window.__ModuleLoader__.load({
           h('h3', { style: styles.sectionTitle }, t('actions')),
           h('div', { style: styles.buttons },
             h('button', { type: 'button', style: styles.button, onClick: props.reapply }, t('reapply')),
-            h('button', { type: 'button', style: styles.button, onClick: props.reload }, t('reload')))),
+            desktopShell()
+              ? null
+              : h('button', { type: 'button', style: styles.button, onClick: props.reload }, t('reload'))),
+          desktopShell() ? h('div', { style: styles.ok }, t('reloadDesktopHint')) : null),
 
         h('details', null,
           h('summary', null, t('diagnostics')),

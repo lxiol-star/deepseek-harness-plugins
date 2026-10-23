@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7
+
+- 设置页“刷新页面”在桌面端（`dsh-app://`）改为**重启提示**：插件文件更新后刷新页面会拿到过期的 client-module 清单，导致 Web Boot 失败并弹“应用无法启动或已意外停止”；桌面端现在显示“完全退出并重开 DSH（⌘Q）”，不再触发 reload。网页端保留刷新按钮。
+- “客户端 bundle 已过期”提示同步区分桌面端/网页端。
+
 ## 0.3.6
 
 - The archive lists every archived Session; the 200-row cap and its "only the latest 200" hint are gone. Row count is now whatever the Workspace registry archives.
