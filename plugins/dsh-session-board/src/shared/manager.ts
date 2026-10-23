@@ -307,15 +307,39 @@ export interface ManagerSessionArchiveFacts {
   readonly clientArchived?: boolean
 }
 
+/** The manager panel's three views, mirroring the native sidebar. */
+export type ManagerViewMode = 'active' | 'archived' | 'workspaces'
+
+/** Whether one session carries an archive marker of either kind. */
+export function isManagerArchived(facts: ManagerSessionArchiveFacts): boolean {
+  return facts.archivedAt !== undefined || facts.clientArchived === true
+}
+
 /**
- * Whether one session belongs in the manager panel's default session list.
- * Archived sessions are hidden by default (both the plugin's Wiki archive and
- * the DSH client archive); the caller can opt in with `showArchived`.
+ * Whether one session belongs in the manager panel under the selected view.
+ * `active` hides archived sessions, `archived` shows only them, and
+ * `workspaces` lists every session so workspace selection stays complete.
  * @param facts - archive markers carried by one BoardEntry.
- * @param showArchived - whether the archived rows are currently shown.
+ * @param mode - selected manager view.
  * @returns true when the row should be rendered.
  */
-export function managerSessionVisible(facts: ManagerSessionArchiveFacts, showArchived: boolean): boolean {
-  if (showArchived) return true
-  return facts.archivedAt === undefined && facts.clientArchived !== true
+export function managerSessionVisible(facts: ManagerSessionArchiveFacts, mode: ManagerViewMode): boolean {
+  if (mode === 'workspaces') return true
+  return isManagerArchived(facts) === (mode === 'archived')
+}
+
+/**
+ * Whether one workspace row belongs in the manager panel under the selected
+ * view: active keeps workspaces with at least one active session, archived
+ * keeps those with at least one archived session, workspaces keeps all.
+ * @param entries - the workspace's board entries.
+ * @param mode - selected manager view.
+ * @returns true when the workspace row should be rendered.
+ */
+export function managerWorkspaceVisible(
+  entries: readonly ManagerSessionArchiveFacts[],
+  mode: ManagerViewMode,
+): boolean {
+  if (mode === 'workspaces') return true
+  return entries.some(entry => managerSessionVisible(entry, mode))
 }

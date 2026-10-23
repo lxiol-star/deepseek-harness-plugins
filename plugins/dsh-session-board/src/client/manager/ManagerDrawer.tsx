@@ -12,8 +12,10 @@
  * phase, the workspaces service for titles, and the manager controller for
  * the host mirror (selection, tasks, retained chat reference).
  */
-import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react'
-import { TASK_STATUS_KEYS, managerPhase, managerSessionVisible } from '../../shared/manager.ts'
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
+import {
+  TASK_STATUS_KEYS, managerPhase, managerSessionVisible, managerWorkspaceVisible, type ManagerViewMode,
+} from '../../shared/manager.ts'
 import type { BoardEntry, BoardGroup } from '../../shared/types.ts'
 import type { SessionReference, SessionStatusSnapshot, WorkspaceSnapshot } from '../dsh.ts'
 import { useSnapshot, type Translate } from '../hooks.ts'
@@ -40,6 +42,25 @@ const EMPTY_STATUS_SNAPSHOT: SessionStatusSnapshot = new Map()
 const EMPTY_STATUSES: ReadonlyStore<SessionStatusSnapshot> = {
   getSnapshot: () => EMPTY_STATUS_SNAPSHOT,
   subscribe: () => () => {},
+}
+
+/** Sidebar view modes the manager panel mirrors. */
+const MANAGER_VIEW_MODES: readonly ManagerViewMode[] = ['active', 'archived', 'workspaces']
+/** The manager panel's own persistence key. */
+const MANAGER_VIEW_KEY = 'dsh.sessionBoard.managerView'
+/** The hide-empty-workspaces mode key, shared so both surfaces stay in sync. */
+const SIDEBAR_VIEW_KEY = 'dsh.hideEmptyWorkspaces.mode'
+/** Same-page event used to mirror view changes between the sidebar and this panel. */
+const SIDEBAR_VIEW_EVENT = 'dsh:sidebar-view-mode'
+
+/** Read one persisted view, defaulting to the active list. */
+function readManagerView(): ManagerViewMode {
+  try {
+    const value = localStorage.getItem(MANAGER_VIEW_KEY) ?? localStorage.getItem(SIDEBAR_VIEW_KEY)
+    return value === 'archived' || value === 'workspaces' ? value : 'active'
+  } catch {
+    return 'active'
+  }
 }
 
 /** One workspace row of the left pane. */
@@ -99,13 +120,6 @@ function workspaceRows(groups: readonly BoardGroup[], workspaces: WorkspaceSnaps
   return [...rows.values()].sort((left, right) => left.title.localeCompare(right.title))
 }
 
-/** Running sessions of one workspace row. */
-function runningCount(row: WorkspaceRow): number {
-  let count = 0
-  for (const entry of row.entries) if (entry.state === 'running') count += 1
-  return count
-}
-
 /** Short wall-clock label for one activity timestamp; empty when unknown. */
 function activityText(at: number): string {
   if (!Number.isFinite(at) || at <= 0) return ''
@@ -119,6 +133,7 @@ function activityText(at: number): string {
 /** Props of one workspace row. */
 interface WorkspaceRowViewProps {
   row: WorkspaceRow
+  mode: ManagerViewMode
   focused: boolean
   selected: boolean
   t: Translate
@@ -126,8 +141,9 @@ interface WorkspaceRowViewProps {
   onFocus: (id: string) => void
 }
 
-function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }: WorkspaceRowViewProps): ReactElement {
-  const running = runningCount(row)
+function WorkspaceRowView({ row, mode, focused, selected, t, onToggle, onFocus }: WorkspaceRowViewProps): ReactElement {
+  const visible = row.entries.filter(entry => managerSessionVisible(entry, mode))
+  const running = visible.filter(entry => entry.state === 'running').length
   return (
     <li className="sb-manager-item" data-focused={focused}>
       <input
@@ -145,7 +161,7 @@ function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }: Work
         onClick={() => onFocus(row.id)}
       >
         <span className="sb-manager-workspace-title">{row.title}</span>
-        <span className="sb-manager-meta">{t('manager.workspaceMeta', { count: row.entries.length, running })}</span>
+        <span className="sb-manager-meta">{t('manager.workspaceMeta', { count: visible.length, running })}</span>
       </button>
     </li>
   )
@@ -208,17 +224,49 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
   const statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, value => value)
 
   const rows = useMemo(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot])
-  /** Archived sessions are hidden by default in the manager's session list. */
-  const [showArchived, setShowArchived] = useState(false)
+  const [viewMode, setViewMode] = useState<ManagerViewMode>(readManagerView)
+  /** Mirror view changes from the native sidebar (hide-empty-workspaces) and other panels. */
+  useEffect(() => {
+    const apply = (value: unknown): void => {
+      if (value === 'active' || value === 'archived' || value === 'workspaces') setViewMode(value)
+    }
+    const onEvent = (event: Event): void => {
+      if (event instanceof CustomEvent) apply(event.detail)
+    }
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === SIDEBAR_VIEW_KEY || event.key === MANAGER_VIEW_KEY) apply(event.newValue)
+    }
+    window.addEventListener(SIDEBAR_VIEW_EVENT, onEvent)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(SIDEBAR_VIEW_EVENT, onEvent)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+  /** Switch the manager view, persist it, and mirror the native sidebar's tabs. */
+  const changeViewMode = (mode: ManagerViewMode): void => {
+    setViewMode(mode)
+    try {
+      localStorage.setItem(MANAGER_VIEW_KEY, mode)
+      localStorage.setItem(SIDEBAR_VIEW_KEY, mode)
+    } catch {
+      // Storage unavailable: the panel still switches for this page.
+    }
+    window.dispatchEvent(new CustomEvent(SIDEBAR_VIEW_EVENT, { detail: mode }))
+  }
   const selectedWorkspaces = useMemo(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds])
   const selectedSessions = useMemo(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds])
-  const focused = useMemo(
-    () => rows.find(row => row.id === snapshot.focusedWorkspaceId) ?? null,
-    [rows, snapshot.focusedWorkspaceId],
+  const visibleRows = useMemo(
+    () => rows.filter(row => managerWorkspaceVisible(row.entries, viewMode)),
+    [rows, viewMode],
   )
+  const focused = useMemo(() => {
+    const row = rows.find(candidate => candidate.id === snapshot.focusedWorkspaceId) ?? null
+    return row !== null && managerWorkspaceVisible(row.entries, viewMode) ? row : null
+  }, [rows, snapshot.focusedWorkspaceId, viewMode])
   const focusedEntries = useMemo(
-    () => focused === null ? [] : focused.entries.filter(entry => managerSessionVisible(entry, showArchived)),
-    [focused, showArchived],
+    () => focused === null ? [] : focused.entries.filter(entry => managerSessionVisible(entry, viewMode)),
+    [focused, viewMode],
   )
   const selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length
   const managerStatus = snapshot.managerSessionId === null
@@ -293,42 +341,52 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
       </header>
       <div className="sb-manager-body">
         <aside className="sb-manager-left">
+          <div className="sb-manager-views" role="tablist" aria-label={t('manager.viewLabel')}>
+            {MANAGER_VIEW_MODES.map(mode => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={mode === viewMode}
+                className="sb-manager-view"
+                data-active={mode === viewMode}
+                onClick={() => changeViewMode(mode)}
+              >
+                {t(`manager.view.${mode}`)}
+              </button>
+            ))}
+          </div>
           <section className="sb-manager-section sb-manager-workspaces">
             <h2 className="sb-manager-section-title">{t('manager.workspaces')}</h2>
             {rows.length === 0
               ? <p className="sb-manager-empty">{t('manager.workspaceEmpty')}</p>
-              : (
-                <ul className="sb-manager-list">
-                  {rows.map(row => (
-                    <WorkspaceRowView
-                      key={row.id}
-                      row={row}
-                      focused={row.id === snapshot.focusedWorkspaceId}
-                      selected={selectedWorkspaces.has(row.id)}
-                      t={t}
-                      onToggle={toggleWorkspace}
-                      onFocus={focusWorkspace}
-                    />
-                  ))}
-                </ul>
-              )}
+              : visibleRows.length === 0
+                ? <p className="sb-manager-empty">{t('manager.workspaceViewEmpty')}</p>
+                : (
+                  <ul className="sb-manager-list">
+                    {visibleRows.map(row => (
+                      <WorkspaceRowView
+                        key={row.id}
+                        row={row}
+                        mode={viewMode}
+                        focused={row.id === snapshot.focusedWorkspaceId}
+                        selected={selectedWorkspaces.has(row.id)}
+                        t={t}
+                        onToggle={toggleWorkspace}
+                        onFocus={focusWorkspace}
+                      />
+                    ))}
+                  </ul>
+                )}
           </section>
           <section className="sb-manager-section sb-manager-sessions">
             <div className="sb-manager-section-head">
               <h2 className="sb-manager-section-title">{t('manager.sessions')}</h2>
-              <label className="sb-manager-filter">
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={(event) => { setShowArchived(event.target.checked) }}
-                />
-                <span>{t('manager.showArchived')}</span>
-              </label>
             </div>
             {focused === null
               ? <p className="sb-manager-empty">{t('manager.focusHint')}</p>
               : focusedEntries.length === 0
-                ? <p className="sb-manager-empty">{t(focused.entries.length === 0 ? 'manager.sessionEmpty' : 'manager.sessionArchivedHidden')}</p>
+                ? <p className="sb-manager-empty">{t(focused.entries.length === 0 ? 'manager.sessionEmpty' : 'manager.sessionViewEmpty')}</p>
                 : (
                   <ul className="sb-manager-list">
                     {focusedEntries.map(entry => (

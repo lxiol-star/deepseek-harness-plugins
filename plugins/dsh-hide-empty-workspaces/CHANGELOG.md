@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- 视图选择与会话看板「管理面板」的三档筛选（进行中 / 已归档 / 工作空间）双向同步：任一侧切换都会通过 `dsh:sidebar-view-mode` 事件 + 共享 `localStorage` 键立即反映到另一侧，两个面板始终显示同一视图。
+- 版本号与 README 安装引用更新。
+
 ## 0.3.9
 
 - 「重新加载客户端插件」改为**强制重挂载第三方插件**：先从 Host 最新 graph 中移除 `dsh-*` 客户端插件并 sync（卸载旧 React 实例），再把真实 graph sync 回来（重新挂载），最后检查 `entries.state.failures`。这样已经打开的旧标签页（例如 better-sidebar 的编辑器 path 栏）也会重建，不再出现“按钮说已重新加载但界面仍是旧代码”。

@@ -183,8 +183,12 @@ export declare const en: {
     readonly 'manager.workspaceEmpty': "No workspaces on the board yet";
     readonly 'manager.workspaceMeta': "{count} sessions · {running} running";
     readonly 'manager.sessionEmpty': "No sessions in this workspace";
-    readonly 'manager.showArchived': "Show archived";
-    readonly 'manager.sessionArchivedHidden': "No active sessions here (archived sessions are hidden)";
+    readonly 'manager.viewLabel': "Manager view";
+    readonly 'manager.view.active': "Active";
+    readonly 'manager.view.archived': "Archived";
+    readonly 'manager.view.workspaces': "Workspaces";
+    readonly 'manager.workspaceViewEmpty': "No workspaces in this view";
+    readonly 'manager.sessionViewEmpty': "No sessions in this view";
     readonly 'manager.taskEmpty': "No tasks yet";
     readonly 'manager.openTask': "Open the session of {title}";
     readonly 'manager.ariaDrawer': "Manager panel";

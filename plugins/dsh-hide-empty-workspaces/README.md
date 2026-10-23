@@ -20,18 +20,18 @@ Give the native DeepSeek Harness sidebar a small view switch — **进行中 / �
 在 DSH 插件管理器中填入下面的 GitHub 地址（需支持 `path:` 子目录的版本）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.9&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.0&path:/plugins/dsh-hide-empty-workspaces
 ```
 
 或者使用 CLI：
 
 ```sh
-dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.9&path:/plugins/dsh-hide-empty-workspaces"
+dsh plugin --profile desktop add "github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.0&path:/plugins/dsh-hide-empty-workspaces"
 ```
 
 Web profile 把 `desktop` 换成 `web`。安装后**完全退出并重新打开 DSH**（客户端 bundle 在启动时加载）；只升级客户端时刷新页面即可。
 
-也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.3.9.tgz`，在设置 → 插件 → 添加插件里选择本地包。
+也可以从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载 `dsh-hide-empty-workspaces-0.4.0.tgz`，在设置 → 插件 → 添加插件里选择本地包。
 
 ## 侧栏视图
 
@@ -80,7 +80,7 @@ localStorage.setItem('dsh.hideEmptyWorkspaces.mode', 'archived') // active / arc
 
 ```js
 window.__dshHideEmptyWorkspaces
-// { version: '0.3.9', state: 'ready', mode: 'active', hidden: ['ws-...'], includeBlank: false, error: null }
+// { version: '0.4.0', state: 'ready', mode: 'active', hidden: ['ws-...'], includeBlank: false, error: null }
 ```
 
 `state: 'waiting'` 表示工作区快照还没就绪；`state: 'error'` 时 `error` 给出原因。`hidden` 是当前视图里被判空并隐藏的 Workspace ID 列表。

@@ -898,6 +898,26 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   min-height: 0;
   border-right: 1px solid var(--dsw-alias-border-l1);
 }
+.sb-manager-views {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+}
+.sb-manager-view {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.sb-manager-view:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-manager-view[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .sb-manager-section {
   min-height: 0;
   overflow-y: auto;

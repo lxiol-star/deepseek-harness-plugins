@@ -26,13 +26,13 @@
 
 ```text
 # 会话看板
-github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.3&path:/plugins/dsh-session-board
+github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.4&path:/plugins/dsh-session-board
 # 推理强度滑条
 github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.1&path:/plugins/dsh-whale-effort
 # 思考弹球桌宠
 github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plugins/dsh-think-bounce-pet
 # 隐藏空工作区
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.3.9&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.0&path:/plugins/dsh-hide-empty-workspaces
 # 工作区自动收录
 github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.2&path:/plugins/dsh-workspace-autoregister
 ```

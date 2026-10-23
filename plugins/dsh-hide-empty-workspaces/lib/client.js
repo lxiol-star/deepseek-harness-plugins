@@ -63,12 +63,14 @@ window.__ModuleLoader__.load({
     const DEFAULT_BLANK_GRACE_MINUTES = 10
     /** Persisted sidebar view: `active`, `archived` or `workspaces`. */
     const MODE_KEY = 'dsh.hideEmptyWorkspaces.mode'
+    /** Same-page event that mirrors the selected view with other surfaces (manager panel). */
+    const MODE_EVENT = 'dsh:sidebar-view-mode'
     /** Host route that reports loaded and installed versions. */
     const STATUS_PATH = '/hide-empty-workspaces/status'
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.9'
+    const VERSION = '0.4.0'
     /**
      * Desktop shell detection: the packaged app serves the GUI from the
      * custom `dsh-app://` scheme. Reloading that page after plugin files
@@ -669,6 +671,11 @@ window.__ModuleLoader__.load({
         diagnostics.mode = mode
         syncControl(mode)
         reapply()
+        try {
+          window.dispatchEvent(new CustomEvent(MODE_EVENT, { detail: mode }))
+        } catch {
+          /* CustomEvent unavailable (tests): persistence still applies. */
+        }
       }
 
       /**
@@ -1146,12 +1153,19 @@ window.__ModuleLoader__.load({
           if (event.key === STORAGE_KEY || event.key === INCLUDE_BLANK_KEY || event.key === MODE_KEY) schedule()
         }
         window.addEventListener('storage', onStorage)
+        const onViewMode = (event) => {
+          if (!(event instanceof CustomEvent)) return
+          const mode = event.detail
+          if (MODES.includes(mode) && mode !== diagnostics.mode) setMode(mode)
+        }
+        window.addEventListener(MODE_EVENT, onViewMode)
         schedule()
         return () => {
           unsubscribe()
           unsubscribeSessions()
           observer.disconnect()
           window.removeEventListener('storage', onStorage)
+          window.removeEventListener(MODE_EVENT, onViewMode)
           if (frame !== 0) cancelAnimationFrame(frame)
           removeControl()
           control = null

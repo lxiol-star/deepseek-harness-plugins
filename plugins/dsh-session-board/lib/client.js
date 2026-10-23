@@ -787,7 +787,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.3",
+      "data-session-board-version": "0.8.4",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -811,7 +811,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.3",
+      "data-session-board-version": "0.8.4",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1311,7 +1311,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.3",
+        "data-session-board-version": "0.8.4",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2257,6 +2257,26 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   min-height: 0;
   border-right: 1px solid var(--dsw-alias-border-l1);
 }
+.sb-manager-views {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+}
+.sb-manager-view {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.sb-manager-view:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-manager-view[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .sb-manager-section {
   min-height: 0;
   overflow-y: auto;
@@ -3040,8 +3060,12 @@ var NS = "session-board", en = {
   "manager.workspaceEmpty": "No workspaces on the board yet",
   "manager.workspaceMeta": "{count} sessions \xB7 {running} running",
   "manager.sessionEmpty": "No sessions in this workspace",
-  "manager.showArchived": "Show archived",
-  "manager.sessionArchivedHidden": "No active sessions here (archived sessions are hidden)",
+  "manager.viewLabel": "Manager view",
+  "manager.view.active": "Active",
+  "manager.view.archived": "Archived",
+  "manager.view.workspaces": "Workspaces",
+  "manager.workspaceViewEmpty": "No workspaces in this view",
+  "manager.sessionViewEmpty": "No sessions in this view",
   "manager.taskEmpty": "No tasks yet",
   "manager.openTask": "Open the session of {title}",
   "manager.ariaDrawer": "Manager panel",
@@ -3295,8 +3319,12 @@ var NS = "session-board", en = {
   "manager.workspaceEmpty": "\u770B\u677F\u4E0A\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A",
   "manager.workspaceMeta": "{count} \u4E2A\u4F1A\u8BDD \xB7 {running} \u4E2A\u8FD0\u884C\u4E2D",
   "manager.sessionEmpty": "\u8BE5\u5DE5\u4F5C\u533A\u8FD8\u6CA1\u6709\u4F1A\u8BDD",
-  "manager.showArchived": "\u663E\u793A\u5DF2\u5F52\u6863",
-  "manager.sessionArchivedHidden": "\u8BE5\u5DE5\u4F5C\u533A\u6CA1\u6709\u672A\u5F52\u6863\u4F1A\u8BDD\uFF08\u5DF2\u5F52\u6863\u5DF2\u9690\u85CF\uFF09",
+  "manager.viewLabel": "\u7BA1\u7406\u9762\u677F\u89C6\u56FE",
+  "manager.view.active": "\u8FDB\u884C\u4E2D",
+  "manager.view.archived": "\u5DF2\u5F52\u6863",
+  "manager.view.workspaces": "\u5DE5\u4F5C\u7A7A\u95F4",
+  "manager.workspaceViewEmpty": "\u5F53\u524D\u89C6\u56FE\u4E0B\u6CA1\u6709\u5DE5\u4F5C\u533A",
+  "manager.sessionViewEmpty": "\u8BE5\u5DE5\u4F5C\u533A\u5728\u5F53\u524D\u89C6\u56FE\u4E0B\u6CA1\u6709\u4F1A\u8BDD",
   "manager.taskEmpty": "\u8FD8\u6CA1\u6709\u4EFB\u52A1",
   "manager.openTask": "\u6253\u5F00\u4EFB\u52A1 {title} \u7684\u4F1A\u8BDD",
   "manager.ariaDrawer": "\u7BA1\u7406\u9762\u677F",
@@ -4840,8 +4868,14 @@ var TASK_STATUS_KEYS = {
   failed: "task.status.failed",
   orphaned: "task.status.orphaned"
 };
-function managerSessionVisible(facts, showArchived) {
-  return showArchived ? !0 : facts.archivedAt === void 0 && facts.clientArchived !== !0;
+function isManagerArchived(facts) {
+  return facts.archivedAt !== void 0 || facts.clientArchived === !0;
+}
+function managerSessionVisible(facts, mode) {
+  return mode === "workspaces" ? !0 : isManagerArchived(facts) === (mode === "archived");
+}
+function managerWorkspaceVisible(entries, mode) {
+  return mode === "workspaces" ? !0 : entries.some((entry) => managerSessionVisible(entry, mode));
 }
 
 // src/client/manager/controller.ts
@@ -5362,7 +5396,15 @@ var import_jsx_runtime9 = require("react/jsx-runtime"), PHASE_LABEL = {
   getSnapshot: () => EMPTY_STATUS_SNAPSHOT,
   subscribe: () => () => {
   }
-};
+}, MANAGER_VIEW_MODES = ["active", "archived", "workspaces"], MANAGER_VIEW_KEY = "dsh.sessionBoard.managerView", SIDEBAR_VIEW_KEY = "dsh.hideEmptyWorkspaces.mode", SIDEBAR_VIEW_EVENT = "dsh:sidebar-view-mode";
+function readManagerView() {
+  try {
+    let value = localStorage.getItem(MANAGER_VIEW_KEY) ?? localStorage.getItem(SIDEBAR_VIEW_KEY);
+    return value === "archived" || value === "workspaces" ? value : "active";
+  } catch {
+    return "active";
+  }
+}
 function baseName(path) {
   return path.replaceAll("\\", "/").split("/").filter(Boolean).pop() ?? path;
 }
@@ -5390,18 +5432,13 @@ function workspaceRows(groups, workspaces) {
       });
   return [...rows.values()].sort((left, right) => left.title.localeCompare(right.title));
 }
-function runningCount(row) {
-  let count = 0;
-  for (let entry of row.entries) entry.state === "running" && (count += 1);
-  return count;
-}
 function activityText(at) {
   if (!Number.isFinite(at) || at <= 0) return "";
   let date = new Date(at);
   return date.toDateString() === (/* @__PURE__ */ new Date()).toDateString() ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
-  let running = runningCount(row);
+function WorkspaceRowView({ row, mode, focused, selected, t, onToggle, onFocus }) {
+  let visible = row.entries.filter((entry) => managerSessionVisible(entry, mode)), running = visible.filter((entry) => entry.state === "running").length;
   return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("li", { className: "sb-manager-item", "data-focused": focused, children: [
     /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       "input",
@@ -5423,7 +5460,7 @@ function WorkspaceRowView({ row, focused, selected, t, onToggle, onFocus }) {
         onClick: () => onFocus(row.id),
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-workspace-title", children: row.title }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: row.entries.length, running }) })
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: visible.length, running }) })
         ]
       }
     )
@@ -5452,12 +5489,35 @@ function SessionRowView({ entry, selected, t, onToggle }) {
   ] });
 }
 function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
-  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), [showArchived, setShowArchived] = (0, import_react10.useState)(!1), selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react10.useMemo)(
-    () => rows.find((row) => row.id === snapshot.focusedWorkspaceId) ?? null,
-    [rows, snapshot.focusedWorkspaceId]
-  ), focusedEntries = (0, import_react10.useMemo)(
-    () => focused === null ? [] : focused.entries.filter((entry) => managerSessionVisible(entry, showArchived)),
-    [focused, showArchived]
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), [viewMode, setViewMode] = (0, import_react10.useState)(readManagerView);
+  (0, import_react10.useEffect)(() => {
+    let apply2 = (value) => {
+      (value === "active" || value === "archived" || value === "workspaces") && setViewMode(value);
+    }, onEvent = (event) => {
+      event instanceof CustomEvent && apply2(event.detail);
+    }, onStorage = (event) => {
+      (event.key === SIDEBAR_VIEW_KEY || event.key === MANAGER_VIEW_KEY) && apply2(event.newValue);
+    };
+    return window.addEventListener(SIDEBAR_VIEW_EVENT, onEvent), window.addEventListener("storage", onStorage), () => {
+      window.removeEventListener(SIDEBAR_VIEW_EVENT, onEvent), window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+  let changeViewMode = (mode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem(MANAGER_VIEW_KEY, mode), localStorage.setItem(SIDEBAR_VIEW_KEY, mode);
+    } catch {
+    }
+    window.dispatchEvent(new CustomEvent(SIDEBAR_VIEW_EVENT, { detail: mode }));
+  }, selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), visibleRows = (0, import_react10.useMemo)(
+    () => rows.filter((row) => managerWorkspaceVisible(row.entries, viewMode)),
+    [rows, viewMode]
+  ), focused = (0, import_react10.useMemo)(() => {
+    let row = rows.find((candidate) => candidate.id === snapshot.focusedWorkspaceId) ?? null;
+    return row !== null && managerWorkspaceVisible(row.entries, viewMode) ? row : null;
+  }, [rows, snapshot.focusedWorkspaceId, viewMode]), focusedEntries = (0, import_react10.useMemo)(
+    () => focused === null ? [] : focused.entries.filter((entry) => managerSessionVisible(entry, viewMode)),
+    [focused, viewMode]
   ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react10.useCallback)((id) => {
     manager.toggleWorkspaceId(id);
   }, [manager]), focusWorkspace = (0, import_react10.useCallback)((id) => {
@@ -5531,12 +5591,26 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-body", children: [
       /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("aside", { className: "sb-manager-left", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-views", role: "tablist", "aria-label": t("manager.viewLabel"), children: MANAGER_VIEW_MODES.map((mode) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          "button",
+          {
+            type: "button",
+            role: "tab",
+            "aria-selected": mode === viewMode,
+            className: "sb-manager-view",
+            "data-active": mode === viewMode,
+            onClick: () => changeViewMode(mode),
+            children: t(`manager.view.${mode}`)
+          },
+          mode
+        )) }),
         /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
           /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.workspaces") }),
-          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: rows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : visibleRows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceViewEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: visibleRows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             WorkspaceRowView,
             {
               row,
+              mode: viewMode,
               focused: row.id === snapshot.focusedWorkspaceId,
               selected: selectedWorkspaces.has(row.id),
               t,
@@ -5547,23 +5621,8 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           )) })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-section-head", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("label", { className: "sb-manager-filter", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: showArchived,
-                  onChange: (event) => {
-                    setShowArchived(event.target.checked);
-                  }
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { children: t("manager.showArchived") })
-            ] })
-          ] }),
-          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focusedEntries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t(focused.entries.length === 0 ? "manager.sessionEmpty" : "manager.sessionArchivedHidden") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focusedEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-section-head", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }) }),
+          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focusedEntries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t(focused.entries.length === 0 ? "manager.sessionEmpty" : "manager.sessionViewEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focusedEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             SessionRowView,
             {
               entry,

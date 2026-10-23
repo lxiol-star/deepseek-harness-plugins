@@ -4,7 +4,7 @@
 >
 > 适用范围：`dsh-session-board`（本仓库主力插件）、`dsh-whale-effort`（合并插件）、`dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`。
 >
-> 最后更新：2026-10-23（`dsh-session-board` 0.8.3、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.3.9、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
+> 最后更新：2026-10-23（`dsh-session-board` 0.8.4、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.4.0、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
 >
 > 阅读顺序：§0 是可直接粘贴给新会话的**交接提示词**；§1–§4 是现状与插件地图；§5–§6 是开发/发布闭环；§7–§12 是规则、排障、权威索引、风险与命令卡。
 
@@ -20,7 +20,7 @@
 
 当前状态（2026-10-22）
 - main 与 origin 同步；四个插件都已发布 Release：
-  - dsh-session-board 0.8.3（最新）：会话看板 + 批量归档提炼（Wiki 引擎自包含、设置页可配）+ 「管理中心」常驻管理 Agent + 项目树（按 git origin 归并多分支工作区）+ 项目协调会话（项目级派任务/会话间消息/worker 回报）+「仅归档」动作/视图。
+  - dsh-session-board 0.8.4（最新）：会话看板 + 批量归档提炼（Wiki 引擎自包含、设置页可配）+ 「管理中心」常驻管理 Agent + 项目树（按 git origin 归并多分支工作区）+ 项目协调会话（项目级派任务/会话间消息/worker 回报）+「仅归档」动作/视图。
   - dsh-hide-empty-workspaces 0.3.9：侧栏视图切换（进行中 / 已归档 / 工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载并重挂载第三方客户端插件（旧标签页也会重建），不刷新页面、不重启、不丢会话。
   - dsh-workspace-autoregister 0.1.2：Host-only，自动把新工作区目录注册进列表；0.1.1 起把 HANDOFF.md 作为首个会话消息；0.1.2 起嵌套 worktree 会同时注册项目根，原生「按工作区树」可按路径归组。
   - dsh-think-bounce-pet 0.1.1：收录的上游构建产物，无本地 src，只在需要时打补丁。
@@ -60,7 +60,7 @@
 | --- | --- | --- | --- |
 | `dsh-session-board` | Host + Client（React） | 0.5.1 | 主力插件：看板/全屏浮层、归档与提炼、自包含 Wiki 引擎与设置、管理中心（常驻管理 Agent 面板）；本文件大部分内容围绕它 |
 | `dsh-whale-effort` | Host + Client（TS 源码 + esbuild 构建） | 0.2.4 | 合并插件（MIT 上游）：原生模型选择器「推理等级」滑条 + 鲸鱼娘跑者 + 科幻能量皮肤 + Ultra/闪电 + 子代理 tok/s；Host 单条鉴权 RPC 通道 `POST /dsh-whale-effort/<endpoint>`，状态存 `$DSH_HOME/storages/dsh-whale-effort.json`；开发命令同 session-board（`npm run check/build`） |
-| `dsh-hide-empty-workspaces` | 仅 Client（手写 `lib/client.js`，无 `src/`、无构建） | 0.3.9 | 原生侧栏视图切换（进行中/已归档/工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载/重挂载第三方客户端插件（旧标签页也会重建），不刷新页面/不重启 |
+| `dsh-hide-empty-workspaces` | 仅 Client（手写 `lib/client.js`，无 `src/`、无构建） | 0.4.0 | 原生侧栏视图切换（进行中/已归档/工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载/重挂载第三方客户端插件（旧标签页也会重建），不刷新页面/不重启 |
 | `dsh-workspace-autoregister` | 仅 Host（手写 `lib/index.js`，无构建） | 0.1.2 | 监听成功工具调用的参数，把新出现的工作区目录登记进列表、建首个空白会话、注入 `HANDOFF.md`；嵌套 worktree 同时注册项目主检出根，供原生工作区树归组 |
 | `dsh-think-bounce-pet` | 上游构建产物 | 0.1.1 | 收录社区插件（MIT），仓库里没有上游 `src/`，只在需要时打补丁/加回归测试 |
 

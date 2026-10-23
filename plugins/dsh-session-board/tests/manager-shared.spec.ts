@@ -8,6 +8,7 @@ import {
   isManagerTaskStatus,
   managerPhase,
   managerSessionVisible,
+  managerWorkspaceVisible,
   normalizeSelection,
   parseManagerWakeStatus,
   previewText,
@@ -200,15 +201,34 @@ describe('TASK_STATUS_KEYS', () => {
 })
 
 describe('managerSessionVisible', () => {
-  it('hides both archive kinds unless archived rows are shown', () => {
-    expect(managerSessionVisible({}, false)).toBe(true)
-    expect(managerSessionVisible({ archivedAt: 1 }, false)).toBe(false)
-    expect(managerSessionVisible({ clientArchived: true }, false)).toBe(false)
-    expect(managerSessionVisible({ archivedAt: 1, clientArchived: true }, false)).toBe(false)
+  it('keeps only active sessions in the active view', () => {
+    expect(managerSessionVisible({}, 'active')).toBe(true)
+    expect(managerSessionVisible({ archivedAt: 1 }, 'active')).toBe(false)
+    expect(managerSessionVisible({ clientArchived: true }, 'active')).toBe(false)
+    expect(managerSessionVisible({ archivedAt: 1, clientArchived: true }, 'active')).toBe(false)
   })
-  it('shows every row when showArchived is on', () => {
-    expect(managerSessionVisible({ archivedAt: 1 }, true)).toBe(true)
-    expect(managerSessionVisible({ clientArchived: true }, true)).toBe(true)
-    expect(managerSessionVisible({}, true)).toBe(true)
+  it('keeps only archived sessions in the archived view', () => {
+    expect(managerSessionVisible({}, 'archived')).toBe(false)
+    expect(managerSessionVisible({ archivedAt: 1 }, 'archived')).toBe(true)
+    expect(managerSessionVisible({ clientArchived: true }, 'archived')).toBe(true)
+  })
+  it('keeps every session in the workspaces view', () => {
+    expect(managerSessionVisible({}, 'workspaces')).toBe(true)
+    expect(managerSessionVisible({ archivedAt: 1 }, 'workspaces')).toBe(true)
+    expect(managerSessionVisible({ clientArchived: true }, 'workspaces')).toBe(true)
+  })
+})
+
+describe('managerWorkspaceVisible', () => {
+  it('filters workspaces by their sessions in active/archived views', () => {
+    expect(managerWorkspaceVisible([{}, { archivedAt: 1 }], 'active')).toBe(true)
+    expect(managerWorkspaceVisible([{ archivedAt: 1 }], 'active')).toBe(false)
+    expect(managerWorkspaceVisible([{ archivedAt: 1 }], 'archived')).toBe(true)
+    expect(managerWorkspaceVisible([{}], 'archived')).toBe(false)
+    expect(managerWorkspaceVisible([], 'active')).toBe(false)
+  })
+  it('keeps every workspace (including empty ones) in the workspaces view', () => {
+    expect(managerWorkspaceVisible([], 'workspaces')).toBe(true)
+    expect(managerWorkspaceVisible([{}], 'workspaces')).toBe(true)
   })
 })
