@@ -71,7 +71,7 @@ describe('instruction message', () => {
     expect(message.role).toBe('user')
     expect(message.id.length).toBeGreaterThan(0)
     expect(message.content).toEqual([{ type: 'text', text: 'policy body' }])
-    expect(message.source).toEqual({ kind: 'plugin', plugin: PLUGIN_ID, form: 'instructions' })
+    expect(message.source).toEqual({ kind: PLUGIN_ID, form: 'instructions' })
   })
 
   it('assigns a fresh identity per injection', () => {
@@ -89,7 +89,7 @@ describe('pre-step listener', () => {
     if (decision.kind !== 'enter') throw new Error('expected an enter decision')
     expect(decision.messages).toHaveLength(2)
     expect(decision.messages[0]).toEqual(admitted)
-    expect(decision.messages[1]?.source).toEqual({ kind: 'plugin', plugin: PLUGIN_ID, form: 'instructions' })
+    expect(decision.messages[1]?.source).toEqual({ kind: PLUGIN_ID, form: 'instructions' })
     expect(injector.lastInjected('session-a')).toBe(policyText({ ultra: true }))
     injector.dispose()
   })

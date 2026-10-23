@@ -28,17 +28,19 @@ import { describeError } from './state.js'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
-    /** Context supplied by an external plugin through `agent/pre-step`. */
-    plugin: {
-      /** Producer family; `plugin` names the exact plugin document below. */
-      readonly kind: 'plugin'
-      /** Stable plugin id that produced the context. */
-      readonly plugin: string
-    } & ContextFormed
+    /**
+     * Policy text dsh-whale-effort appends through `agent/pre-step`.
+     *
+     * Session format v4 requires a producer-owned source kind and rejects the
+     * retired `kind: 'plugin'` wrapper (`format v4 message requires a
+     * producer-owned source kind`). Each producer declares its own kind, so the
+     * stable middle dot here is the plugin id itself.
+     */
+    'dsh-whale-effort': { readonly kind: 'dsh-whale-effort' } & ContextFormed
   }
 }
 
-/** Stable plugin id recorded in the message source. */
+/** Stable producer id used by logs and the durable message source kind. */
 export const PLUGIN_ID = 'dsh-whale-effort'
 
 /**
@@ -51,7 +53,7 @@ export function instructionMessage(text: string): UserMessage {
     id: randomUUID() as MessageId,
     role: 'user',
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'instructions' },
+    source: { kind: 'dsh-whale-effort', form: 'instructions' },
   }
 }
 

@@ -54,11 +54,11 @@ Requires **DSH `0.2.1-rc.2`** (Web or Desktop profile).
 
 ### Option 1: Release tarball (recommended)
 
-1. Download `dsh-whale-effort-0.2.0.tgz` from [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.0).
+1. Download `dsh-whale-effort-0.2.1.tgz` from [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.1).
 2. In DSH, open **Settings → Plugins → Add plugin** and pick the `.tgz`; or run:
 
    ```sh
-   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.0.tgz
+   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.1.tgz
    ```
 
 3. **Fully quit and reopen DSH**: the host and client halves load separately, so refreshing the page does not load new host code.
@@ -68,7 +68,7 @@ Requires **DSH `0.2.1-rc.2`** (Web or Desktop profile).
 Enter this pinned version in the plugin manager's "package name or address" field:
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.0&path:/plugins/dsh-whale-effort
+github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.1&path:/plugins/dsh-whale-effort
 ```
 
 `plugins/dsh-whale-effort/` in the repository is the complete plugin directory and its `lib/` is already built, so no local build is needed.
