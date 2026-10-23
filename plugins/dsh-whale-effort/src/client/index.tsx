@@ -775,9 +775,24 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
     <>
       {notice === null ? null : <div className="re-model-status" role="status">{notice}</div>}
       <div
-        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}${selectedUltra ? ' is-ultra' : ''}`}
+        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${turboAvailable ? ' has-head' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}${selectedUltra ? ' is-ultra' : ''}`}
         title={title}
       >
+        {turboAvailable ? (
+          <div className="re-effort-head" style={{ '--we-rate': normalizedRate } as CSSProperties}>
+            <BoltToggle
+              on={lightning}
+              disabled={busy}
+              label={t('effort.lightning.aria')}
+              onToggle={toggleLightning}
+            />
+            <RateReadout
+              total={turboState.rate}
+              generating={turboState.generating || turboState.agents > 0}
+              label={t('effort.rate')}
+            />
+          </div>
+        ) : null}
         <div
           className="re-effort-slider"
           data-top={isTop ? 'true' : undefined}
@@ -841,21 +856,6 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
           ))}
         </div>
         <div className="re-effort-name" role="status" aria-live="polite">{effortName}</div>
-        {turboAvailable ? (
-          <div className="re-effort-turbo" style={{ '--we-rate': normalizedRate } as CSSProperties}>
-            <BoltToggle
-              on={lightning}
-              disabled={busy}
-              label={t('effort.lightning.aria')}
-              onToggle={toggleLightning}
-            />
-            <RateReadout
-              total={turboState.rate}
-              generating={turboState.generating || turboState.agents > 0}
-              label={t('effort.rate')}
-            />
-          </div>
-        ) : null}
         {turboNotice === null ? null : <div className="re-effort-turbo-note" role="status">{turboNotice}</div>}
         {policyText === '' ? null : (
           <div className="re-effort-policy">

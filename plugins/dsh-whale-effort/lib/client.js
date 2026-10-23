@@ -255,6 +255,7 @@ var chibi_runner_strip_default = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA
 // src/client/styles.ts
 var CSS = `
 .re-effort {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -385,6 +386,10 @@ var CSS = `
   pointer-events: none;
 }
 .re-effort.is-chibi { padding-top: 12px; }
+/* Header row (lightning toggle left, fleet readout right) floats above the
+   track; the extra top padding keeps the chibi thumb from painting over it. */
+.re-effort.has-head { padding-top: 24px; }
+.re-effort.is-chibi.has-head { padding-top: 36px; }
 .re-effort.is-chibi .re-effort-ticks { margin-top: 14px; }
 .re-effort.is-chibi .re-effort-knob {
   left: clamp(10px, var(--re-progress), calc(100% - 10px));
@@ -989,13 +994,16 @@ body[data-ds-dark-theme] .re-adapt-panel {
      surface, where a white label is unreadable. */
   color: var(--dsw-static-deepseek-500, #4d70ff);
 }
-.re-effort-turbo {
+.re-effort-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 24px;
-  margin-top: 4px;
+  justify-content: space-between;
+  gap: 8px;
+  height: 20px;
 }
 .re-effort-turbo-note {
   color: var(--dsw-alias-label-tertiary, #9296a0);
@@ -3053,9 +3061,28 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
       "div",
       {
-        className: `re-effort${chibiThumb ? " is-chibi" : ""}${dragging ? " is-dragging" : ""}${busy ? " is-busy" : ""}${error === null ? "" : " is-error"}${selectedUltra ? " is-ultra" : ""}`,
+        className: `re-effort${chibiThumb ? " is-chibi" : ""}${turboAvailable ? " has-head" : ""}${dragging ? " is-dragging" : ""}${busy ? " is-busy" : ""}${error === null ? "" : " is-error"}${selectedUltra ? " is-ultra" : ""}`,
         title,
         children: [
+          turboAvailable ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "re-effort-head", style: { "--we-rate": normalizedRate }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+              BoltToggle,
+              {
+                on: lightning,
+                disabled: busy,
+                label: t("effort.lightning.aria"),
+                onToggle: toggleLightning
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+              RateReadout,
+              {
+                total: turboState.rate,
+                generating: turboState.generating || turboState.agents > 0,
+                label: t("effort.rate")
+              }
+            )
+          ] }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
             "div",
             {
@@ -3126,25 +3153,6 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
             level.id
           )) }),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-name", role: "status", "aria-live": "polite", children: effortName }),
-          turboAvailable ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "re-effort-turbo", style: { "--we-rate": normalizedRate }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-              BoltToggle,
-              {
-                on: lightning,
-                disabled: busy,
-                label: t("effort.lightning.aria"),
-                onToggle: toggleLightning
-              }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-              RateReadout,
-              {
-                total: turboState.rate,
-                generating: turboState.generating || turboState.agents > 0,
-                label: t("effort.rate")
-              }
-            )
-          ] }) : null,
           turboNotice === null ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-turbo-note", role: "status", children: turboNotice }),
           policyText === "" ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-policy", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(PolicyChip, { text: policyText, title: t("effort.policy"), expandLabel: t("effort.policy") }) }),
           error === null ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "re-effort-sr", role: "status", children: error })

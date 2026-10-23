@@ -11,6 +11,7 @@ import chibiRunnerSprite from '../../assets/chibi-runner-strip.png'
 
 export const CSS = `
 .re-effort {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -141,6 +142,10 @@ export const CSS = `
   pointer-events: none;
 }
 .re-effort.is-chibi { padding-top: 12px; }
+/* Header row (lightning toggle left, fleet readout right) floats above the
+   track; the extra top padding keeps the chibi thumb from painting over it. */
+.re-effort.has-head { padding-top: 24px; }
+.re-effort.is-chibi.has-head { padding-top: 36px; }
 .re-effort.is-chibi .re-effort-ticks { margin-top: 14px; }
 .re-effort.is-chibi .re-effort-knob {
   left: clamp(10px, var(--re-progress), calc(100% - 10px));
@@ -745,13 +750,16 @@ body[data-ds-dark-theme] .re-adapt-panel {
      surface, where a white label is unreadable. */
   color: var(--dsw-static-deepseek-500, #4d70ff);
 }
-.re-effort-turbo {
+.re-effort-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 24px;
-  margin-top: 4px;
+  justify-content: space-between;
+  gap: 8px;
+  height: 20px;
 }
 .re-effort-turbo-note {
   color: var(--dsw-alias-label-tertiary, #9296a0);
