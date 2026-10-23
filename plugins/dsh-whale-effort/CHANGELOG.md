@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-10-23
+
+修复开启 Ultra / 闪电后本轮运行失败：`format v4 message requires a producer-owned source kind`。
+
+- 原因：策略注入把用户消息的 source 写成 `{ kind: "plugin", plugin: "dsh-whale-effort" }`。DSH 的会话格式 v4 要求 source kind 由产出方自己声明，并且明确拒绝退休的 `plugin` 包装（正式版与 Harness Dev2 的 0.2.1-rc.2 都带这条校验），于是注入发生在真实模型轮次时整轮失败。
+- 修法：按 v4 的合并扩展约定，把插件的产出方 kind 声明为 `dsh-whale-effort`（`MessageSourceMap` 的 type augmentation），消息 source 改为 `{ kind: "dsh-whale-effort", form: "instructions" }`；不再写入被拒绝的 `plugin` kind。
+- Ultra 策略、闪电策略、去重与会话隔离语义均不变；离线测试更新为断言新的 producer kind。
+- 之前失败的会话没有落盘坏行（写入在持久化前被拒），修复后重新开 Ultra 即可正常跑。
+
 ## 0.2.0 — 2026-10-23
 
 Ultra 档改为**按模型能力自适应**，并修掉浅色主题下 Ultra 标签的对比度问题：

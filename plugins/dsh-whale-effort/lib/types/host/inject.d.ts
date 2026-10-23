@@ -24,16 +24,20 @@ import type { PreStepDecision } from '@deepseek-ai/dsh-agent';
 import type { ContextFormed, UserMessage } from '@deepseek-ai/dsh-llm';
 declare module '@deepseek-ai/dsh-llm' {
     interface MessageSourceMap {
-        /** Context supplied by an external plugin through `agent/pre-step`. */
-        plugin: {
-            /** Producer family; `plugin` names the exact plugin document below. */
-            readonly kind: 'plugin';
-            /** Stable plugin id that produced the context. */
-            readonly plugin: string;
+        /**
+         * Policy text dsh-whale-effort appends through `agent/pre-step`.
+         *
+         * Session format v4 requires a producer-owned source kind and rejects the
+         * retired `kind: 'plugin'` wrapper (`format v4 message requires a
+         * producer-owned source kind`). Each producer declares its own kind, so the
+         * stable middle dot here is the plugin id itself.
+         */
+        'dsh-whale-effort': {
+            readonly kind: 'dsh-whale-effort';
         } & ContextFormed;
     }
 }
-/** Stable plugin id recorded in the message source. */
+/** Stable producer id used by logs and the durable message source kind. */
 export declare const PLUGIN_ID = "dsh-whale-effort";
 /**
  * Build one instruction message carrying the policy body.

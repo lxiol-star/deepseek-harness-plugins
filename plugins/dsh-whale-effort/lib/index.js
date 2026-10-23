@@ -597,13 +597,12 @@ function currentPolicyText(flags) {
 
 // src/host/inject.ts
 import { randomUUID } from "node:crypto";
-var PLUGIN_ID = "dsh-whale-effort";
 function instructionMessage(text) {
   return {
     id: randomUUID(),
     role: "user",
     content: [{ type: "text", text }],
-    source: { kind: "plugin", plugin: PLUGIN_ID, form: "instructions" }
+    source: { kind: "dsh-whale-effort", form: "instructions" }
   };
 }
 function shouldInject(lastInjected, text) {
