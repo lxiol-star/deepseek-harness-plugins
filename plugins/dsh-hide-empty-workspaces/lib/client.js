@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     const exports = module.exports
 
     /** Client services: slot registry, locale dictionaries, Workspace and Session snapshots. */
-    const inject = ['slots', 'locale', 'workspaces', 'sessions']
+    const inject = ['slots', 'locale', 'workspaces', 'sessions', 'modules']
 
     /** Attribute carried by a hidden row or group section. */
     const ATTR = 'data-dsh-hide-empty'
@@ -68,7 +68,7 @@ window.__ModuleLoader__.load({
     /** Locale namespace owned by this plugin. */
     const NS = 'hideEmptyWorkspaces'
     /** Version stamped into this client bundle. */
-    const VERSION = '0.3.7'
+    const VERSION = '0.3.8'
     /**
      * Desktop shell detection: the packaged app serves the GUI from the
      * custom `dsh-app://` scheme. Reloading that page after plugin files
@@ -83,6 +83,54 @@ window.__ModuleLoader__.load({
           || globalThis.dshDesktop?.protocolVersion === 1
       } catch {
         return false
+      }
+    }
+
+    /**
+     * Read the Host's current client-module graph from the HMR SSE channel.
+     * The first frame on connect is the settled graph; a short deadline keeps
+     * a missing/blocked channel from wedging the settings button.
+     * @returns the current boot graph accepted by `modules.entries.sync`.
+     */
+    async function fetchLatestPluginGraph() {
+      const controller = new AbortController()
+      const deadline = setTimeout(() => controller.abort(), 5000)
+      try {
+        const response = await fetch('/plugins/events', {
+          headers: { accept: 'text/event-stream' },
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (!response.ok || response.body === null) throw new Error(`HTTP ${response.status}`)
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+        let buffer = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += value
+          let end = buffer.indexOf('\n\n')
+          while (end !== -1) {
+            const block = buffer.slice(0, end)
+            buffer = buffer.slice(end + 2)
+            for (const line of block.split('\n')) {
+              if (!line.startsWith('data:')) continue
+              const payload = line.slice(5).trim()
+              if (payload === '') continue
+              let frame
+              try {
+                frame = JSON.parse(payload)
+              } catch {
+                continue
+              }
+              if (frame !== null && typeof frame === 'object' && frame.type === 'graph' && frame.graph) return frame.graph
+            }
+            end = buffer.indexOf('\n\n')
+          }
+        }
+        throw new Error('client-module graph frame missing')
+      } finally {
+        clearTimeout(deadline)
+        controller.abort()
       }
     }
 
@@ -106,7 +154,7 @@ window.__ModuleLoader__.load({
       hostVersion: '服务端（已加载）',
       installedVersion: '磁盘（已安装）',
       unknown: '未知',
-      staleClient: '客户端 bundle 已过期：网页端刷新页面即可；桌面端请完全退出并重开 DSH。',
+      staleClient: '客户端 bundle 已过期：点「重新加载客户端插件」即可原地加载，不丢会话。',
       staleHost: '服务端仍是旧版本：需要完全退出应用后重新打开。',
       upToDate: '已安装版本与已加载版本一致。',
       flags: '开关',
@@ -116,8 +164,11 @@ window.__ModuleLoader__.load({
       blankGraceHint: '新建后多久内仍算作有会话；0 表示立即算空。',
       actions: '操作',
       reapply: '重新应用',
-      reload: '刷新页面',
-      reloadDesktopHint: '桌面端不要刷新页面：插件文件更新后刷新可能因启动清单未同步而启动失败。请完全退出并重开 DSH（⌘Q）。',
+      reloadClientPlugins: '重新加载客户端插件',
+      reloadingClientPlugins: '正在重新加载…',
+      reloadClientPluginsDone: '客户端插件已重新加载，页面未刷新。',
+      reloadClientPluginsFailed: '重新加载失败：{message}',
+      reloadDesktopHint: '重新加载不重启应用、不打断会话；仍失败时再完全退出并重开 DSH（⌘Q）。',
       refreshVersions: '重新检查版本',
       diagnostics: '诊断',
       loadError: '读取版本失败',
@@ -157,7 +208,7 @@ window.__ModuleLoader__.load({
       hostVersion: 'Host (loaded)',
       installedVersion: 'On disk (installed)',
       unknown: 'Unknown',
-      staleClient: 'The client bundle is stale: reload the page on web; on desktop fully quit and reopen DSH.',
+      staleClient: 'The client bundle is stale: use "Reload client plugins" to load it in place without losing the session.',
       staleHost: 'The host still runs an old version: fully quit and reopen the app.',
       upToDate: 'Loaded versions match the installed package.',
       flags: 'Options',
@@ -167,8 +218,11 @@ window.__ModuleLoader__.load({
       blankGraceHint: 'How long a new blank session keeps its Workspace visible; 0 means immediately empty.',
       actions: 'Actions',
       reapply: 'Re-apply',
-      reload: 'Reload page',
-      reloadDesktopHint: 'Desktop: do not reload the page after a plugin update — the boot manifest can be stale and the whole app may fail to start. Fully quit and reopen DSH (⌘Q).',
+      reloadClientPlugins: 'Reload client plugins',
+      reloadingClientPlugins: 'Reloading…',
+      reloadClientPluginsDone: 'Client plugins reloaded in place; the page was not refreshed.',
+      reloadClientPluginsFailed: 'Reload failed: {message}',
+      reloadDesktopHint: 'Reloading keeps the app and sessions alive; if it still fails, fully quit and reopen DSH (⌘Q).',
       refreshVersions: 'Check versions again',
       diagnostics: 'Diagnostics',
       loadError: 'Failed to read versions',
@@ -326,6 +380,16 @@ window.__ModuleLoader__.load({
       const { t } = props
       const [, forceRender] = React.useState(0)
       const [versions, setVersions] = React.useState({ status: 'loading' })
+      const [reloadState, setReloadState] = React.useState({ status: 'idle' })
+
+      /** Reload client plugins in place; the page itself must stay alive so sessions survive. */
+      const softReload = () => {
+        setReloadState({ status: 'busy' })
+        props.reload().then(
+          () => { setReloadState({ status: 'done' }); loadVersions() },
+          (error) => { setReloadState({ status: 'error', message: String(error) }) },
+        )
+      }
 
       React.useEffect(() => props.subscribe(() => forceRender((value) => value + 1)), [])
 
@@ -419,9 +483,16 @@ window.__ModuleLoader__.load({
           h('h3', { style: styles.sectionTitle }, t('actions')),
           h('div', { style: styles.buttons },
             h('button', { type: 'button', style: styles.button, onClick: props.reapply }, t('reapply')),
-            desktopShell()
-              ? null
-              : h('button', { type: 'button', style: styles.button, onClick: props.reload }, t('reload'))),
+            h('button', {
+              type: 'button',
+              style: styles.button,
+              disabled: reloadState.status === 'busy',
+              onClick: softReload,
+            }, reloadState.status === 'busy' ? t('reloadingClientPlugins') : t('reloadClientPlugins'))),
+          reloadState.status === 'done' ? h('div', { style: styles.ok }, t('reloadClientPluginsDone')) : null,
+          reloadState.status === 'error'
+            ? h('div', { style: styles.error }, formatMessage(t('reloadClientPluginsFailed'), { message: reloadState.message }))
+            : null,
           desktopShell() ? h('div', { style: styles.ok }, t('reloadDesktopHint')) : null),
 
         h('details', null,
@@ -1004,7 +1075,29 @@ window.__ModuleLoader__.load({
         },
         setMode,
         reapply,
-        reload: () => { window.location.reload() },
+        /**
+         * Reload the page's client plugins in place through the module
+         * controller: fetches the Host's latest graph over `/plugins/events`
+         * and reconciles entries. Desktop never falls back to
+         * `location.reload()` (its cached boot injections can fail the whole
+         * app after a plugin update); a plain web page still can.
+         * @returns a promise settling after the reconciliation.
+         */
+        reload: async () => {
+          const modules = ctx.modules
+          if (modules === undefined || modules.entries === undefined) {
+            if (desktopShell()) throw new Error('客户端模块加载器不可用，请完全退出并重开 DSH')
+            window.location.reload()
+            return
+          }
+          try {
+            const graph = await fetchLatestPluginGraph()
+            await modules.entries.sync(graph)
+          } catch (error) {
+            if (desktopShell()) throw error
+            window.location.reload()
+          }
+        },
         versions: async () => {
           const response = await fetch(STATUS_PATH, { cache: 'no-store' })
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
