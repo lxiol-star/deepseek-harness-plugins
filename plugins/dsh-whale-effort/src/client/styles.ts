@@ -740,7 +740,11 @@ body[data-ds-dark-theme] .re-adapt-panel {
      stick half of the word past the track and force a pane-level scrollbar. */
   transform: translateX(-100%) translateY(1px);
 }
-.re-effort-tick.is-ultra.is-selected { color: #fff; }
+.re-effort-tick.is-ultra.is-selected {
+  /* Accent instead of fixed white: the light theme paints the pane on a white
+     surface, where a white label is unreadable. */
+  color: var(--dsw-static-deepseek-500, #4d70ff);
+}
 .re-effort-turbo {
   display: flex;
   align-items: center;

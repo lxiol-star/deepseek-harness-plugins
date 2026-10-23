@@ -47,6 +47,7 @@ import {
   displayLevels,
   effortIdForDisplay,
   effortIndex,
+  hasUltra,
   isUltraIndex,
   selectEffort,
   sliderLevels,
@@ -436,7 +437,8 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
     if (!available || committingRef.current || draggingRef.current) return
     const next = directoryState.current?.reasoningEffort ?? ''
     const topId = levels[levels.length - 1]?.id
-    const index = ultraModeRef.current && topId !== undefined && next === topId
+    const ultraAvailable = hasUltra(levels)
+    const index = ultraModeRef.current && ultraAvailable && topId !== undefined && next === topId
       ? levels.length
       : Math.max(0, effortIndex(levels, next))
     committedRef.current = next
@@ -444,8 +446,9 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
     setEffort(next)
     setPreview(index)
     // A previous model's Ultra selection cannot survive a route change: the
-    // real MAX id differs per model, so the Host flag must stop injecting.
-    if (ultraModeRef.current && (topId === undefined || next !== topId)) {
+    // real ceiling id differs per model (or the new model has no ceiling tier),
+    // so the Host flag must stop injecting and the track re-distributes.
+    if (ultraModeRef.current && (!ultraAvailable || topId === undefined || next !== topId)) {
       setUltraMode(false)
       if (turbo !== null && sessionId !== undefined) {
         void turbo.update({ session: String(sessionId), ultra: false })
@@ -511,15 +514,17 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
           setLightning(snapshot.lightning)
           const topId = levelsRef.current[levelsRef.current.length - 1]?.id
           const current = directory.store.getSnapshot().current?.reasoningEffort
-          if (snapshot.ultra && topId !== undefined && current === topId) {
+          const ultraAvailable = hasUltra(levelsRef.current)
+          if (snapshot.ultra && ultraAvailable && topId !== undefined && current === topId) {
             // Restore the Ultra display index, not just the flag: the persisted
-            // session sits on the real MAX effort and the appended tier is what
-            // the user last chose.
+            // session sits on the real ceiling effort and the appended tier is
+            // what the user last chose.
             setUltraMode(true)
             previewRef.current = levelsRef.current.length
             setPreview(levelsRef.current.length)
-          } else if (snapshot.ultra && topId !== undefined) {
-            // The route changed under the persisted flag; stop injecting.
+          } else if (snapshot.ultra) {
+            // The current model cannot carry Ultra (no ceiling tier) or the
+            // route changed under the persisted flag; stop injecting.
             void turbo.update({ session: String(sessionId), ultra: false })
           }
         }

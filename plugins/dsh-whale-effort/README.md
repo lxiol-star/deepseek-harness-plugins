@@ -26,7 +26,7 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 - **档位跟随模型**：档数、名称和顺序来自当前模型目录公开的 `reasoning.efforts`，不写死三档；模型公开不足两档时显示提示并保持原有选择方式。
 - **鲸鱼娘滑块**：八帧跑步动画替换滑块按钮（默认开启，上游称「大肥鱼」），拖动时加速；系统启用「减少动态效果」时停在稳定帧。
 - **科幻能量皮肤**：`holo`（全息能量）、`chrome`（液态金属）、`fluid`（流体，默认，带粒子流体引擎与最高档星痕）；支持深色与浅色主题。设置里选项名为「特效皮肤」。
-- **Ultra 档**：模型公开至少两个真实档位时，滑条末尾追加一格 `Ultra`；选中时向模型目录提交的仍是**最高真实档（MAX）**的 id，`Ultra` 从不出现在模型目录里。
+- **Ultra 档（自适应）**：仅当模型公开至少两个真实档位、且最高档是 `xhigh` / `max` 时，滑条末尾才追加一格 `Ultra`；不满足的模型自动隐藏 Ultra，滑条只按真实档位分布，刻度随档数重新排布。选中 Ultra 时向模型目录提交的仍是**最高真实档（MAX）** 的 id，`Ultra` 从不出现在模型目录里。
 - **闪电模式**：滑条下方、与子代理 tok/s 读数同一行的闪电开关（默认关闭），给当前会话注入「父 agent 只做编排、按边界切分、在同一条消息里并发派发子代理」的编排策略。
 - **子代理 tok/s**：实时显示被跟踪会话的子代理合计 token 产出速率，完整整数、不做 k/M 缩写；没有数据时整块隐藏。
 - **「注入策略」读数**：只读 chip 展示当前会话实际解析出的策略正文，默认折叠、点击展开；仅当 Host 解析出非空策略（Ultra 或闪电生效）时显示。
@@ -53,11 +53,11 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 
 ### 方式一：Release 安装包（推荐）
 
-1. 从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.1.2) 下载 `dsh-whale-effort-0.1.2.tgz`。
+1. 从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.0) 下载 `dsh-whale-effort-0.2.0.tgz`。
 2. 在 DSH **设置 → 插件 → 添加插件** 中选择该 `.tgz`；或在终端执行：
 
    ```sh
-   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.1.2.tgz
+   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.0.tgz
    ```
 
 3. **完全退出并重新打开 DSH**：Host 与 Client 两半分别加载，只刷新页面不会加载新的 Host 代码。
@@ -67,7 +67,7 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 在插件管理器的「包名或地址」中填入指定版本：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.2&path:/plugins/dsh-whale-effort
+github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.0&path:/plugins/dsh-whale-effort
 ```
 
 仓库里的 `plugins/dsh-whale-effort/` 就是完整插件目录；`lib/` 已构建，装上即可用，无需自行构建。
@@ -80,7 +80,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.2&path:/plugins
 
 ### Ultra 档
 
-当模型公开至少两个真实档位时，滑条末尾多出一格 **`Ultra`**：
+仅当模型公开至少两个真实档位、且最高档是 `xhigh` / `max` 时，滑条末尾才多出一格 **`Ultra`**；最高档更低（例如只有 `low`/`medium`/`high`）的模型不会出现 Ultra，滑条按真实档位重新分布刻度。
 
 - 选中 Ultra 时，写入模型的仍是**真实最高档（MAX）**的 id —— Ultra 只是显示层的一格，不会出现在模型目录或请求参数里。
 - 同时给当前会话注入一段「严格性契约」：先写验收标准、证据先于断言、对抗式复查、根因优先、显式停止条件、不允许改测试迁就实现。

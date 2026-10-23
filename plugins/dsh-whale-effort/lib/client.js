@@ -984,7 +984,11 @@ body[data-ds-dark-theme] .re-adapt-panel {
      stick half of the word past the track and force a pane-level scrollbar. */
   transform: translateX(-100%) translateY(1px);
 }
-.re-effort-tick.is-ultra.is-selected { color: #fff; }
+.re-effort-tick.is-ultra.is-selected {
+  /* Accent instead of fixed white: the light theme paints the pane on a white
+     surface, where a white label is unreadable. */
+  color: var(--dsw-static-deepseek-500, #4d70ff);
+}
 .re-effort-turbo {
   display: flex;
   align-items: center;
@@ -1178,13 +1182,18 @@ async function selectEffort(directory, target, signal, t, timeoutMs = 5e3) {
   if (signal.throwIfAborted(), !result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   return waitForSelection(directory, target, signal, t, timeoutMs);
 }
-var ULTRA_DISPLAY_ID = "ultra";
+var ULTRA_DISPLAY_ID = "ultra", CEILING_EFFORTS = /* @__PURE__ */ new Set(["xhigh", "max"]);
+function supportsUltra(levels) {
+  if (levels.length < 2) return !1;
+  let top = levels[levels.length - 1];
+  return top !== void 0 && CEILING_EFFORTS.has(top.id.trim().toLowerCase());
+}
 function displayLevels(levels) {
   let real = levels.map((level) => ({ id: level.id, name: level.name, ultra: !1 }));
-  return levels.length < 2 ? real : [...real, { id: ULTRA_DISPLAY_ID, name: "Ultra", ultra: !0 }];
+  return supportsUltra(levels) ? [...real, { id: ULTRA_DISPLAY_ID, name: "Ultra", ultra: !0 }] : real;
 }
 function hasUltra(levels) {
-  return levels.length >= 2;
+  return supportsUltra(levels);
 }
 function displayIndexFor(levels, id, ultra) {
   let index = effortIndex(levels, id);
@@ -2895,8 +2904,8 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
   }, []);
   (0, import_react5.useEffect)(() => {
     if (!available || committingRef.current || draggingRef.current) return;
-    let next = directoryState.current?.reasoningEffort ?? "", topId = levels[levels.length - 1]?.id, index = ultraModeRef.current && topId !== void 0 && next === topId ? levels.length : Math.max(0, effortIndex(levels, next));
-    committedRef.current = next, previewRef.current = index, setEffort(next), setPreview(index), ultraModeRef.current && (topId === void 0 || next !== topId) && (setUltraMode(!1), turbo !== null && sessionId !== void 0 && turbo.update({ session: String(sessionId), ultra: !1 }));
+    let next = directoryState.current?.reasoningEffort ?? "", topId = levels[levels.length - 1]?.id, ultraAvailable = hasUltra(levels), index = ultraModeRef.current && ultraAvailable && topId !== void 0 && next === topId ? levels.length : Math.max(0, effortIndex(levels, next));
+    committedRef.current = next, previewRef.current = index, setEffort(next), setPreview(index), ultraModeRef.current && (!ultraAvailable || topId === void 0 || next !== topId) && (setUltraMode(!1), turbo !== null && sessionId !== void 0 && turbo.update({ session: String(sessionId), ultra: !1 }));
   }, [available, levels, directoryState, committing, dragging, setUltraMode, turbo, sessionId]), (0, import_react5.useEffect)(() => () => {
     selectionAbortRef.current?.abort();
     let input = inputRef.current, pointerId = activePointerIdRef.current;
@@ -2924,8 +2933,8 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
           }
         } else if (failures = 0, setTurboUnavailable(!1), setTurboState(snapshot), !hydratedRef.current) {
           hydratedRef.current = !0, setLightning(snapshot.lightning);
-          let topId = levelsRef.current[levelsRef.current.length - 1]?.id, current = directory.store.getSnapshot().current?.reasoningEffort;
-          snapshot.ultra && topId !== void 0 && current === topId ? (setUltraMode(!0), previewRef.current = levelsRef.current.length, setPreview(levelsRef.current.length)) : snapshot.ultra && topId !== void 0 && turbo.update({ session: String(sessionId), ultra: !1 });
+          let topId = levelsRef.current[levelsRef.current.length - 1]?.id, current = directory.store.getSnapshot().current?.reasoningEffort, ultraAvailable = hasUltra(levelsRef.current);
+          snapshot.ultra && ultraAvailable && topId !== void 0 && current === topId ? (setUltraMode(!0), previewRef.current = levelsRef.current.length, setPreview(levelsRef.current.length)) : snapshot.ultra && turbo.update({ session: String(sessionId), ultra: !1 });
         }
         timer = setTimeout(() => {
           tick();

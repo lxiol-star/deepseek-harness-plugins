@@ -23,13 +23,26 @@ export interface DisplayLevel {
     readonly ultra: boolean;
 }
 /**
- * Build the display scale: the model's real levels plus a trailing Ultra entry.
+ * Whether a model's effort scale can carry the appended Ultra tier.
+ *
+ * Ultra is only offered when the model's highest real level is already a
+ * ceiling tier (`xhigh` / `max`): then "Ultra" means "stay at the real MAX and
+ * add the rigor policy". Models whose scale tops out lower (for example
+ * `low`/`medium`/`high`) get a plain real-level slider with no Ultra entry, so
+ * the track adapts to what the model actually exposes.
+ * @param levels - the model's real effort levels, in directory order.
+ * @returns whether the display scale appends Ultra.
+ */
+export declare function supportsUltra(levels: readonly EffortLevel[]): boolean;
+/**
+ * Build the display scale: the model's real levels plus, when the model can
+ * carry it, a trailing Ultra entry.
  *
  * Ultra is presentation-only. Committing it writes the model's highest real
  * effort id (see {@link effortIdForDisplay}); it never reaches the model
  * directory as an effort value of its own.
  * @param levels - the model's real effort levels, in directory order.
- * @returns the display scale; identical to `levels` when fewer than two exist.
+ * @returns the display scale; identical to `levels` when Ultra does not apply.
  */
 export declare function displayLevels(levels: readonly EffortLevel[]): readonly DisplayLevel[];
 /** Whether the display scale carries the appended Ultra tier. */

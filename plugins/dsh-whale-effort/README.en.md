@@ -27,7 +27,7 @@ DSH exposes reasoning effort as a dropdown by default. This plugin keeps the nat
 - **Levels follow the model**: the count, names and order of levels come from the current model directory's `reasoning.efforts`; there is no fixed three-level set. Models exposing fewer than two levels show a notice and keep the host's original control.
 - **Whale-girl slider**: an eight-frame runner replaces the slider button (on by default; called "Big Fat Fish" upstream) and speeds up while dragging; with the system's reduce-motion preference it freezes on a stable frame.
 - **Sci-fi energy skins**: `holo` (holographic energy), `chrome` (liquid metal) and `fluid` (fluid, default, with a particle fluid engine and a star trail at the top level); dark and light themes are supported. The Settings row is labelled "Effect skin".
-- **Ultra tier**: when a model exposes at least two real levels, one extra `Ultra` stop is appended to the slider. Selecting it still submits the model's **highest real level (MAX)** id — `Ultra` never appears in the model directory.
+- **Ultra tier (adaptive)**: one extra `Ultra` stop is appended only when the model exposes at least two real levels **and** its highest real level is `xhigh` / `max`. Other models get a plain real-level slider with no Ultra stop, and the ticks re-distribute over the real levels. Selecting Ultra still submits the model's **highest real level (MAX)** id — `Ultra` never appears in the model directory.
 - **Lightning mode**: a bolt toggle under the slider, on the same row as the subagent tok/s readout (off by default), injects an orchestration policy into the current session: the parent agent only plans, splits boundaries, dispatches subagents concurrently in one message and integrates their results.
 - **Subagent tok/s**: the live token throughput of the tracked session's descendants (subagents), shown as full integers without k/M abbreviation; the whole block hides when there is no data.
 - **"Injected policy" readout**: a read-only chip showing the exact policy body currently resolved for the session; collapsed by default and shown only when the host resolves a non-empty policy (Ultra or lightning active).
@@ -54,11 +54,11 @@ Requires **DSH `0.2.1-rc.2`** (Web or Desktop profile).
 
 ### Option 1: Release tarball (recommended)
 
-1. Download `dsh-whale-effort-0.1.2.tgz` from [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.1.2).
+1. Download `dsh-whale-effort-0.2.0.tgz` from [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.0).
 2. In DSH, open **Settings → Plugins → Add plugin** and pick the `.tgz`; or run:
 
    ```sh
-   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.1.2.tgz
+   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.0.tgz
    ```
 
 3. **Fully quit and reopen DSH**: the host and client halves load separately, so refreshing the page does not load new host code.
@@ -68,7 +68,7 @@ Requires **DSH `0.2.1-rc.2`** (Web or Desktop profile).
 Enter this pinned version in the plugin manager's "package name or address" field:
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.2&path:/plugins/dsh-whale-effort
+github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.0&path:/plugins/dsh-whale-effort
 ```
 
 `plugins/dsh-whale-effort/` in the repository is the complete plugin directory and its `lib/` is already built, so no local build is needed.
@@ -81,7 +81,7 @@ Open a session, click the model entry next to the composer and choose **Effort**
 
 ### Ultra tier
 
-When the model exposes at least two real levels, the slider gains one extra **`Ultra`** stop:
+The slider gains one extra **`Ultra`** stop only when the model exposes at least two real levels and its highest real level is `xhigh` / `max`; models whose scale tops out lower (for example `low`/`medium`/`high`) keep a plain real-level slider whose ticks re-distribute over the real levels:
 
 - Selecting Ultra still submits the model's **real highest level (MAX)** id; Ultra is a display-only stop and never reaches the model directory or the request payload.
 - It also injects a "rigor contract" into the current session: define acceptance criteria first, evidence before claims, adversarial review, root-cause first, explicit stop conditions, and never edit tests to fit the implementation.

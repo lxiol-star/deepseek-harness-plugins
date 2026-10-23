@@ -143,24 +143,45 @@ export interface DisplayLevel {
   readonly ultra: boolean
 }
 
+/** Effort ids that denote a real ceiling tier Ultra can pin. */
+const CEILING_EFFORTS: ReadonlySet<string> = new Set(['xhigh', 'max'])
+
 /**
- * Build the display scale: the model's real levels plus a trailing Ultra entry.
+ * Whether a model's effort scale can carry the appended Ultra tier.
+ *
+ * Ultra is only offered when the model's highest real level is already a
+ * ceiling tier (`xhigh` / `max`): then "Ultra" means "stay at the real MAX and
+ * add the rigor policy". Models whose scale tops out lower (for example
+ * `low`/`medium`/`high`) get a plain real-level slider with no Ultra entry, so
+ * the track adapts to what the model actually exposes.
+ * @param levels - the model's real effort levels, in directory order.
+ * @returns whether the display scale appends Ultra.
+ */
+export function supportsUltra(levels: readonly EffortLevel[]): boolean {
+  if (levels.length < 2) return false
+  const top = levels[levels.length - 1]
+  return top !== undefined && CEILING_EFFORTS.has(top.id.trim().toLowerCase())
+}
+
+/**
+ * Build the display scale: the model's real levels plus, when the model can
+ * carry it, a trailing Ultra entry.
  *
  * Ultra is presentation-only. Committing it writes the model's highest real
  * effort id (see {@link effortIdForDisplay}); it never reaches the model
  * directory as an effort value of its own.
  * @param levels - the model's real effort levels, in directory order.
- * @returns the display scale; identical to `levels` when fewer than two exist.
+ * @returns the display scale; identical to `levels` when Ultra does not apply.
  */
 export function displayLevels(levels: readonly EffortLevel[]): readonly DisplayLevel[] {
   const real = levels.map((level) => ({ id: level.id, name: level.name, ultra: false }))
-  if (levels.length < 2) return real
+  if (!supportsUltra(levels)) return real
   return [...real, { id: ULTRA_DISPLAY_ID, name: 'Ultra', ultra: true }]
 }
 
 /** Whether the display scale carries the appended Ultra tier. */
 export function hasUltra(levels: readonly EffortLevel[]): boolean {
-  return levels.length >= 2
+  return supportsUltra(levels)
 }
 
 /**
