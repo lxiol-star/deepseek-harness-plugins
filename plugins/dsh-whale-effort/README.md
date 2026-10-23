@@ -53,11 +53,11 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 
 ### 方式一：Release 安装包（推荐）
 
-1. 从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.2) 下载 `dsh-whale-effort-0.2.2.tgz`。
+1. 从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases/tag/dsh-whale-effort-v0.2.3) 下载 `dsh-whale-effort-0.2.3.tgz`。
 2. 在 DSH **设置 → 插件 → 添加插件** 中选择该 `.tgz`；或在终端执行：
 
    ```sh
-   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.2.tgz
+   dsh plugin --profile desktop add /absolute/path/to/dsh-whale-effort-0.2.3.tgz
    ```
 
 3. **完全退出并重新打开 DSH**：Host 与 Client 两半分别加载，只刷新页面不会加载新的 Host 代码。
@@ -67,7 +67,7 @@ DSH 的推理强度默认是一个下拉选择。本插件沿用 DSH 原生模�
 在插件管理器的「包名或地址」中填入指定版本：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.2&path:/plugins/dsh-whale-effort
+github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.2.3&path:/plugins/dsh-whale-effort
 ```
 
 仓库里的 `plugins/dsh-whale-effort/` 就是完整插件目录；`lib/` 已构建，装上即可用，无需自行构建。

@@ -22,20 +22,20 @@ export const CSS = `
   box-sizing: border-box;
 }
 .re-effort-name {
-  margin-top: 2px;
+  margin-top: 0;
   color: var(--dsw-alias-label-secondary, #686c75);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 15px;
   text-align: center;
   overflow-wrap: anywhere;
 }
-.re-effort-ticks { position: relative; height: 16px; margin-top: 4px; }
+.re-effort-ticks { position: relative; height: 12px; margin-top: 2px; }
 .re-effort-tick {
   position: absolute;
   transform: translateX(-50%);
   color: var(--dsw-alias-label-tertiary, #9296a0);
-  font-size: 22px;
-  line-height: 16px;
+  font-size: 18px;
+  line-height: 12px;
   user-select: none;
 }
 .re-effort-tick.is-selected { color: var(--dsw-static-deepseek-500, #4d70ff); font-weight: 700; }
@@ -141,16 +141,16 @@ export const CSS = `
   transition: left 190ms cubic-bezier(.22,1,.36,1), transform 160ms ease, box-shadow 180ms ease;
   pointer-events: none;
 }
-.re-effort.is-chibi { padding-top: 12px; }
+.re-effort.is-chibi { padding-top: 10px; }
 /* Header row (lightning toggle left, fleet readout right) floats above the
    track; the extra top padding keeps the chibi thumb from painting over it. */
-.re-effort.has-head { padding-top: 24px; }
-.re-effort.is-chibi.has-head { padding-top: 36px; }
-.re-effort.is-chibi .re-effort-ticks { margin-top: 14px; }
+.re-effort.has-head { padding-top: 22px; }
+.re-effort.is-chibi.has-head { padding-top: 30px; }
+.re-effort.is-chibi .re-effort-ticks { margin-top: 8px; }
 .re-effort.is-chibi .re-effort-knob {
   left: clamp(10px, var(--re-progress), calc(100% - 10px));
-  width: 40px;
-  height: 55px;
+  width: 36px;
+  height: 50px;
   border: 0;
   border-radius: 8px;
   background-color: transparent;
@@ -328,8 +328,8 @@ export const CSS = `
 .re-advanced {
   padding: 14px;
 }
-.re-native-effort .re-advanced { padding: 10px 14px 8px; }
-.re-native-effort .re-effort-name { line-height: 18px; }
+.re-native-effort .re-advanced { padding: 8px 12px 6px; }
+.re-native-effort .re-effort-name { line-height: 15px; }
 .re-effort-unavailable {
   padding: 10px 14px 0;
   text-align: center;
@@ -759,7 +759,7 @@ body[data-ds-dark-theme] .re-adapt-panel {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  height: 20px;
+  height: 18px;
 }
 .re-effort-turbo-note {
   color: var(--dsw-alias-label-tertiary, #9296a0);
@@ -767,7 +767,9 @@ body[data-ds-dark-theme] .re-adapt-panel {
   line-height: 1.4;
   text-align: center;
 }
-.re-effort-policy { margin-top: 4px; }
+.re-effort-policy { margin-top: 2px; }
+.re-effort-policy .we-policy__chip { height: 20px; }
+.re-effort-policy .we-policy { border-radius: 999px; }
 
 .re-skin-group {
   display: flex;
