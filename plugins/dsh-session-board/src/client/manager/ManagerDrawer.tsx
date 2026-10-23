@@ -12,8 +12,8 @@
  * phase, the workspaces service for titles, and the manager controller for
  * the host mirror (selection, tasks, retained chat reference).
  */
-import { useCallback, useMemo, type ReactElement, type ReactNode } from 'react'
-import { TASK_STATUS_KEYS, managerPhase } from '../../shared/manager.ts'
+import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react'
+import { TASK_STATUS_KEYS, managerPhase, managerSessionVisible } from '../../shared/manager.ts'
 import type { BoardEntry, BoardGroup } from '../../shared/types.ts'
 import type { SessionReference, SessionStatusSnapshot, WorkspaceSnapshot } from '../dsh.ts'
 import { useSnapshot, type Translate } from '../hooks.ts'
@@ -208,11 +208,17 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
   const statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, value => value)
 
   const rows = useMemo(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot])
+  /** Archived sessions are hidden by default in the manager's session list. */
+  const [showArchived, setShowArchived] = useState(false)
   const selectedWorkspaces = useMemo(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds])
   const selectedSessions = useMemo(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds])
   const focused = useMemo(
     () => rows.find(row => row.id === snapshot.focusedWorkspaceId) ?? null,
     [rows, snapshot.focusedWorkspaceId],
+  )
+  const focusedEntries = useMemo(
+    () => focused === null ? [] : focused.entries.filter(entry => managerSessionVisible(entry, showArchived)),
+    [focused, showArchived],
   )
   const selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length
   const managerStatus = snapshot.managerSessionId === null
@@ -308,14 +314,24 @@ export function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }:
               )}
           </section>
           <section className="sb-manager-section sb-manager-sessions">
-            <h2 className="sb-manager-section-title">{t('manager.sessions')}</h2>
+            <div className="sb-manager-section-head">
+              <h2 className="sb-manager-section-title">{t('manager.sessions')}</h2>
+              <label className="sb-manager-filter">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => { setShowArchived(event.target.checked) }}
+                />
+                <span>{t('manager.showArchived')}</span>
+              </label>
+            </div>
             {focused === null
               ? <p className="sb-manager-empty">{t('manager.focusHint')}</p>
-              : focused.entries.length === 0
-                ? <p className="sb-manager-empty">{t('manager.sessionEmpty')}</p>
+              : focusedEntries.length === 0
+                ? <p className="sb-manager-empty">{t(focused.entries.length === 0 ? 'manager.sessionEmpty' : 'manager.sessionArchivedHidden')}</p>
                 : (
                   <ul className="sb-manager-list">
-                    {focused.entries.map(entry => (
+                    {focusedEntries.map(entry => (
                       <SessionRowView
                         key={entry.id}
                         entry={entry}

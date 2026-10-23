@@ -787,7 +787,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.2",
+      "data-session-board-version": "0.8.3",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -811,7 +811,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.2",
+      "data-session-board-version": "0.8.3",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1311,7 +1311,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.2",
+        "data-session-board-version": "0.8.3",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2267,6 +2267,24 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-workspaces { flex: 0 1 auto; max-height: 34%; }
 .sb-manager-sessions { flex: 1 1 auto; }
 .sb-manager-tasks { flex: 0 1 auto; max-height: 30%; }
+.sb-manager-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sb-manager-section-head .sb-manager-section-title { margin: 0; }
+.sb-manager-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-manager-filter input { width: 12px; height: 12px; margin: 0; }
 .sb-manager-section-title {
   margin: 0 0 6px;
   font-size: 10px;
@@ -3022,6 +3040,8 @@ var NS = "session-board", en = {
   "manager.workspaceEmpty": "No workspaces on the board yet",
   "manager.workspaceMeta": "{count} sessions \xB7 {running} running",
   "manager.sessionEmpty": "No sessions in this workspace",
+  "manager.showArchived": "Show archived",
+  "manager.sessionArchivedHidden": "No active sessions here (archived sessions are hidden)",
   "manager.taskEmpty": "No tasks yet",
   "manager.openTask": "Open the session of {title}",
   "manager.ariaDrawer": "Manager panel",
@@ -3275,6 +3295,8 @@ var NS = "session-board", en = {
   "manager.workspaceEmpty": "\u770B\u677F\u4E0A\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A",
   "manager.workspaceMeta": "{count} \u4E2A\u4F1A\u8BDD \xB7 {running} \u4E2A\u8FD0\u884C\u4E2D",
   "manager.sessionEmpty": "\u8BE5\u5DE5\u4F5C\u533A\u8FD8\u6CA1\u6709\u4F1A\u8BDD",
+  "manager.showArchived": "\u663E\u793A\u5DF2\u5F52\u6863",
+  "manager.sessionArchivedHidden": "\u8BE5\u5DE5\u4F5C\u533A\u6CA1\u6709\u672A\u5F52\u6863\u4F1A\u8BDD\uFF08\u5DF2\u5F52\u6863\u5DF2\u9690\u85CF\uFF09",
   "manager.taskEmpty": "\u8FD8\u6CA1\u6709\u4EFB\u52A1",
   "manager.openTask": "\u6253\u5F00\u4EFB\u52A1 {title} \u7684\u4F1A\u8BDD",
   "manager.ariaDrawer": "\u7BA1\u7406\u9762\u677F",
@@ -4818,6 +4840,9 @@ var TASK_STATUS_KEYS = {
   failed: "task.status.failed",
   orphaned: "task.status.orphaned"
 };
+function managerSessionVisible(facts, showArchived) {
+  return showArchived ? !0 : facts.archivedAt === void 0 && facts.clientArchived !== !0;
+}
 
 // src/client/manager/controller.ts
 var MANAGER_STORE_KEY = "dsh.session-board.manager.v1", MANAGER_SELECTION_DEBOUNCE_MS = 450, MANAGER_POLL_MS = 4e3, MANAGER_REFERENCE_SOURCE = "sessionBoardManager";
@@ -5427,9 +5452,12 @@ function SessionRowView({ entry, selected, t, onToggle }) {
   ] });
 }
 function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
-  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react10.useMemo)(
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), [showArchived, setShowArchived] = (0, import_react10.useState)(!1), selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), focused = (0, import_react10.useMemo)(
     () => rows.find((row) => row.id === snapshot.focusedWorkspaceId) ?? null,
     [rows, snapshot.focusedWorkspaceId]
+  ), focusedEntries = (0, import_react10.useMemo)(
+    () => focused === null ? [] : focused.entries.filter((entry) => managerSessionVisible(entry, showArchived)),
+    [focused, showArchived]
   ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react10.useCallback)((id) => {
     manager.toggleWorkspaceId(id);
   }, [manager]), focusWorkspace = (0, import_react10.useCallback)((id) => {
@@ -5519,8 +5547,23 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
           )) })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
-          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focused.entries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.sessionEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focused.entries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-section-head", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }),
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("label", { className: "sb-manager-filter", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: showArchived,
+                  onChange: (event) => {
+                    setShowArchived(event.target.checked);
+                  }
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { children: t("manager.showArchived") })
+            ] })
+          ] }),
+          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focusedEntries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t(focused.entries.length === 0 ? "manager.sessionEmpty" : "manager.sessionArchivedHidden") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focusedEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             SessionRowView,
             {
               entry,

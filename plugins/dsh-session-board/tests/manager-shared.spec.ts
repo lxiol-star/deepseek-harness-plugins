@@ -7,6 +7,7 @@ import {
   buildSelectionMessage,
   isManagerTaskStatus,
   managerPhase,
+  managerSessionVisible,
   normalizeSelection,
   parseManagerWakeStatus,
   previewText,
@@ -195,5 +196,19 @@ describe('TASK_STATUS_KEYS', () => {
     for (const status of MANAGER_TASK_STATUSES) {
       expect(TASK_STATUS_KEYS[status]).toBe(`task.status.${status}`)
     }
+  })
+})
+
+describe('managerSessionVisible', () => {
+  it('hides both archive kinds unless archived rows are shown', () => {
+    expect(managerSessionVisible({}, false)).toBe(true)
+    expect(managerSessionVisible({ archivedAt: 1 }, false)).toBe(false)
+    expect(managerSessionVisible({ clientArchived: true }, false)).toBe(false)
+    expect(managerSessionVisible({ archivedAt: 1, clientArchived: true }, false)).toBe(false)
+  })
+  it('shows every row when showArchived is on', () => {
+    expect(managerSessionVisible({ archivedAt: 1 }, true)).toBe(true)
+    expect(managerSessionVisible({ clientArchived: true }, true)).toBe(true)
+    expect(managerSessionVisible({}, true)).toBe(true)
   })
 })

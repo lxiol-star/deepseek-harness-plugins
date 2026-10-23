@@ -300,3 +300,22 @@ export const TASK_STATUS_KEYS: Readonly<Record<ManagerTaskStatus, string>> = {
   failed: 'task.status.failed',
   orphaned: 'task.status.orphaned',
 }
+
+/** Archive facts the manager session list needs; structural so callers stay UI-free. */
+export interface ManagerSessionArchiveFacts {
+  readonly archivedAt?: number
+  readonly clientArchived?: boolean
+}
+
+/**
+ * Whether one session belongs in the manager panel's default session list.
+ * Archived sessions are hidden by default (both the plugin's Wiki archive and
+ * the DSH client archive); the caller can opt in with `showArchived`.
+ * @param facts - archive markers carried by one BoardEntry.
+ * @param showArchived - whether the archived rows are currently shown.
+ * @returns true when the row should be rendered.
+ */
+export function managerSessionVisible(facts: ManagerSessionArchiveFacts, showArchived: boolean): boolean {
+  if (showArchived) return true
+  return facts.archivedAt === undefined && facts.clientArchived !== true
+}

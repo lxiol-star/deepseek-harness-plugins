@@ -17,7 +17,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 
 会话头部新增「管理中心」按钮，点开是一个右侧抽屉：
 
-- **上半屏是工作区看板**：列出所有工作区及其会话数/运行状态；点一个工作区，下方列出它的会话，可勾选会话或整个工作区。
+- **上半屏是工作区看板**：列出所有工作区及其会话数/运行状态；点一个工作区，下方列出它的会话，可勾选会话或整个工作区。会话列表**默认隐藏已归档会话**（插件 Wiki 归档与 DSH 客户端归档都算），会话标题右侧的「显示已归档」可临时展开。
 - **「发送选区」**：把当前勾选变成一条普通用户消息发给管理 Agent（走宿主官方 `session.prompt`，可在会话日志里审计）；勾选本身只更新宿主的选区镜像，不产生模型调用。
 - **下半屏是管理 Agent 的官方聊天**：输入框、模型选择、流式输出、工具卡片全部复用主界面会话，不是另写的一套 UI；也可以点「在主界面打开」继续。
 - **管理 Agent**：一个普通 DSH 会话（标题「DSH 管理台」，懒创建在工作区 `~/Documents/deepseek-harness/dsh-console`，可用环境变量 `DSH_SESSION_BOARD_MANAGER_DIR` 覆盖目录）。它可随时冷恢复，空闲不消耗 token；只有它拥有下面这些工具，普通会话看不到。
@@ -48,10 +48,10 @@ git remote 里内嵌的凭据（如 `https://x-access-token:TOKEN@host/repo.git`
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.8.2.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.8.3.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.2.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.3.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

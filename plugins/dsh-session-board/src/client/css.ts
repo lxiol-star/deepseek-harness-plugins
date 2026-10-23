@@ -908,6 +908,24 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-workspaces { flex: 0 1 auto; max-height: 34%; }
 .sb-manager-sessions { flex: 1 1 auto; }
 .sb-manager-tasks { flex: 0 1 auto; max-height: 30%; }
+.sb-manager-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sb-manager-section-head .sb-manager-section-title { margin: 0; }
+.sb-manager-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-manager-filter input { width: 12px; height: 12px; margin: 0; }
 .sb-manager-section-title {
   margin: 0 0 6px;
   font-size: 10px;

@@ -26,7 +26,7 @@
 
 ```text
 # 会话看板
-github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.2&path:/plugins/dsh-session-board
+github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.3&path:/plugins/dsh-session-board
 # 推理强度滑条
 github:lxiol-star/deepseek-harness-plugins#dsh-whale-effort-v0.1.1&path:/plugins/dsh-whale-effort
 # 思考弹球桌宠

@@ -4,7 +4,7 @@
 >
 > 适用范围：`dsh-session-board`（本仓库主力插件）、`dsh-whale-effort`（合并插件）、`dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`。
 >
-> 最后更新：2026-10-23（`dsh-session-board` 0.8.2、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.3.9、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
+> 最后更新：2026-10-23（`dsh-session-board` 0.8.3、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.3.9、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
 >
 > 阅读顺序：§0 是可直接粘贴给新会话的**交接提示词**；§1–§4 是现状与插件地图；§5–§6 是开发/发布闭环；§7–§12 是规则、排障、权威索引、风险与命令卡。
 
@@ -20,7 +20,7 @@
 
 当前状态（2026-10-22）
 - main 与 origin 同步；四个插件都已发布 Release：
-  - dsh-session-board 0.8.2（最新）：会话看板 + 批量归档提炼（Wiki 引擎自包含、设置页可配）+ 「管理中心」常驻管理 Agent + 项目树（按 git origin 归并多分支工作区）+ 项目协调会话（项目级派任务/会话间消息/worker 回报）+「仅归档」动作/视图。
+  - dsh-session-board 0.8.3（最新）：会话看板 + 批量归档提炼（Wiki 引擎自包含、设置页可配）+ 「管理中心」常驻管理 Agent + 项目树（按 git origin 归并多分支工作区）+ 项目协调会话（项目级派任务/会话间消息/worker 回报）+「仅归档」动作/视图。
   - dsh-hide-empty-workspaces 0.3.9：侧栏视图切换（进行中 / 已归档 / 工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载并重挂载第三方客户端插件（旧标签页也会重建），不刷新页面、不重启、不丢会话。
   - dsh-workspace-autoregister 0.1.2：Host-only，自动把新工作区目录注册进列表；0.1.1 起把 HANDOFF.md 作为首个会话消息；0.1.2 起嵌套 worktree 会同时注册项目根，原生「按工作区树」可按路径归组。
   - dsh-think-bounce-pet 0.1.1：收录的上游构建产物，无本地 src，只在需要时打补丁。

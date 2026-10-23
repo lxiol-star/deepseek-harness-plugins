@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-board",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Session board for DeepSeek Harness with workspace trees, archive filters and optional Wiki synthesis.",
   "type": "module",
   "engines": {
