@@ -141,11 +141,7 @@ export const CSS = `
   transition: left 190ms cubic-bezier(.22,1,.36,1), transform 160ms ease, box-shadow 180ms ease;
   pointer-events: none;
 }
-.re-effort.is-chibi { padding-top: 10px; }
-/* Header row (lightning toggle left, fleet readout right) floats above the
-   track; the extra top padding keeps the chibi thumb from painting over it. */
-.re-effort.has-head { padding-top: 22px; }
-.re-effort.is-chibi.has-head { padding-top: 30px; }
+.re-effort.is-chibi { padding-top: 12px; }
 .re-effort.is-chibi .re-effort-ticks { margin-top: 8px; }
 .re-effort.is-chibi .re-effort-knob {
   left: clamp(10px, var(--re-progress), calc(100% - 10px));
@@ -750,16 +746,31 @@ body[data-ds-dark-theme] .re-adapt-panel {
      surface, where a white label is unreadable. */
   color: var(--dsw-static-deepseek-500, #4d70ff);
 }
-.re-effort-head {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+/* The lightning switch sits at the very start of the slider row; the readout
+   (when the fleet has data) rides the right edge of the foot row. */
+.re-effort-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 18px;
+  gap: 12px;
+}
+.re-effort-row > .re-effort-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Ticks start where the track starts, after the bolt slot (19+12px). */
+.re-effort.has-bolt .re-effort-ticks { margin-left: 31px; }
+.re-effort-foot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 15px;
+}
+.re-effort-foot .we-rate {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 .re-effort-turbo-note {
   color: var(--dsw-alias-label-tertiary, #9296a0);

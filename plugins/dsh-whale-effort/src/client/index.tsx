@@ -770,31 +770,30 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
   const turboAvailable = turbo !== null && !turboUnavailable
   const normalizedRate = Math.min(1, turboState.rate / RATE_FULL_SCALE)
   const policyText = turboState.policy
+  // Ultra already names its level in the accent-colored tick label, so the
+  // black name row is dropped there; other levels keep the centered name.
+  const showName = !selectedUltra
+  const showRate = turboAvailable && (turboState.rate > 0 || turboState.generating || turboState.agents > 0)
+  const showFoot = showName || showRate
 
   return (
     <>
       {notice === null ? null : <div className="re-model-status" role="status">{notice}</div>}
       <div
-        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${turboAvailable ? ' has-head' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}${selectedUltra ? ' is-ultra' : ''}`}
+        className={`re-effort${chibiThumb ? ' is-chibi' : ''}${turboAvailable ? ' has-bolt' : ''}${dragging ? ' is-dragging' : ''}${busy ? ' is-busy' : ''}${error === null ? '' : ' is-error'}${selectedUltra ? ' is-ultra' : ''}`}
         title={title}
       >
-        {turboAvailable ? (
-          <div className="re-effort-head" style={{ '--we-rate': normalizedRate } as CSSProperties}>
+        <div className="re-effort-row" style={{ '--we-rate': normalizedRate } as CSSProperties}>
+          {turboAvailable ? (
             <BoltToggle
               on={lightning}
               disabled={busy}
               label={t('effort.lightning.aria')}
               onToggle={toggleLightning}
             />
-            <RateReadout
-              total={turboState.rate}
-              generating={turboState.generating || turboState.agents > 0}
-              label={t('effort.rate')}
-            />
-          </div>
-        ) : null}
-        <div
-          className="re-effort-slider"
+          ) : null}
+          <div
+            className="re-effort-slider"
           data-top={isTop ? 'true' : undefined}
           data-ultra={selectedUltra ? 'true' : undefined}
           data-lightning={lightning ? 'true' : undefined}
@@ -848,6 +847,7 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
             onKeyDown={onKeyDown}
           />
           {selectedIndex < 0 ? null : <span className="re-effort-knob" aria-hidden="true" />}
+          </div>
         </div>
         <div className="re-effort-ticks" aria-hidden="true">
           {display.map((level, index) => (
@@ -855,7 +855,18 @@ function EffortSlider({ directory, t, locked = false, sessionId, turbo }: Effort
               style={{ left: `${index / Math.max(1, count - 1) * 100}%` }} title={level.ultra ? t('effort.ultra') : level.name}>{level.ultra ? 'Ultra' : '·'}</span>
           ))}
         </div>
-        <div className="re-effort-name" role="status" aria-live="polite">{effortName}</div>
+        {showFoot ? (
+          <div className="re-effort-foot">
+            {showName ? <div className="re-effort-name" role="status" aria-live="polite">{effortName}</div> : null}
+            {showRate ? (
+              <RateReadout
+                total={turboState.rate}
+                generating={turboState.generating || turboState.agents > 0}
+                label={t('effort.rate')}
+              />
+            ) : null}
+          </div>
+        ) : null}
         {turboNotice === null ? null : <div className="re-effort-turbo-note" role="status">{turboNotice}</div>}
         {policyText === '' ? null : (
           <div className="re-effort-policy">

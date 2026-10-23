@@ -385,11 +385,7 @@ var CSS = `
   transition: left 190ms cubic-bezier(.22,1,.36,1), transform 160ms ease, box-shadow 180ms ease;
   pointer-events: none;
 }
-.re-effort.is-chibi { padding-top: 10px; }
-/* Header row (lightning toggle left, fleet readout right) floats above the
-   track; the extra top padding keeps the chibi thumb from painting over it. */
-.re-effort.has-head { padding-top: 22px; }
-.re-effort.is-chibi.has-head { padding-top: 30px; }
+.re-effort.is-chibi { padding-top: 12px; }
 .re-effort.is-chibi .re-effort-ticks { margin-top: 8px; }
 .re-effort.is-chibi .re-effort-knob {
   left: clamp(10px, var(--re-progress), calc(100% - 10px));
@@ -994,16 +990,31 @@ body[data-ds-dark-theme] .re-adapt-panel {
      surface, where a white label is unreadable. */
   color: var(--dsw-static-deepseek-500, #4d70ff);
 }
-.re-effort-head {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+/* The lightning switch sits at the very start of the slider row; the readout
+   (when the fleet has data) rides the right edge of the foot row. */
+.re-effort-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 18px;
+  gap: 12px;
+}
+.re-effort-row > .re-effort-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Ticks start where the track starts, after the bolt slot (19+12px). */
+.re-effort.has-bolt .re-effort-ticks { margin-left: 31px; }
+.re-effort-foot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 15px;
+}
+.re-effort-foot .we-rate {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 .re-effort-turbo-note {
   color: var(--dsw-alias-label-tertiary, #9296a0);
@@ -3057,17 +3068,17 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
     // EffectsRail's geometry reads the knob inset: the chibi thumb clamps at
     // 10px while the round thumb clamps at 14px (see styles.ts).
     "--we-inset": chibiThumb ? "10px" : "14px"
-  }, title = selectedUltra ? t("effort.ultra.description") : error === null ? t("effort.title", { effort: effortName }) : t("effort.failed", { error }), turboAvailable = turbo !== null && !turboUnavailable, normalizedRate = Math.min(1, turboState.rate / RATE_FULL_SCALE), policyText = turboState.policy;
+  }, title = selectedUltra ? t("effort.ultra.description") : error === null ? t("effort.title", { effort: effortName }) : t("effort.failed", { error }), turboAvailable = turbo !== null && !turboUnavailable, normalizedRate = Math.min(1, turboState.rate / RATE_FULL_SCALE), policyText = turboState.policy, showName = !selectedUltra, showRate = turboAvailable && (turboState.rate > 0 || turboState.generating || turboState.agents > 0), showFoot = showName || showRate;
   return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
     notice === null ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-model-status", role: "status", children: notice }),
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
       "div",
       {
-        className: `re-effort${chibiThumb ? " is-chibi" : ""}${turboAvailable ? " has-head" : ""}${dragging ? " is-dragging" : ""}${busy ? " is-busy" : ""}${error === null ? "" : " is-error"}${selectedUltra ? " is-ultra" : ""}`,
+        className: `re-effort${chibiThumb ? " is-chibi" : ""}${turboAvailable ? " has-bolt" : ""}${dragging ? " is-dragging" : ""}${busy ? " is-busy" : ""}${error === null ? "" : " is-error"}${selectedUltra ? " is-ultra" : ""}`,
         title,
         children: [
-          turboAvailable ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "re-effort-head", style: { "--we-rate": normalizedRate }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "re-effort-row", style: { "--we-rate": normalizedRate }, children: [
+            turboAvailable ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
               BoltToggle,
               {
                 on: lightning,
@@ -3075,75 +3086,67 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
                 label: t("effort.lightning.aria"),
                 onToggle: toggleLightning
               }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-              RateReadout,
+            ) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+              "div",
               {
-                total: turboState.rate,
-                generating: turboState.generating || turboState.agents > 0,
-                label: t("effort.rate")
+                className: "re-effort-slider",
+                "data-top": isTop ? "true" : void 0,
+                "data-ultra": selectedUltra ? "true" : void 0,
+                "data-lightning": lightning ? "true" : void 0,
+                "data-we-skin": skin,
+                style,
+                children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-track", "aria-hidden": "true" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+                    EffectsRail,
+                    {
+                      progress: progress / 100,
+                      dragging,
+                      skin,
+                      ultra: selectedUltra,
+                      lightning,
+                      rate: normalizedRate,
+                      top: isTop
+                    }
+                  ),
+                  /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+                    "input",
+                    {
+                      ref: inputRef,
+                      className: "re-effort-input",
+                      type: "range",
+                      min: "0",
+                      max: count - 1,
+                      step: "0.01",
+                      value: preview,
+                      disabled: busy,
+                      "aria-label": t("effort.label"),
+                      "aria-valuetext": effortName,
+                      onChange: (event) => {
+                        if (pointerActiveRef.current || committingRef.current || busy) return;
+                        let raw = Number(event.currentTarget.value);
+                        showPointerPreview(raw), commit(raw);
+                      },
+                      onPointerDown: (event) => {
+                        event.preventDefault(), event.currentTarget.focus(), beginDragging(event.currentTarget, event.pointerId, event.clientX);
+                      },
+                      onPointerMove: (event) => moveDragging(event.currentTarget, event.pointerId, event.clientX),
+                      onPointerUp: (event) => stopDragging(event.currentTarget, event.pointerId, event.clientX),
+                      onPointerCancel: (event) => {
+                        !pointerActiveRef.current || activePointerIdRef.current !== event.pointerId || (event.currentTarget.hasPointerCapture(event.pointerId) && event.currentTarget.releasePointerCapture(event.pointerId), rollback());
+                      },
+                      onBlur: (event) => {
+                        stopDragging(event.currentTarget);
+                      },
+                      onKeyDown
+                    }
+                  ),
+                  selectedIndex < 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "re-effort-knob", "aria-hidden": "true" })
+                ]
               }
             )
-          ] }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
-            "div",
-            {
-              className: "re-effort-slider",
-              "data-top": isTop ? "true" : void 0,
-              "data-ultra": selectedUltra ? "true" : void 0,
-              "data-lightning": lightning ? "true" : void 0,
-              "data-we-skin": skin,
-              style,
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-track", "aria-hidden": "true" }),
-                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-                  EffectsRail,
-                  {
-                    progress: progress / 100,
-                    dragging,
-                    skin,
-                    ultra: selectedUltra,
-                    lightning,
-                    rate: normalizedRate,
-                    top: isTop
-                  }
-                ),
-                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-                  "input",
-                  {
-                    ref: inputRef,
-                    className: "re-effort-input",
-                    type: "range",
-                    min: "0",
-                    max: count - 1,
-                    step: "0.01",
-                    value: preview,
-                    disabled: busy,
-                    "aria-label": t("effort.label"),
-                    "aria-valuetext": effortName,
-                    onChange: (event) => {
-                      if (pointerActiveRef.current || committingRef.current || busy) return;
-                      let raw = Number(event.currentTarget.value);
-                      showPointerPreview(raw), commit(raw);
-                    },
-                    onPointerDown: (event) => {
-                      event.preventDefault(), event.currentTarget.focus(), beginDragging(event.currentTarget, event.pointerId, event.clientX);
-                    },
-                    onPointerMove: (event) => moveDragging(event.currentTarget, event.pointerId, event.clientX),
-                    onPointerUp: (event) => stopDragging(event.currentTarget, event.pointerId, event.clientX),
-                    onPointerCancel: (event) => {
-                      !pointerActiveRef.current || activePointerIdRef.current !== event.pointerId || (event.currentTarget.hasPointerCapture(event.pointerId) && event.currentTarget.releasePointerCapture(event.pointerId), rollback());
-                    },
-                    onBlur: (event) => {
-                      stopDragging(event.currentTarget);
-                    },
-                    onKeyDown
-                  }
-                ),
-                selectedIndex < 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "re-effort-knob", "aria-hidden": "true" })
-              ]
-            }
-          ),
+          ] }),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-ticks", "aria-hidden": "true", children: display.map((level, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
             "span",
             {
@@ -3154,7 +3157,17 @@ function EffortSlider({ directory, t, locked = !1, sessionId, turbo }) {
             },
             level.id
           )) }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-name", role: "status", "aria-live": "polite", children: effortName }),
+          showFoot ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "re-effort-foot", children: [
+            showName ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-name", role: "status", "aria-live": "polite", children: effortName }) : null,
+            showRate ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+              RateReadout,
+              {
+                total: turboState.rate,
+                generating: turboState.generating || turboState.agents > 0,
+                label: t("effort.rate")
+              }
+            ) : null
+          ] }) : null,
           turboNotice === null ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-turbo-note", role: "status", children: turboNotice }),
           policyText === "" ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "re-effort-policy", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(PolicyChip, { text: policyText, title: t("effort.policy"), expandLabel: t("effort.policy") }) }),
           error === null ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "re-effort-sr", role: "status", children: error })
