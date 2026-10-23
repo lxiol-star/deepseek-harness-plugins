@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-effort",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Whale-girl reasoning-effort slider for DeepSeek Harness: the native model selector's effort pane, sci-fi energy skins, an Ultra tier, lightning orchestration and a live subagent tok/s readout.",
   "type": "module",
   "engines": {

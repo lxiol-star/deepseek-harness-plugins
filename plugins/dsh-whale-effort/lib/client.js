@@ -557,7 +557,11 @@ var CSS = `
 .re-native-effort {
   width: min(312px, calc(100vw - 40px));
   max-height: min(312px, calc(100vh - 144px));
-  overflow: auto;
+  /* The slider's effect layers paint a few pixels past the track (thumb aura,
+     leading glow). Clip only the horizontal axis so those never surface as a
+     horizontal scrollbar; vertical scrolling stays available for tall guides. */
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
 }
 .re-advanced {
@@ -976,7 +980,9 @@ body[data-ds-dark-theme] .re-adapt-panel {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .06em;
-  transform: translateX(-50%) translateY(1px);
+  /* Right-align the wider Ultra label inside the track: centering it would
+     stick half of the word past the track and force a pane-level scrollbar. */
+  transform: translateX(-100%) translateY(1px);
 }
 .re-effort-tick.is-ultra.is-selected { color: #fff; }
 .re-effort-turbo {
