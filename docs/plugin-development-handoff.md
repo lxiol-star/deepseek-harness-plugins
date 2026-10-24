@@ -2,9 +2,9 @@
 
 > 面向接手本仓库插件开发的同学（或 AI Agent）。读完应当能独立完成一次「改代码 → 验证 → 打包 → 发布 → 让用户升级」的闭环。
 >
-> 适用范围：`dsh-session-board`（本仓库主力插件）、`dsh-whale-effort`（合并插件）、`dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`。
+> 适用范围：`dsh-session-board`（本仓库主力插件）、`dsh-whale-effort`（合并插件）、`dsh-hide-empty-workspaces`、`dsh-workspace-autoregister`、`dsh-think-bounce-pet`、`dsh-pet`。
 >
-> 最后更新：2026-10-23（`dsh-session-board` 0.8.4、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.4.0、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1）。
+> 最后更新：2026-10-23（`dsh-session-board` 0.8.4、`dsh-whale-effort` 0.2.4、`dsh-hide-empty-workspaces` 0.4.0、`dsh-workspace-autoregister` 0.1.2、`dsh-think-bounce-pet` 0.1.1、`dsh-pet` 0.3.8）。
 >
 > 阅读顺序：§0 是可直接粘贴给新会话的**交接提示词**；§1–§4 是现状与插件地图；§5–§6 是开发/发布闭环；§7–§12 是规则、排障、权威索引、风险与命令卡。
 
@@ -24,6 +24,7 @@
   - dsh-hide-empty-workspaces 0.3.9：侧栏视图切换（进行中 / 已归档 / 工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载并重挂载第三方客户端插件（旧标签页也会重建），不刷新页面、不重启、不丢会话。
   - dsh-workspace-autoregister 0.1.2：Host-only，自动把新工作区目录注册进列表；0.1.1 起把 HANDOFF.md 作为首个会话消息；0.1.2 起嵌套 worktree 会同时注册项目根，原生「按工作区树」可按路径归组。
   - dsh-think-bounce-pet 0.1.1：收录的上游构建产物，无本地 src，只在需要时打补丁。
+  - dsh-pet 0.3.8：上游 PC2005-cloud/dsh-pet 的完整发布包 vendored 副本（MIT，含 src/lib/assets/Electron helper），以本仓库 `plugins/dsh-pet/` 为固定安装源；代码改动优先回上游。
 - 先跑通闭环：cd plugins/dsh-session-board && DSH_REPO=<DSH 源码检出> npm run check
   （2026-10-22 基线：40 个 spec 文件 / 538 个用例全绿）。
 
@@ -63,6 +64,7 @@
 | `dsh-hide-empty-workspaces` | 仅 Client（手写 `lib/client.js`，无 `src/`、无构建） | 0.4.0 | 原生侧栏视图切换（进行中/已归档/工作空间）、归档按工作区分组、空白会话宽限期、设置页；「重新加载客户端插件」强制卸载/重挂载第三方客户端插件（旧标签页也会重建），不刷新页面/不重启 |
 | `dsh-workspace-autoregister` | 仅 Host（手写 `lib/index.js`，无构建） | 0.1.2 | 监听成功工具调用的参数，把新出现的工作区目录登记进列表、建首个空白会话、注入 `HANDOFF.md`；嵌套 worktree 同时注册项目主检出根，供原生工作区树归组 |
 | `dsh-think-bounce-pet` | 上游构建产物 | 0.1.1 | 收录社区插件（MIT），仓库里没有上游 `src/`，只在需要时打补丁/加回归测试 |
+| `dsh-pet` | 上游完整发布包（含 src/lib/assets/runtime） | 0.3.8 | vendored 自 `PC2005-cloud/dsh-pet`（MIT），固定安装/分发副本；上游是代码真源 |
 
 插件目录规范：`plugins/<npm 包名>/`，各自声明 `version`、入口、依赖、README、CHANGELOG。发布物是各插件独立的 `.tgz`，**版本号和 tag 按插件独立**（`dsh-session-board-v0.5.1` 这种格式）。`dsh-session-board` 与 `dsh-whale-effort` 有 TS 源码与构建步骤；另外两个手写 JS 插件直接维护 `lib/`，`check` 只有 Node 测试（见 §5）。
 
