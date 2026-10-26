@@ -5,6 +5,10 @@
  * of covering the chat. Collapse state and width belong to the caller (they
  * are persisted), while the drag gesture owns a local width so the store is
  * written once per gesture instead of once per frame.
+ *
+ * The header row carries the shell's window-drag mark, so dragging the panel's
+ * title bar moves the DSH window on the macOS desktop exactly like the native
+ * panel headers do. Its controls opt out of the drag region and stay clickable.
  */
 import {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -16,6 +20,7 @@ import { BoardScroll } from './BoardList.tsx'
 import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts'
 import type { Translate } from './hooks.ts'
 import { useDocumentHidden } from './hooks.ts'
+import { boardPlatformMarker } from './platform.ts'
 
 /** Narrowest and widest the column may be dragged, in pixels. */
 export const DOCK_MIN_WIDTH = 260
@@ -27,14 +32,6 @@ export const DOCK_RAIL_WIDTH = 40
 export function clampDockWidth(width: number): number {
   if (!Number.isFinite(width)) return DOCK_MIN_WIDTH
   return Math.min(DOCK_MAX_WIDTH, Math.max(DOCK_MIN_WIDTH, Math.round(width)))
-}
-
-/** Descendants of a drag surface that keep their own pointer behavior. */
-const INTERACTIVE_TARGET = 'button, input, select, textarea, a, [role="button"], [contenteditable="true"]'
-
-/** Whether a press on `target` should stay a click instead of starting a drag. */
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(INTERACTIVE_TARGET) !== null
 }
 
 /** Props of {@link BoardDock}. */
@@ -104,17 +101,11 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   const hidden = useDocumentHidden()
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
 
-  // Both the header and the right edge strip start the same gesture; the
-  // pointer capture makes the surface that received the press own the rest of
-  // the drag, so the shared move/end handlers keep working from either one.
-  const beginDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
-    // A press that starts on a control is a click on that control, not a drag.
-    if (isInteractiveTarget(event.target)) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    const startWidth = clampDockWidth(width)
-    dragState.current = { startX: event.clientX, startWidth, pointerId: event.pointerId, frame: null, latest: startWidth }
+    dragState.current = { startX: event.clientX, startWidth: clampDockWidth(width), pointerId: event.pointerId, frame: null, latest: clampDockWidth(width) }
     setDragging(true)
   }, [width])
 
@@ -161,7 +152,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.8.5"
+        data-session-board-version="0.8.6"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -192,7 +183,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.8.5"
+        data-session-board-version="0.8.6"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}
@@ -206,15 +197,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
         <span aria-hidden="true">▦</span><span>{t('panel.title')}</span><span>{total}</span>
       </button>
       <div className="sb-dock-body">
-        <div
-          className="sb-head"
-          title={t('action.resize')}
-          onPointerDown={beginDrag}
-          onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onLostPointerCapture={endDrag}
-        >
+        <div className="sb-head" data-window-drag data-platform={boardPlatformMarker()}>
           <span className="sb-title">{t('panel.title')}</span>
           <span className="sb-count">{total}</span>
           <IconButton label={t('action.openBoard')} onClick={onOpenBoard}>
@@ -260,7 +243,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
         role="separator"
         aria-orientation="vertical"
         aria-label={t('action.resize')}
-        onPointerDown={beginDrag}
+        onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}

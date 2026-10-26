@@ -30,6 +30,7 @@ const components = require(output) as {
   BoardList: unknown
   BoardFilterBar: unknown
   SessionBoardSettingsPage: unknown
+  STYLESHEET: string
   DEFAULT_WIKI_CONFIG: Record<string, unknown>
   wikiDefaults: (home: string) => Record<string, unknown>
   BatchController: new (transport: object) => {
@@ -87,7 +88,7 @@ function pointer(element: Element, type: string, init: { clientX: number; pointe
 }
 afterEach(async () => {
   await React.act(async () => { for (const root of roots.splice(0)) root.unmount() })
-  document.body.innerHTML = ''; vi.restoreAllMocks()
+  document.body.innerHTML = ''; delete document.documentElement.dataset.platform; vi.restoreAllMocks()
 })
 
 describe('actual React components', () => {
@@ -441,51 +442,30 @@ describe('actual React components', () => {
     await React.act(async () => { action().click() })
     expect(view.container.querySelector('.sb-workspace-error')).toBeNull()
   })
-  it('drags the dock width from its header, clamps at both limits, and commits on release', async () => {
-    const onWidth = vi.fn()
-    const props = dockProps({ onWidth })
-    const view = mount(components.BoardDock, props); await view.render(props)
-    const dock = view.container.querySelector<HTMLElement>('.sb-dock')!
-    const head = view.container.querySelector<HTMLElement>('.sb-head')!
-    capturePointer(head)
-
-    await React.act(async () => { pointer(head.querySelector('.sb-title')!, 'pointerdown', { clientX: 100, pointerId: 11 }) })
-    expect(dock.getAttribute('data-dragging')).toBe('true')
-    expect(dock.style.getPropertyValue('--sb-dock-width')).toBe('300px')
-
-    await React.act(async () => { pointer(head, 'pointermove', { clientX: 220, pointerId: 11 }) })
-    await React.act(async () => { pointer(head, 'pointerup', { clientX: 220, pointerId: 11 }) })
-    expect(onWidth).toHaveBeenLastCalledWith(420)
-    expect(dock.getAttribute('data-dragging')).toBeNull()
-
-    // A committed width is what the caller's next render paints.
-    await view.render({ ...props, width: 420 })
-    expect(dock.style.getPropertyValue('--sb-dock-width')).toBe('420px')
-
-    await React.act(async () => { pointer(head, 'pointerdown', { clientX: 200, pointerId: 12 }) })
-    await React.act(async () => { pointer(head, 'pointermove', { clientX: 900, pointerId: 12 }) })
-    await React.act(async () => { pointer(head, 'pointerup', { clientX: 900, pointerId: 12 }) })
-    expect(onWidth).toHaveBeenLastCalledWith(480)
-
-    await React.act(async () => { pointer(head, 'pointerdown', { clientX: 300, pointerId: 13 }) })
-    await React.act(async () => { pointer(head, 'pointermove', { clientX: -500, pointerId: 13 }) })
-    await React.act(async () => { pointer(head, 'pointerup', { clientX: -500, pointerId: 13 }) })
-    expect(onWidth).toHaveBeenLastCalledWith(260)
-    expect(onWidth).toHaveBeenCalledTimes(3)
-  })
-  it('keeps dock header controls clickable instead of starting a drag', async () => {
+  it('marks the dock header as the window drag row instead of a width handle', async () => {
+    document.documentElement.dataset.platform = 'darwin'
     const onWidth = vi.fn()
     const onOpenBoard = vi.fn()
     const props = dockProps({ onWidth, onOpenBoard })
     const view = mount(components.BoardDock, props); await view.render(props)
     const dock = view.container.querySelector<HTMLElement>('.sb-dock')!
-    const controls = [...view.container.querySelectorAll<HTMLButtonElement>('.sb-head .sb-btn')]
+    const head = view.container.querySelector<HTMLElement>('.sb-head')!
+    expect(head.hasAttribute('data-window-drag')).toBe(true)
+    expect(head.getAttribute('data-platform')).toBe('darwin')
+
+    // The header is no longer a width surface: pressing it starts no dock drag.
+    const title = head.querySelector('.sb-title')!
+    await React.act(async () => { pointer(title, 'pointerdown', { clientX: 100, pointerId: 11 }) })
+    await React.act(async () => { pointer(title, 'pointerup', { clientX: 100, pointerId: 11 }) })
+    expect(dock.getAttribute('data-dragging')).toBeNull()
+    expect(onWidth).not.toHaveBeenCalled()
+
+    // Controls stay real controls; the stylesheet opts them out of the drag region.
+    const controls = [...head.querySelectorAll<HTMLButtonElement>('.sb-btn')]
     expect(controls).toHaveLength(3)
     for (const [index, control] of controls.entries()) {
-      capturePointer(control)
       let pressed: PointerEvent | undefined
       await React.act(async () => { pressed = pointer(control, 'pointerdown', { clientX: 120, pointerId: 20 + index }) })
-      // A press on a control must not be swallowed: the click has to reach it.
       expect(pressed?.defaultPrevented).toBe(false)
       expect(dock.getAttribute('data-dragging')).toBeNull()
       await React.act(async () => { pointer(control, 'pointerup', { clientX: 120, pointerId: 20 + index }) })
@@ -493,6 +473,26 @@ describe('actual React components', () => {
     expect(onWidth).not.toHaveBeenCalled()
     await React.act(async () => { controls[0]!.click() })
     expect(onOpenBoard).toHaveBeenCalledTimes(1)
+
+    // The echo is the shell's raw marker: plain web leaves it absent.
+    delete document.documentElement.dataset.platform
+    await view.render(props)
+    expect(head.hasAttribute('data-window-drag')).toBe(true)
+    expect(head.hasAttribute('data-platform')).toBe(false)
+  })
+  it('declares the darwin window-drag contract on the header only', () => {
+    const sheet = components.STYLESHEET
+    expect(sheet).toContain("html[data-platform='darwin'] .sb-head { -webkit-app-region: drag; }")
+    expect(sheet).toMatch(/html\[data-platform='darwin'\] \.sb-head :is\([^)]*\) \{[^}]*-webkit-app-region: no-drag;/)
+    // The edge strip overlaps the header's last pixels; it must stay a width handle.
+    expect(sheet).toContain("html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }")
+    // jsdom cannot compute -webkit-app-region, so the sheet text is the contract:
+    // the header keeps an ordinary cursor and never becomes a touch trap.
+    const headBlock = /\n\.sb-head \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+    expect(headBlock).not.toContain('cursor')
+    expect(headBlock).not.toContain('touch-action')
+    // The column itself must never drag: that would swallow card clicks.
+    expect(sheet).not.toMatch(/\.sb-dock[^{}]*\{[^}]*-webkit-app-region: drag/)
   })
   it('keeps the right edge strip a resize surface', async () => {
     const onWidth = vi.fn()

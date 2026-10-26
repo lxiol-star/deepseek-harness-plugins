@@ -81,9 +81,7 @@ export const STYLESHEET = `
 .sb-dock[data-collapsed="true"] {
   cursor: pointer;
 }
-/* A live drag must not animate the width and must not select text while the
-   pointer travels over the cards below the header. */
-.sb-dock[data-dragging="true"] { transition: none; user-select: none; }
+.sb-dock[data-dragging="true"] { transition: none; }
 
 /* Vertical label shown while collapsed. */
 .sb-rail {
@@ -130,9 +128,10 @@ export const STYLESHEET = `
 
 /* --------------------------------------------------------------- chrome --- */
 
-/* The header is the second grab surface for the column width: pressing it
-   and dragging resizes exactly like the right edge strip. Keep its text
-   unselectable so a drag never highlights the title. */
+/* The header row is also the dock's window-drag surface: it carries the
+   shell's data-window-drag mark, which ui-web base.css turns into the one
+   darwin drag rule, and repeats the declaration here so the row does not rely
+   on that sheet. The width gesture stays on the right edge strip below. */
 .sb-head {
   display: flex;
   align-items: center;
@@ -140,14 +139,18 @@ export const STYLESHEET = `
   padding: 8px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   flex: 0 0 auto;
-  cursor: ew-resize;
   user-select: none;
-  /* Keep a touch/pen drag on the header from turning into a scroll gesture. */
-  touch-action: none;
 }
-/* Controls in the header still look and behave like controls. */
-.sb-head :is(button, input, select, textarea, a) { cursor: pointer; }
-.sb-dock[data-dragging="true"] .sb-head { cursor: grabbing; }
+/* macOS desktop only: make the header a native window-drag row. Controls
+   subtract their own boxes so opening the board, switching density and
+   collapsing the panel stay clickable. */
+html[data-platform='darwin'] .sb-head { -webkit-app-region: drag; }
+html[data-platform='darwin'] .sb-head :is(button, input, select, a, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+/* The edge strip spans the column top to bottom, so its 3px overlap with the
+   header row must stay a width handle instead of becoming window drag. */
+html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-title {
   font-weight: 600;
   font-size: 12px;

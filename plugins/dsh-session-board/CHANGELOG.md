@@ -1,11 +1,20 @@
 # Changelog
 
+## 0.8.6 — 2026-10-26
+
+- **更正 0.8.5 的行为方向**：贴边栏「会话」标题栏的需求是**按住拖动整个 DSH 窗口**（与左右原生面板顶部一致），不是拖拽调宽。标题栏现在带 `data-window-drag` 和 `data-platform`，macOS 桌面由 `-webkit-app-region: drag` 提供原生窗口拖动；打开看板、密度、折叠三个按钮显式 `no-drag`，点击不受影响。
+- 移除 0.8.5 给标题栏加的调宽 pointer 手势与 `ew-resize` / `grabbing` / `touch-action` 样式，恢复普通箭头光标；列宽仍只由右侧 `.sb-resize` 边缘条和键盘方向键调整。
+- 窗口拖动只在 darwin 桌面生效；Web 与其它平台只是多一个无害的 `data-window-drag` 属性，不受影响。全屏看板头部原有的 `data-window-drag` 窗口拖动保持原样；右侧 `.sb-resize` 在 darwin 上显式 `no-drag`，保证它与标题栏重叠的顶部仍可拖动调宽。
+- 测试：标题栏窗口拖动标记/平台回显与按钮 no-drag 契约、标题栏 pointerdown 不再触发调宽、右侧边缘条调宽回归。
+- 平台标记读取逻辑从 `BoardOverlay` 抽到共享的 `platform.ts`，两处使用同一实现。
+
 ## 0.8.5 — 2026-10-26
 
 - 贴边栏（`BoardDock`）展开态的「会话」标题栏现在也能按住拖动调整宽度，与右侧 `.sb-resize` 边缘条共用同一套手势：pointer capture、260–480px 夹取、拖拽期间 `data-dragging` 暂停动画、只在松手时提交一次宽度。
 - 标题栏增加 `ew-resize` 光标（拖拽中 `grabbing`）并禁止选中标题文本；标题栏里的「打开看板 / 密度 / 折叠」按钮仍是普通点击，pointerdown 命中 `button`、`input`、`select`、`textarea`、`a`、`[role=button]` 等交互元素时不会启动拖拽。键盘用户继续用右侧 separator 的左右方向键调宽。
 - 全屏看板的头部保留 `data-window-drag` 原生窗口拖动，不加入调宽手势（全屏态没有可持久化的列宽）。
 - 新增组件回归测试：标题栏拖拽提交宽度与两端夹取、标题栏按钮不触发拖拽且点击仍生效、右侧边缘条拖拽行为不变。
+- （0.8.6 更正）本版本把标题栏误做成了拖拽调宽；实际需求是拖动 DSH 窗口，已在 0.8.6 修正。
 
 ## 0.8.4 — 2026-10-24
 

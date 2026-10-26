@@ -28,6 +28,7 @@ import type { BoardGroup } from '../shared/types.ts'
 import { BoardScroll } from './BoardList.tsx'
 import type { WorkspaceGitInfo } from '../shared/workspace-meta.ts'
 import { useDocumentHidden, type Translate } from './hooks.ts'
+import { boardPlatformMarker } from './platform.ts'
 import {
   focusableIn, inertBackground, isInsideMenu, isTopmostModal, modalLayers,
   resolveRestoreTarget, trapTabTarget,
@@ -56,20 +57,6 @@ export interface BoardOverlayProps {
   workspaceMeta?: Readonly<Record<string, WorkspaceGitInfo>>
   /** Open the coordinator session of one project. */
   onOpenCoordinator?: (projectKey: string) => void | Promise<void>
-}
-
-/**
- * The platform marker the shell sets on `<html data-platform>` (`darwin` on the
- * macOS desktop shell), echoed on the board header.
- *
- * The board is portalled outside `#root`, so echoing the marker here lets the
- * stylesheet scope the traffic-light clearance to the overlay itself instead of
- * reaching back to the document element. The value is the shell's own marker,
- * not a normalized name, so it matches every other `data-platform` rule.
- */
-function boardPlatformMarker(): string | undefined {
-  const marker = globalThis.document?.documentElement?.dataset?.platform
-  return marker === undefined || marker === '' ? undefined : marker
 }
 
 /** The fullscreen board, or null while closed. */
@@ -152,7 +139,7 @@ export function BoardOverlay(props: BoardOverlayProps): ReactElement | null {
   return createPortal(
     <div
       className="sb-overlay sb-root"
-      data-session-board-version="0.8.5"
+      data-session-board-version="0.8.6"
       data-density={density}
       data-quiet={hidden ? 'true' : undefined}
       role="dialog"

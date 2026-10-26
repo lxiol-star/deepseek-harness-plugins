@@ -5,6 +5,10 @@
  * of covering the chat. Collapse state and width belong to the caller (they
  * are persisted), while the drag gesture owns a local width so the store is
  * written once per gesture instead of once per frame.
+ *
+ * The header row carries the shell's window-drag mark, so dragging the panel's
+ * title bar moves the DSH window on the macOS desktop exactly like the native
+ * panel headers do. Its controls opt out of the drag region and stay clickable.
  */
 import { type ReactElement } from 'react';
 import type { GroupingMode } from './workspace-tree.ts';

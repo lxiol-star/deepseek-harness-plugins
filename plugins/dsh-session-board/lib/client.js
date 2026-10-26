@@ -711,14 +711,16 @@ function BoardScroll({ className, backToTop = !0, ...list }) {
   ] });
 }
 
+// src/client/platform.ts
+function boardPlatformMarker() {
+  let marker = globalThis.document?.documentElement?.dataset?.platform;
+  return marker === void 0 || marker === "" ? void 0 : marker;
+}
+
 // src/client/BoardDock.tsx
 var import_jsx_runtime4 = require("react/jsx-runtime"), DOCK_MIN_WIDTH = 260, DOCK_MAX_WIDTH = 480, DOCK_RAIL_WIDTH = 40;
 function clampDockWidth(width) {
   return Number.isFinite(width) ? Math.min(DOCK_MAX_WIDTH, Math.max(DOCK_MIN_WIDTH, Math.round(width))) : DOCK_MIN_WIDTH;
-}
-var INTERACTIVE_TARGET = 'button, input, select, textarea, a, [role="button"], [contenteditable="true"]';
-function isInteractiveTarget(target) {
-  return target instanceof Element && target.closest(INTERACTIVE_TARGET) !== null;
 }
 function IconButton({
   label,
@@ -763,11 +765,8 @@ function BoardDock(props) {
     onToggleGroup,
     workspaceMeta,
     onOpenCoordinator
-  } = props, [dragging, setDragging] = (0, import_react5.useState)(!1), [liveWidth, setLiveWidth] = (0, import_react5.useState)(width), dragState = (0, import_react5.useRef)(null), hidden = useDocumentHidden(), total = groups.reduce((sum, group) => sum + group.entries.length, 0), beginDrag = (0, import_react5.useCallback)((event) => {
-    if (event.button !== 0 || isInteractiveTarget(event.target)) return;
-    event.preventDefault(), event.currentTarget.setPointerCapture(event.pointerId);
-    let startWidth = clampDockWidth(width);
-    dragState.current = { startX: event.clientX, startWidth, pointerId: event.pointerId, frame: null, latest: startWidth }, setDragging(!0);
+  } = props, [dragging, setDragging] = (0, import_react5.useState)(!1), [liveWidth, setLiveWidth] = (0, import_react5.useState)(width), dragState = (0, import_react5.useRef)(null), hidden = useDocumentHidden(), total = groups.reduce((sum, group) => sum + group.entries.length, 0), onPointerDown = (0, import_react5.useCallback)((event) => {
+    event.button === 0 && (event.preventDefault(), event.currentTarget.setPointerCapture(event.pointerId), dragState.current = { startX: event.clientX, startWidth: clampDockWidth(width), pointerId: event.pointerId, frame: null, latest: clampDockWidth(width) }, setDragging(!0));
   }, [width]), onPointerMove = (0, import_react5.useCallback)((event) => {
     let state = dragState.current;
     if (state === null || state.pointerId !== event.pointerId || event.currentTarget.hasPointerCapture(event.pointerId) === !1) return;
@@ -794,7 +793,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.5",
+      "data-session-board-version": "0.8.6",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -818,7 +817,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.5",
+      "data-session-board-version": "0.8.6",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -834,33 +833,21 @@ function BoardDock(props) {
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: total })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "sb-dock-body", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
-            "div",
-            {
-              className: "sb-head",
-              title: t("action.resize"),
-              onPointerDown: beginDrag,
-              onPointerMove,
-              onPointerUp: endDrag,
-              onPointerCancel: endDrag,
-              onLostPointerCapture: endDrag,
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "sb-title", children: t("panel.title") }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "sb-count", children: total }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconButton, { label: t("action.openBoard"), onClick: onOpenBoard, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M1.5 1.5h4v4h-4zM7.5 1.5h4v4h-4zM1.5 7.5h4v4h-4zM7.5 7.5h4v4h-4z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-                  IconButton,
-                  {
-                    label: t(density === "compact" ? "action.densityFull" : "action.densityCompact"),
-                    pressed: density === "compact",
-                    onClick: onToggleDensity,
-                    children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M1.5 3h10M1.5 6.5h10M1.5 10h10", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
-                  }
-                ),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconButton, { label: t("action.collapse"), onClick: onToggleCollapse, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M9 3L5 7l4 4", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round" }) }) })
-              ]
-            }
-          ),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "sb-head", "data-window-drag": !0, "data-platform": boardPlatformMarker(), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "sb-title", children: t("panel.title") }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "sb-count", children: total }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconButton, { label: t("action.openBoard"), onClick: onOpenBoard, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M1.5 1.5h4v4h-4zM7.5 1.5h4v4h-4zM1.5 7.5h4v4h-4zM7.5 7.5h4v4h-4z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+              IconButton,
+              {
+                label: t(density === "compact" ? "action.densityFull" : "action.densityCompact"),
+                pressed: density === "compact",
+                onClick: onToggleDensity,
+                children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M1.5 3h10M1.5 6.5h10M1.5 10h10", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconButton, { label: t("action.collapse"), onClick: onToggleCollapse, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("svg", { width: "13", height: "13", viewBox: "0 0 13 13", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("path", { d: "M9 3L5 7l4 4", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round" }) }) })
+          ] }),
           online ? null : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "sb-offline", children: t("status.hostOffline") }),
           toolbar,
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
@@ -889,7 +876,7 @@ function BoardDock(props) {
             role: "separator",
             "aria-orientation": "vertical",
             "aria-label": t("action.resize"),
-            onPointerDown: beginDrag,
+            onPointerDown,
             onPointerMove,
             onPointerUp: endDrag,
             onPointerCancel: endDrag,
@@ -1260,10 +1247,6 @@ function resolveRestoreTarget(query) {
 
 // src/client/BoardOverlay.tsx
 var import_jsx_runtime5 = require("react/jsx-runtime");
-function boardPlatformMarker() {
-  let marker = globalThis.document?.documentElement?.dataset?.platform;
-  return marker === void 0 || marker === "" ? void 0 : marker;
-}
 function BoardOverlay(props) {
   let {
     open,
@@ -1330,7 +1313,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.5",
+        "data-session-board-version": "0.8.6",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1459,9 +1442,7 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
 .sb-dock[data-collapsed="true"] {
   cursor: pointer;
 }
-/* A live drag must not animate the width and must not select text while the
-   pointer travels over the cards below the header. */
-.sb-dock[data-dragging="true"] { transition: none; user-select: none; }
+.sb-dock[data-dragging="true"] { transition: none; }
 
 /* Vertical label shown while collapsed. */
 .sb-rail {
@@ -1508,9 +1489,10 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
 
 /* --------------------------------------------------------------- chrome --- */
 
-/* The header is the second grab surface for the column width: pressing it
-   and dragging resizes exactly like the right edge strip. Keep its text
-   unselectable so a drag never highlights the title. */
+/* The header row is also the dock's window-drag surface: it carries the
+   shell's data-window-drag mark, which ui-web base.css turns into the one
+   darwin drag rule, and repeats the declaration here so the row does not rely
+   on that sheet. The width gesture stays on the right edge strip below. */
 .sb-head {
   display: flex;
   align-items: center;
@@ -1518,14 +1500,18 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
   padding: 8px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   flex: 0 0 auto;
-  cursor: ew-resize;
   user-select: none;
-  /* Keep a touch/pen drag on the header from turning into a scroll gesture. */
-  touch-action: none;
 }
-/* Controls in the header still look and behave like controls. */
-.sb-head :is(button, input, select, textarea, a) { cursor: pointer; }
-.sb-dock[data-dragging="true"] .sb-head { cursor: grabbing; }
+/* macOS desktop only: make the header a native window-drag row. Controls
+   subtract their own boxes so opening the board, switching density and
+   collapsing the panel stay clickable. */
+html[data-platform='darwin'] .sb-head { -webkit-app-region: drag; }
+html[data-platform='darwin'] .sb-head :is(button, input, select, a, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+/* The edge strip spans the column top to bottom, so its 3px overlap with the
+   header row must stay a width handle instead of becoming window drag. */
+html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-title {
   font-weight: 600;
   font-size: 12px;
