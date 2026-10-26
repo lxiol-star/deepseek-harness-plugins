@@ -25,6 +25,7 @@ execFileSync(join(repo, 'node_modules', '.bin', 'esbuild'), [
 const components = require(output) as {
   createRoot: (element: Element) => { render(node: unknown): void; unmount(): void }
   SessionCard: unknown
+  BoardDock: unknown
   BoardOverlay: unknown
   BoardList: unknown
   BoardFilterBar: unknown
@@ -55,6 +56,34 @@ function mount(component: unknown, _props: object) {
   const container = document.createElement('div'); document.body.append(container)
   const root = components.createRoot(container); roots.push(root)
   return { root, container, render: async (value: object) => React.act(async () => { root.render(React.createElement(component, value)) }) }
+}
+
+/** Props the docked column needs; features under test override these. */
+function dockProps(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    groups: [], t: components.t, collapsed: false, width: 300, density: 'compact', online: true,
+    onToggleCollapse: vi.fn(), onWidth: vi.fn(), onToggleDensity: vi.fn(), onOpenBoard: vi.fn(),
+    onOpen: vi.fn(), onAck: vi.fn(), collapsedGroups: {}, onToggleGroup: vi.fn(), ...overrides,
+  }
+}
+
+/** jsdom implements PointerEvent but not pointer capture. */
+function capturePointer(element: Element): void {
+  Object.assign(element, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  })
+}
+
+/** Dispatch one mouse-pointer event at `element`. */
+function pointer(element: Element, type: string, init: { clientX: number; pointerId: number }): PointerEvent {
+  const event = new PointerEvent(type, {
+    bubbles: true, cancelable: true, clientX: init.clientX, clientY: 0,
+    pointerId: init.pointerId, button: 0, buttons: 1,
+  })
+  element.dispatchEvent(event)
+  return event
 }
 afterEach(async () => {
   await React.act(async () => { for (const root of roots.splice(0)) root.unmount() })
@@ -411,6 +440,73 @@ describe('actual React components', () => {
     openCoordinator.mockImplementation(async () => {})
     await React.act(async () => { action().click() })
     expect(view.container.querySelector('.sb-workspace-error')).toBeNull()
+  })
+  it('drags the dock width from its header, clamps at both limits, and commits on release', async () => {
+    const onWidth = vi.fn()
+    const props = dockProps({ onWidth })
+    const view = mount(components.BoardDock, props); await view.render(props)
+    const dock = view.container.querySelector<HTMLElement>('.sb-dock')!
+    const head = view.container.querySelector<HTMLElement>('.sb-head')!
+    capturePointer(head)
+
+    await React.act(async () => { pointer(head.querySelector('.sb-title')!, 'pointerdown', { clientX: 100, pointerId: 11 }) })
+    expect(dock.getAttribute('data-dragging')).toBe('true')
+    expect(dock.style.getPropertyValue('--sb-dock-width')).toBe('300px')
+
+    await React.act(async () => { pointer(head, 'pointermove', { clientX: 220, pointerId: 11 }) })
+    await React.act(async () => { pointer(head, 'pointerup', { clientX: 220, pointerId: 11 }) })
+    expect(onWidth).toHaveBeenLastCalledWith(420)
+    expect(dock.getAttribute('data-dragging')).toBeNull()
+
+    // A committed width is what the caller's next render paints.
+    await view.render({ ...props, width: 420 })
+    expect(dock.style.getPropertyValue('--sb-dock-width')).toBe('420px')
+
+    await React.act(async () => { pointer(head, 'pointerdown', { clientX: 200, pointerId: 12 }) })
+    await React.act(async () => { pointer(head, 'pointermove', { clientX: 900, pointerId: 12 }) })
+    await React.act(async () => { pointer(head, 'pointerup', { clientX: 900, pointerId: 12 }) })
+    expect(onWidth).toHaveBeenLastCalledWith(480)
+
+    await React.act(async () => { pointer(head, 'pointerdown', { clientX: 300, pointerId: 13 }) })
+    await React.act(async () => { pointer(head, 'pointermove', { clientX: -500, pointerId: 13 }) })
+    await React.act(async () => { pointer(head, 'pointerup', { clientX: -500, pointerId: 13 }) })
+    expect(onWidth).toHaveBeenLastCalledWith(260)
+    expect(onWidth).toHaveBeenCalledTimes(3)
+  })
+  it('keeps dock header controls clickable instead of starting a drag', async () => {
+    const onWidth = vi.fn()
+    const onOpenBoard = vi.fn()
+    const props = dockProps({ onWidth, onOpenBoard })
+    const view = mount(components.BoardDock, props); await view.render(props)
+    const dock = view.container.querySelector<HTMLElement>('.sb-dock')!
+    const controls = [...view.container.querySelectorAll<HTMLButtonElement>('.sb-head .sb-btn')]
+    expect(controls).toHaveLength(3)
+    for (const [index, control] of controls.entries()) {
+      capturePointer(control)
+      let pressed: PointerEvent | undefined
+      await React.act(async () => { pressed = pointer(control, 'pointerdown', { clientX: 120, pointerId: 20 + index }) })
+      // A press on a control must not be swallowed: the click has to reach it.
+      expect(pressed?.defaultPrevented).toBe(false)
+      expect(dock.getAttribute('data-dragging')).toBeNull()
+      await React.act(async () => { pointer(control, 'pointerup', { clientX: 120, pointerId: 20 + index }) })
+    }
+    expect(onWidth).not.toHaveBeenCalled()
+    await React.act(async () => { controls[0]!.click() })
+    expect(onOpenBoard).toHaveBeenCalledTimes(1)
+  })
+  it('keeps the right edge strip a resize surface', async () => {
+    const onWidth = vi.fn()
+    const props = dockProps({ onWidth })
+    const view = mount(components.BoardDock, props); await view.render(props)
+    const dock = view.container.querySelector<HTMLElement>('.sb-dock')!
+    const strip = view.container.querySelector<HTMLElement>('.sb-resize')!
+    capturePointer(strip)
+    await React.act(async () => { pointer(strip, 'pointerdown', { clientX: 400, pointerId: 31 }) })
+    expect(dock.getAttribute('data-dragging')).toBe('true')
+    await React.act(async () => { pointer(strip, 'pointermove', { clientX: 350, pointerId: 31 }) })
+    await React.act(async () => { pointer(strip, 'pointerup', { clientX: 350, pointerId: 31 }) })
+    expect(onWidth).toHaveBeenCalledTimes(1)
+    expect(onWidth).toHaveBeenCalledWith(260)
   })
   it('plumbs the project coordinator action through the fullscreen board', async () => {
     const workspaceEntry = { ...entry, workspaceId: 'wa', workspacePath: '/repo/i-ai-gw', workspaceTitle: 'i-ai-gw' }

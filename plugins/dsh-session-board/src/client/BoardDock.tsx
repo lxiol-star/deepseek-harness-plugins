@@ -29,6 +29,14 @@ export function clampDockWidth(width: number): number {
   return Math.min(DOCK_MAX_WIDTH, Math.max(DOCK_MIN_WIDTH, Math.round(width)))
 }
 
+/** Descendants of a drag surface that keep their own pointer behavior. */
+const INTERACTIVE_TARGET = 'button, input, select, textarea, a, [role="button"], [contenteditable="true"]'
+
+/** Whether a press on `target` should stay a click instead of starting a drag. */
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(INTERACTIVE_TARGET) !== null
+}
+
 /** Props of {@link BoardDock}. */
 export interface BoardDockProps {
   grouping?: GroupingMode
@@ -96,11 +104,17 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   const hidden = useDocumentHidden()
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0)
 
-  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  // Both the header and the right edge strip start the same gesture; the
+  // pointer capture makes the surface that received the press own the rest of
+  // the drag, so the shared move/end handlers keep working from either one.
+  const beginDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
+    // A press that starts on a control is a click on that control, not a drag.
+    if (isInteractiveTarget(event.target)) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    dragState.current = { startX: event.clientX, startWidth: clampDockWidth(width), pointerId: event.pointerId, frame: null, latest: clampDockWidth(width) }
+    const startWidth = clampDockWidth(width)
+    dragState.current = { startX: event.clientX, startWidth, pointerId: event.pointerId, frame: null, latest: startWidth }
     setDragging(true)
   }, [width])
 
@@ -147,7 +161,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
     return (
       <aside
         className="sb-dock sb-root"
-        data-session-board-version="0.8.4"
+        data-session-board-version="0.8.5"
         data-dsh-session-board=""
         data-collapsed="true"
         data-density={density}
@@ -178,7 +192,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
   return (
     <aside
       className="sb-dock sb-root"
-        data-session-board-version="0.8.4"
+        data-session-board-version="0.8.5"
       data-dsh-session-board=""
       data-collapsed="false"
       data-density={density}
@@ -192,7 +206,15 @@ export function BoardDock(props: BoardDockProps): ReactElement {
         <span aria-hidden="true">▦</span><span>{t('panel.title')}</span><span>{total}</span>
       </button>
       <div className="sb-dock-body">
-        <div className="sb-head">
+        <div
+          className="sb-head"
+          title={t('action.resize')}
+          onPointerDown={beginDrag}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
+        >
           <span className="sb-title">{t('panel.title')}</span>
           <span className="sb-count">{total}</span>
           <IconButton label={t('action.openBoard')} onClick={onOpenBoard}>
@@ -238,7 +260,7 @@ export function BoardDock(props: BoardDockProps): ReactElement {
         role="separator"
         aria-orientation="vertical"
         aria-label={t('action.resize')}
-        onPointerDown={onPointerDown}
+        onPointerDown={beginDrag}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}

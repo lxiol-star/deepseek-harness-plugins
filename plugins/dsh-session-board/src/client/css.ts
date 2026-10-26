@@ -81,7 +81,9 @@ export const STYLESHEET = `
 .sb-dock[data-collapsed="true"] {
   cursor: pointer;
 }
-.sb-dock[data-dragging="true"] { transition: none; }
+/* A live drag must not animate the width and must not select text while the
+   pointer travels over the cards below the header. */
+.sb-dock[data-dragging="true"] { transition: none; user-select: none; }
 
 /* Vertical label shown while collapsed. */
 .sb-rail {
@@ -128,6 +130,9 @@ export const STYLESHEET = `
 
 /* --------------------------------------------------------------- chrome --- */
 
+/* The header is the second grab surface for the column width: pressing it
+   and dragging resizes exactly like the right edge strip. Keep its text
+   unselectable so a drag never highlights the title. */
 .sb-head {
   display: flex;
   align-items: center;
@@ -135,7 +140,14 @@ export const STYLESHEET = `
   padding: 8px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   flex: 0 0 auto;
+  cursor: ew-resize;
+  user-select: none;
+  /* Keep a touch/pen drag on the header from turning into a scroll gesture. */
+  touch-action: none;
 }
+/* Controls in the header still look and behave like controls. */
+.sb-head :is(button, input, select, textarea, a) { cursor: pointer; }
+.sb-dock[data-dragging="true"] .sb-head { cursor: grabbing; }
 .sb-title {
   font-weight: 600;
   font-size: 12px;

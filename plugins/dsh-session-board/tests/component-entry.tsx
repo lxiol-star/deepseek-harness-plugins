@@ -4,6 +4,7 @@
  */
 import { createRoot } from 'react-dom/client'
 import { BoardList } from '../src/client/BoardList.tsx'
+import { BoardDock } from '../src/client/BoardDock.tsx'
 import { BoardFilterBar } from '../src/client/BoardFilterBar.tsx'
 import { SessionCard } from '../src/client/SessionCard.tsx'
 import { BoardOverlay } from '../src/client/BoardOverlay.tsx'
@@ -18,4 +19,4 @@ const t = (key: string, args?: Record<string, string | number>) => {
   const template = (en as Record<string, string>)[key] ?? key
   return template.replace(/\{(\w+)\}/g, (match, name: string) => String(args?.[name] ?? match))
 }
-export { BoardList, BoardFilterBar, createRoot, SessionCard, BoardOverlay, BatchToolbar, BatchController, SessionBoardSettingsPage, buildEntry, DEFAULT_WIKI_CONFIG, wikiDefaults, t }
+export { BoardList, BoardDock, BoardFilterBar, createRoot, SessionCard, BoardOverlay, BatchToolbar, BatchController, SessionBoardSettingsPage, buildEntry, DEFAULT_WIKI_CONFIG, wikiDefaults, t }
