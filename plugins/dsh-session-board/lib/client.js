@@ -793,7 +793,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.8",
+      "data-session-board-version": "0.8.9",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -817,7 +817,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.8",
+      "data-session-board-version": "0.8.9",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1313,7 +1313,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.8",
+        "data-session-board-version": "0.8.9",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -3425,9 +3425,9 @@ var NS = "session-board", en = {
 // src/client/BatchToolbar.tsx
 var import_jsx_runtime6 = require("react/jsx-runtime");
 function BatchToolbar({ controller, groups, visibleGroups = groups, t }) {
-  let state = useSnapshot(controller, (value) => value), busy = state.phase === "previewing" || state.phase === "archiving", entries = groups.flatMap((group) => group.entries), visibleIds = visibleGroups.flatMap((group) => group.entries.map((entry) => entry.id)), hiddenSelected = state.selected.filter((id) => !visibleIds.includes(id)).length, titles = new Map(entries.map((entry) => [entry.id, entry.title]));
+  let state = useSnapshot(controller, (value) => value), busy = state.phase === "previewing" || state.phase === "archiving", entries = groups.flatMap((group) => group.entries), visibleIds = visibleGroups.flatMap((group) => group.entries.map((entry) => entry.id)), hiddenSelected = state.selected.filter((id) => !visibleIds.includes(id)).length, titles = new Map(entries.map((entry) => [entry.id, entry.title])), selectable = entries.filter((entry) => entry.archivedAt === void 0 && entry.clientArchived !== !0);
   return (0, import_react7.useEffect)(() => {
-    controller.reconcile(entries.map((entry) => entry.id));
+    controller.reconcile(selectable.map((entry) => entry.id));
   }, [controller, groups]), /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "sb-batch", "aria-label": t("batch.label"), children: [
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "sb-batchbar", children: [
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "sb-batchbar__count", children: t("batch.selected", { count: state.selected.length }) }),

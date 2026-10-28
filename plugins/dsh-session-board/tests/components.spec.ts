@@ -269,6 +269,15 @@ describe('actual React components', () => {
     await React.act(async () => { pressed.click() })
     expect(change).toHaveBeenLastCalledWith({ ...filters, archive: 'active' })
   })
+  it('drops archived sessions from the batch selection', async () => {
+    const controller = new components.BatchController({ preview: vi.fn(), commit: vi.fn() })
+    controller.toggle('session-one')
+    const archived = { ...entry, archivedAt: 123 }
+    const props = { controller, groups: [{ id: 'attention', entries: [archived] }], t: components.t }
+    const view = mount(components.BatchToolbar, props); await view.render(props)
+    expect(controller.getSnapshot().selected).toEqual([])
+    expect(view.container.textContent).toContain('0 selected')
+  })
   it('keeps hidden selection and selects only visible results', async () => {
     const controller = new components.BatchController({ preview: vi.fn(), commit: vi.fn() })
     controller.toggle('session-one')

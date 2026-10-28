@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.9 — 2026-10-29
+
+- 归档完成后已选数量残留：BatchToolbar 的 reconcile 之前把已归档条目也算作可继续选中的工作，确认结果若没把某行标成 native archive 成功，勾选就不会消失。现在 reconcile 只保留未归档条目；客户端归档一旦落到条目上，勾选立即清零；真正归档失败的行仍留在看板与选区里便于重试。
+- 新增组件测试：归档条目渲染后自动从选区移除。
+
 ## 0.8.8 — 2026-10-28
 
 - 修复「仅归档」实际按完整提炼流程执行的问题：BatchController 的 transport.preview 没把 mode 传给 host，预览/提交都走了 full，session 因 synthesis 失败（SENSITIVE_CONTENT / SYNTHESIS_FAILED）被标记为“Wiki 流程未完成”，DSH 原生归档因此不执行，会话继续留在工作区。

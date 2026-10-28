@@ -11,7 +11,12 @@ export function BatchToolbar({ controller, groups, visibleGroups = groups, t }: 
   const visibleIds = visibleGroups.flatMap(group => group.entries.map(entry => entry.id))
   const hiddenSelected = state.selected.filter(id => !visibleIds.includes(id)).length
   const titles = new Map(entries.map(entry => [entry.id, entry.title]))
-  useEffect(() => { controller.reconcile(entries.map(entry => entry.id)) }, [controller, groups])
+  // Archived rows are not selectable work: dropping them here clears the
+  // toolbar the moment the client archive lands, even if a transport result
+  // failed to mark the row as a native-archive success. Rows that failed to
+  // archive stay in the board (and in the selection) for a retry.
+  const selectable = entries.filter(entry => entry.archivedAt === undefined && entry.clientArchived !== true)
+  useEffect(() => { controller.reconcile(selectable.map(entry => entry.id)) }, [controller, groups])
   return (
     <section className="sb-batch" aria-label={t('batch.label')}>
       <div className="sb-batchbar">
