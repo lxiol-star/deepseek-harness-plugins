@@ -11,6 +11,7 @@ DeepSeek Harness 的会话看板插件。提供贴边栏和全屏看板，集中
 - 支持“隐藏已归档 / 查看已归档 / 全部会话”，筛选栏还有「仅归档」按钮可一键切换视图；批量操作区另有独立的「仅归档」动作（只归档不提炼）。Wiki 完成标记与 DSH 原生归档是两种不同来源，分别显示。
 - 归档成功的 Wiki 标记记录当时观察到的内容版本；会话重新运行或出现新内容后重新显示。
 - 贴边栏展开后，按住「会话」标题栏可拖动整个 DSH 窗口（与左右原生面板顶部一致，macOS 桌面生效）；列宽仍由右侧边缘条拖拽调整（260–480px，支持键盘方向键），标题栏里的打开看板、密度、折叠按钮照常点击。
+- 从看板卡片打开会话后，原生工作区会话列表会自动滚到该会话行（工作区分组折叠时保持无操作）。
 - 中英双语、键盘操作、独立滚动、触控板滚动传递和减少动态效果支持。
 - 设置 → 会话看板提供两组配置：「归档提炼」选择提炼模型（选项来自宿主当前可用的模型列表，模型支持时可单独选择思考等级）；「Wiki 归档引擎」配置 Wiki 根目录、SCHEMA 规则、引擎来源、Python、超时与 provider，并可直接「检查环境」。
 
@@ -49,10 +50,10 @@ git remote 里内嵌的凭据（如 `https://x-access-token:TOKEN@host/repo.git`
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.8.6.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.8.7.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.6.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.7.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

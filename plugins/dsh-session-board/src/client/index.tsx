@@ -35,6 +35,7 @@ import { BatchToolbar } from './BatchToolbar.tsx'
 import { currentSessionId } from './source.ts'
 import { BoardModel } from './model.ts'
 import { CleanupStack } from './lifecycle.ts'
+import { revealSessionRow } from './reveal-session.ts'
 import { createStore, type ReadonlyStore, type Store } from './store.ts'
 import { en, NS, zh } from './locales.ts'
 import { useSnapshot, type Translate } from './hooks.ts'
@@ -576,6 +577,7 @@ export function apply(ctx: Context): void {
           if (address === undefined || address === null) return false
           try {
             nav.openSession(address)
+            revealSessionRow(id)
             return true
           } catch (error: unknown) {
             warn(`open-session-failed: ${String(error)}`)
@@ -584,6 +586,7 @@ export function apply(ctx: Context): void {
         }
         try {
           nav.openSession(id)
+          revealSessionRow(id)
         } catch (error: unknown) {
           if (openSubagent()) return
           // A Session archived in the client — often by this board's own batch
@@ -598,6 +601,7 @@ export function apply(ctx: Context): void {
             () => {
               try {
                 nav.openSession(id)
+                revealSessionRow(id)
               } catch (retryError: unknown) {
                 warn(`open-session-failed: ${String(retryError)}`)
               }

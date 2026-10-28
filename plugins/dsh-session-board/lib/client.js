@@ -793,7 +793,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.6",
+      "data-session-board-version": "0.8.7",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -817,7 +817,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.6",
+      "data-session-board-version": "0.8.7",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1313,7 +1313,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.6",
+        "data-session-board-version": "0.8.7",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -4080,6 +4080,21 @@ var CleanupStack = class {
   }
 };
 
+// src/client/reveal-session.ts
+function revealSessionRow(sessionId, maxFrames = 60) {
+  if (typeof document > "u" || typeof requestAnimationFrame != "function") return;
+  let target = `session:${sessionId}`, frames = 0, tick = () => {
+    let rows = document.querySelectorAll('[data-row-key^="session:"]');
+    for (let row of rows)
+      if (row.dataset.rowKey === target) {
+        row.scrollIntoView({ block: "nearest" });
+        return;
+      }
+    frames += 1, frames < maxFrames && requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 // src/shared/synthesis.ts
 var SYNTHESIS_MODEL_PATH = "/api/session-board/synthesis-model";
 function asRecord2(value) {
@@ -6061,13 +6076,13 @@ function apply(ctx) {
             }
             if (address == null) return !1;
             try {
-              return nav.openSession(address), !0;
+              return nav.openSession(address), revealSessionRow(id), !0;
             } catch (error) {
               return warn(`open-session-failed: ${String(error)}`), !0;
             }
           };
           try {
-            nav.openSession(id);
+            nav.openSession(id), revealSessionRow(id);
           } catch (error) {
             if (openSubagent()) return;
             if (!(workspaces?.list.getSnapshot().archivedSessionIds ?? []).includes(id) || typeof nav.unarchiveSession != "function") {
@@ -6077,7 +6092,7 @@ function apply(ctx) {
             nav.unarchiveSession(id).then(
               () => {
                 try {
-                  nav.openSession(id);
+                  nav.openSession(id), revealSessionRow(id);
                 } catch (retryError) {
                   warn(`open-session-failed: ${String(retryError)}`);
                 }
