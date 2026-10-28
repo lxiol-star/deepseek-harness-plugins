@@ -1,4 +1,4 @@
-import type { ArchiveSummary } from '../shared/archive.ts'
+import type { ArchiveMode, ArchiveSummary } from '../shared/archive.ts'
 import type { BoardEntry } from '../shared/types.ts'
 import { archiveRevision } from './archive-marks.ts'
 
@@ -10,6 +10,8 @@ export interface NativeArchiveOptions {
   archivedIds: () => readonly string[]
   archive: (id: string) => Promise<void>
   disposed: () => boolean
+  /** The batch mode: archive-only has no synthesis rows to wait for. */
+  mode?: ArchiveMode | undefined
 }
 
 /** DSH owns its archive set. Never stop active work or archive newer messages. */
@@ -20,7 +22,9 @@ export async function archiveCompletedSessions(summary: ArchiveSummary, options:
     if (options.disposed()) { finish('unavailable'); continue }
     const synthesis = summary.workflow?.synthesis.find(item => item.session === row.session)
     const empty = row.action === 'empty'
-    if (!empty && (!['archived', 'skipped'].includes(row.action) || !synthesis || !['synthesized', 'skipped'].includes(synthesis.status) || summary.workflow?.index === 'failed')) {
+    const archiveOnly = options.mode === 'archive'
+    if (!empty && (!['archived', 'skipped'].includes(row.action)
+      || (!archiveOnly && (!synthesis || !['synthesized', 'skipped'].includes(synthesis.status) || summary.workflow?.index === 'failed')))) {
       finish('wiki-failed'); continue
     }
     if (options.archivedIds().includes(row.session)) { finish('already-archived'); continue }

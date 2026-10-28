@@ -61,7 +61,7 @@ describe('batch archive state machine', () => {
     expect(preview).toHaveBeenCalledWith(['a'], 'archive')
     expect(controller.getSnapshot()).toMatchObject({ phase: 'confirming', mode: 'archive' })
     await controller.confirm()
-    expect(commit).toHaveBeenCalledWith('token')
+    expect(commit).toHaveBeenCalledWith('token', 'archive')
     expect(controller.getSnapshot()).toMatchObject({ phase: 'idle', mode: 'archive', error: null })
     expect(controller.getSnapshot().result?.workflow).toBeUndefined()
   })

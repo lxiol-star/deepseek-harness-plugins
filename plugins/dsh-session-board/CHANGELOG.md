@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.8 — 2026-10-28
+
+- 修复「仅归档」实际按完整提炼流程执行的问题：BatchController 的 transport.preview 没把 mode 传给 host，预览/提交都走了 full，session 因 synthesis 失败（SENSITIVE_CONTENT / SYNTHESIS_FAILED）被标记为“Wiki 流程未完成”，DSH 原生归档因此不执行，会话继续留在工作区。
+- 现在 preview 与 commit 都携带 mode；archive-only 提交在客户端 `archiveCompletedSessions` 里跳过 synthesis 门禁，对 raw 归档成功的会话直接执行 DSH 原生归档（仍保留运行中/有新内容/不可用的保护）。
+- 测试补 archive-only 原生归档用例，并更新 batch commit 参数断言；全量 40 文件 / 550 项通过。
+
 ## 0.8.7 — 2026-10-28
 
 - 从看板卡片打开会话后，原生工作区会话列表会自动把该会话行滚入可视区（`data-row-key="session:<id>"`，`scrollIntoView({block:'nearest'})`）；最多等待 60 帧让导航后的行挂载，找不到行时静默无操作，不报错。

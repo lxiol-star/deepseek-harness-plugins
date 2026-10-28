@@ -80,8 +80,8 @@ async function archiveCompletedSessions(summary, options) {
       finish("unavailable");
       continue;
     }
-    let synthesis = summary.workflow?.synthesis.find((item) => item.session === row.session), empty = row.action === "empty";
-    if (!empty && (!["archived", "skipped"].includes(row.action) || !synthesis || !["synthesized", "skipped"].includes(synthesis.status) || summary.workflow?.index === "failed")) {
+    let synthesis = summary.workflow?.synthesis.find((item) => item.session === row.session), empty = row.action === "empty", archiveOnly = options.mode === "archive";
+    if (!empty && (!["archived", "skipped"].includes(row.action) || !archiveOnly && (!synthesis || !["synthesized", "skipped"].includes(synthesis.status) || summary.workflow?.index === "failed"))) {
       finish("wiki-failed");
       continue;
     }
@@ -793,7 +793,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.7",
+      "data-session-board-version": "0.8.8",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -817,7 +817,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.7",
+      "data-session-board-version": "0.8.8",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1313,7 +1313,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.7",
+        "data-session-board-version": "0.8.8",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -2881,7 +2881,7 @@ var BatchController = class {
     if (!(this.disposed || s.phase !== "confirming" || s.preview === null)) {
       this.state.set({ ...s, phase: "archiving", error: null, errorDetail: null });
       try {
-        let result = await this.transport.commit(s.preview.token);
+        let result = await this.transport.commit(s.preview.token, s.mode);
         if (this.disposed) return;
         let incomplete = new Set(result.workflow?.synthesis.filter((row) => row.status === "failed" || row.status === "sensitive").map((row) => row.session) ?? []), succeeded = new Set(result.nativeArchive ? result.nativeArchive.filter((row) => ["archived", "already-archived", "empty-archived"].includes(row.status)).map((row) => row.session) : result.results.filter((row) => (row.action === "archived" || row.action === "skipped") && !incomplete.has(row.session)).map((row) => row.session));
         this.state.set({ selected: s.selected.filter((id) => !succeeded.has(id)), phase: "idle", mode: modeOf(result, s.mode), preview: null, result, error: null, errorDetail: null });
@@ -6029,12 +6029,13 @@ function apply(ctx) {
         archiveDisposed = !0;
       });
       let batch = new BatchController({
-        preview: (ids) => feed.previewArchive(ids),
-        commit: async (token) => {
+        preview: (ids, mode) => feed.previewArchive(ids, mode),
+        commit: async (token, mode) => {
           let captured = model.getSnapshot().groups.flatMap((group) => group.entries), result = await feed.commitArchive(token), nativeArchive = await archiveCompletedSessions(result, {
             captured,
             current: () => model.getSnapshot().groups.flatMap((group) => group.entries),
             archivedIds: () => workspaces?.list.getSnapshot().archivedSessionIds ?? [],
+            mode,
             archive: (id) => navigation?.archiveSession ? navigation.archiveSession(id) : Promise.reject(new Error("NATIVE_ARCHIVE_UNAVAILABLE")),
             disposed: () => archiveDisposed
           });

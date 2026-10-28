@@ -13,7 +13,7 @@ export interface BatchState {
 }
 export interface ArchiveTransport {
     preview(ids: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>;
-    commit(token: string): Promise<ArchiveSummary>;
+    commit(token: string, mode?: ArchiveMode): Promise<ArchiveSummary>;
 }
 /** One shared, explicit preview/confirm/write state machine for both views. */
 export declare class BatchController {

@@ -50,10 +50,10 @@ git remote 里内嵌的凭据（如 `https://x-access-token:TOKEN@host/repo.git`
 
 ## 安装与兼容性
 
-从本仓库 Releases 下载 `dsh-session-board-0.8.7.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
+从本仓库 Releases 下载 `dsh-session-board-0.8.8.tgz`，在 **DSH 设置 → 插件 → 添加插件** 中安装。
 
 ```sh
-dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.7.tgz
+dsh plugin --profile desktop add /absolute/path/to/dsh-session-board-0.8.8.tgz
 ```
 
 升级后请**完全退出并重开 DSH**，单纯刷新页面可能出现新客户端搭配旧服务端的情况。插件会检查 Wiki 后台协议，版本不一致时要求重启。

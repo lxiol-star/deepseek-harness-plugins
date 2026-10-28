@@ -16,7 +16,7 @@ export interface BatchState {
 }
 export interface ArchiveTransport {
   preview(ids: readonly string[], mode?: ArchiveMode): Promise<ArchivePreview>
-  commit(token: string): Promise<ArchiveSummary>
+  commit(token: string, mode?: ArchiveMode): Promise<ArchiveSummary>
 }
 
 /**
@@ -95,7 +95,7 @@ export class BatchController {
     if (this.disposed || s.phase !== 'confirming' || s.preview === null) return
     this.state.set({ ...s, phase: 'archiving', error: null, errorDetail: null })
     try {
-      const result = await this.transport.commit(s.preview.token)
+      const result = await this.transport.commit(s.preview.token, s.mode)
       if (this.disposed) return
       const incomplete = new Set(result.workflow?.synthesis.filter(row => row.status === 'failed' || row.status === 'sensitive').map(row => row.session) ?? [])
       const succeeded = new Set(result.nativeArchive

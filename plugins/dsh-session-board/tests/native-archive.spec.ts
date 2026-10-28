@@ -44,6 +44,13 @@ describe('native DSH archive after the Wiki workflow', () => {
     expect(await archiveCompletedSessions(rawOnly, options(archive))).toEqual([{ session: 'one', status: 'wiki-failed' }])
     expect(archive).not.toHaveBeenCalled()
   })
+  it('archives archive-only rows without requiring synthesis', async () => {
+    const archive = vi.fn(async () => {})
+    const rawOnly = summary()
+    delete rawOnly.workflow
+    expect(await archiveCompletedSessions(rawOnly, options(archive, { mode: 'archive' }))).toEqual([{ session: 'one', status: 'archived' }])
+    expect(archive).toHaveBeenCalledWith('one')
+  })
   it('keeps sessions with newer content or active work in the workspace', async () => {
     const archive = vi.fn(async () => {})
     expect(await archiveCompletedSessions(summary(), options(archive, { current: () => [entry({ updatedAt: 5000 })] }))).toEqual([{ session: 'one', status: 'changed' }])

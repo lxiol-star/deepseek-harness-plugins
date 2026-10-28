@@ -1,4 +1,4 @@
-import type { ArchiveSummary } from '../shared/archive.ts';
+import type { ArchiveMode, ArchiveSummary } from '../shared/archive.ts';
 import type { BoardEntry } from '../shared/types.ts';
 export type NativeArchiveOutcome = 'archived' | 'already-archived' | 'empty-archived' | 'active' | 'changed' | 'unavailable' | 'wiki-failed' | 'failed';
 export interface NativeArchiveResult {
@@ -11,6 +11,8 @@ export interface NativeArchiveOptions {
     archivedIds: () => readonly string[];
     archive: (id: string) => Promise<void>;
     disposed: () => boolean;
+    /** The batch mode: archive-only has no synthesis rows to wait for. */
+    mode?: ArchiveMode | undefined;
 }
 /** DSH owns its archive set. Never stop active work or archive newer messages. */
 export declare function archiveCompletedSessions(summary: ArchiveSummary, options: NativeArchiveOptions): Promise<NativeArchiveResult[]>;
