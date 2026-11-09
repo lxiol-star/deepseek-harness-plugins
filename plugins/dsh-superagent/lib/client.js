@@ -3209,11 +3209,11 @@ window.__ModuleLoader__.load({
 				}),
 				data && (data.items.length ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
 					className: "dt-list",
-					children: data.items.map((ticket) => ticket.stage === "person" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketLine, {
+					children: data.items.map((ticket) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketLine, {
 						ticket,
-						question: true,
+						...ticket.stage === "person" ? { question: true } : {},
 						onChanged: reloadTickets
-					}, ticket.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketLine, { ticket }, ticket.id))
+					}, ticket.id))
 				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Hint, { children: t("none") })),
 				data?.next_offset != null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LoadMore, { onMore: () => setLimit(limit + 20) })
 			] });

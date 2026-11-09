@@ -43,9 +43,8 @@ export function ExecutionStatus({ filter: current, state, reload }: {
     </div>
     {current === 'idle' && <Hint>{t('idleHint')}</Hint>}
     <LoadState error={error} loading={!data} />
-    {data && (data.items.length ? <ul className="dt-list">{data.items.map(ticket => ticket.stage === 'person'
-      ? <TicketLine key={ticket.id} ticket={ticket} question
-        onChanged={reloadTickets} /> : <TicketLine key={ticket.id} ticket={ticket} />)}</ul> : <Hint>{t('none')}</Hint>)}
+    {data && (data.items.length ? <ul className="dt-list">{data.items.map(ticket => <TicketLine key={ticket.id} ticket={ticket}
+      {...ticket.stage === 'person' ? { question: true } : {}} onChanged={reloadTickets} />)}</ul> : <Hint>{t('none')}</Hint>)}
     {data?.next_offset != null && <LoadMore onMore={() => setLimit(limit + 20)} />}
   </>
 }
