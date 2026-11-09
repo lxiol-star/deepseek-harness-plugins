@@ -9305,6 +9305,19 @@ const WORK_TOOLS = [
 ];
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = "Reports, follow_up notices, new candidates and a background job's end with its output arrive by themselves as messages; end the turn instead of waiting for them.";
+/** What the main Session is told when it would wait on an agent of its own: that agent's message arrives by itself too. */
+const NO_WAIT_AGENT = "A teammate or subagent reports by itself as a message; end the turn instead of waiting for it.";
+/**
+* Tools that hold the turn until other agents finish. A profile can register them in the Session's own scope, which
+* `tools.restrict` does not cover (it only filters inherited globals), so the guard refuses them by name for the main Session.
+*/
+const WAITING_TOOLS = /* @__PURE__ */ new Set([
+	"wait_agent",
+	"subagent",
+	"subagent_fork",
+	"ralph",
+	"workflow"
+]);
 /** What a main Session under `standard` is told when its command would wait the shell's default. */
 const DEFAULT_WAIT = "This shell waits up to 60 seconds by default: pass timeoutMs of at most 30000, or run_in_background, as a waiting step holds back new candidates.";
 /** `sleep` at a command position: the start, after ; & | ( { ! ` or a newline, or after a keyword or a command that runs it. */
@@ -9316,6 +9329,7 @@ const SLEEP = /(?:^|[;&|({!`\n]|\b(?:do|then|else|elif|if|while|until|time|exec|
 * job wait its timeout; the router preset ends both after 5 seconds.
 */
 function noWait({ name, arguments: input }, routed) {
+	if (WAITING_TOOLS.has(name)) return NO_WAIT_AGENT;
 	const args = input ?? {};
 	if (name === "bash") {
 		if (typeof args.command === "string" && SLEEP.test(args.command) || typeof args.timeoutMs === "number" && args.timeoutMs > 3e4) return NO_WAIT;

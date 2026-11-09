@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 — 2026-11-09
+
+- **修复主会话仍能等待子 agent**：装了 Agent Teams 的 profile 把 `wait_agent`/`spawn_teammate`/`team_task_*` 注册在**会话自己的 scope**，而 `tools.restrict` 只过滤继承来的全局工具，白名单管不到它们——于是主会话拿到 `wait_agent` 后会阻塞（实测一次会话 17:11–17:22 连续 `wait_agent` 180s/240s）。
+- 现在 guard 按名字拒绝会「等别的 agent」的工具：`wait_agent`、`subagent`、`subagent_fork`、`ralph`、`workflow`，并回一句「对方的报告会自己作为消息到达，结束本轮」。只派发/发消息的工具（`spawn_teammate`、`send_message`、`interrupt_agent`、`list_agents`、`team_task_*`）不受影响。
+- 单测覆盖：主会话拒绝上述 5 个工具、放行派发类工具；worker 行为不变。
+
 ## 0.2.3 — 2026-11-09
 
 - 主会话提示词增加一条硬规则：**不要在会话里等待或轮询**——开一张工单或一个后台任务，结束本轮，结果会以消息的形式回来触发下一次处理（I/O 多路复用的写法）。配合既定 preset（无 wait/poll 工具、前台命令 5 秒转后台、禁写文件），主会话只接请求与答问。

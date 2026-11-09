@@ -1531,6 +1531,13 @@ it('refuses the main Session a bash command that runs sleep and a long job wait,
   expect(main({ name: 'job_output', arguments: { job_id: 'j', wait: true, timeout_ms: 30_000 } })).toMatch(/^Reports/)
   expect(main({ name: 'job_output', arguments: { job_id: 'j', wait: true, timeout_ms: 5_000 } })).toBeUndefined()
   expect(main({ name: 'job_output', arguments: { job_id: 'j' } })).toBeUndefined()
+  // A profile that registers agent tools in the Session's own scope (Agent Teams does) gets past `restrict`, which only
+  // filters inherited globals; the guard still refuses the ones that hold the turn until another agent reports, whose
+  // message arrives by itself. Tools that only start or message an agent run.
+  for (const name of ['wait_agent', 'subagent', 'subagent_fork', 'ralph', 'workflow'])
+    expect(main({ name, arguments: {} }), name).toMatch(/^A teammate or subagent reports by itself/)
+  for (const name of ['spawn_teammate', 'send_message', 'interrupt_agent', 'list_agents', 'team_task_list'])
+    expect(main({ name, arguments: {} }), name).toBeUndefined()
   // A main Session created before runs under standard, whose shell waits 60 seconds by default and whose job waits last 30:
   // a command without a timeout runs in the background or names one, and a job wait names one.
   ;(agents.get(runtime.masterId) as unknown as { session: { header: { agentPreset: string } } }).session.header = { agentPreset: 'standard' }
