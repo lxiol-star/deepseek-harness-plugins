@@ -169,6 +169,12 @@ export class Engine {
    */
   stopTicket(ticketId: string, reason?: string): Ticket { return this.repo.atomic(() => this.tickets.stop(ticketId, reason)) }
   /**
+   * A person clears a ticket from the panel: an open one is ended as stopped by a person first, and the record is marked
+   * dismissed so lists leave it out. The stored history keeps it.
+   * @throws UserError when the ticket is unknown.
+   */
+  dismissTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.dismiss(ticketId)) }
+  /**
    * A person retries a ticket whose worker reported failed or blocked (or whose input delivery failed): the stalled
    * Assignment ends and a new one starts under the same Mandate.
    * @throws UserError when the ticket is unknown, has ended, or is not retryable.
@@ -270,9 +276,9 @@ export class Engine {
 /** What Sources ask and tell the Engine. */
 export type EngineForSources = Pick<Engine, 'receive' | 'bindThread' | 'threadClosed'>
 /** What the main Session asks of the Engine. */
-export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask'>
+export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask' | 'dismissTicket'>
 /** What people ask of the Engine, through the panel or the main Session. */
-export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss' | 'dismissTicket'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */

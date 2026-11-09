@@ -1,4 +1,4 @@
-import { $ as Thread, A as ReplyStatus, B as ChannelRef, C as DomainEvent, Ct as ReasonCode, D as OutboundMessage, Dt as Deployment, E as GateResult, Et as Config, F as ActorRef, G as Follow, H as DecisionKind, I as AdmissionCell, J as MandateBasis, K as FollowupRecords, L as Assignment, M as ScopeResult, N as SourceScope, O as Outbox, Ot as DeploymentConfig, P as AcceptMode, Q as Text, R as AssignmentState, S as Candidate, St as Reason, T as Executor, Tt as said, U as Evaluation, V as Decision, W as Execution, X as ReportState, Y as PolicyEffect, Z as Strength, _t as settled, at as TicketInput, b as AssessmentOutcome, bt as waitsForPerson, ct as TriggerDisposition, dt as latestAssignment, et as ThreadFact, ft as latestReport, gt as runningAssignment, ht as readUntil, it as TicketEndBy, j as Repositories, k as Policy, lt as followupOwners, mt as reached, nt as ThreadRef, ot as TicketOutcome, pt as liveTicket, q as Mandate, rt as Ticket, st as Trigger, tt as ThreadFacts, ut as isoTime, v as Settings, vt as threadKey, w as DomainEvents, wt as reasonText, x as Assessor, xt as REASONS, y as ReceiveResult, yt as ticketOutcome, z as Attention } from "./store-DytLJokq.js";
+import { $ as Thread, A as ReplyStatus, B as ChannelRef, C as DomainEvent, Ct as ReasonCode, D as OutboundMessage, Dt as Deployment, E as GateResult, Et as Config, F as ActorRef, G as Follow, H as DecisionKind, I as AdmissionCell, J as MandateBasis, K as FollowupRecords, L as Assignment, M as ScopeResult, N as SourceScope, O as Outbox, Ot as DeploymentConfig, P as AcceptMode, Q as Text, R as AssignmentState, S as Candidate, St as Reason, T as Executor, Tt as said, U as Evaluation, V as Decision, W as Execution, X as ReportState, Y as PolicyEffect, Z as Strength, _t as settled, at as TicketInput, b as AssessmentOutcome, bt as waitsForPerson, ct as TriggerDisposition, dt as latestAssignment, et as ThreadFact, ft as latestReport, gt as runningAssignment, ht as readUntil, it as TicketEndBy, j as Repositories, k as Policy, lt as followupOwners, mt as reached, nt as ThreadRef, ot as TicketOutcome, pt as liveTicket, q as Mandate, rt as Ticket, st as Trigger, tt as ThreadFacts, ut as isoTime, v as Settings, vt as threadKey, w as DomainEvents, wt as reasonText, x as Assessor, xt as REASONS, y as ReceiveResult, yt as ticketOutcome, z as Attention } from "./store-LYPmcn8x.js";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/core/part.d.ts
 interface EngineOptions {
@@ -169,6 +169,12 @@ declare class Engine {
    */
   stopTicket(ticketId: string, reason?: string): Ticket;
   /**
+   * A person clears a ticket from the panel: an open one is ended as stopped by a person first, and the record is marked
+   * dismissed so lists leave it out. The stored history keeps it.
+   * @throws UserError when the ticket is unknown.
+   */
+  dismissTicket(ticketId: string): Ticket;
+  /**
    * A person retries a ticket whose worker reported failed or blocked (or whose input delivery failed): the stalled
    * Assignment ends and a new one starts under the same Mandate.
    * @throws UserError when the ticket is unknown, has ended, or is not retryable.
@@ -243,9 +249,9 @@ declare class Engine {
 /** What Sources ask and tell the Engine. */
 type EngineForSources = Pick<Engine, 'receive' | 'bindThread' | 'threadClosed'>;
 /** What the main Session asks of the Engine. */
-type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask'>;
+type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask' | 'dismissTicket'>;
 /** What people ask of the Engine, through the panel or the main Session. */
-type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss'>;
+type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss' | 'dismissTicket'>;
 /** What Settings tells the Engine. */
 type EngineForSettings = Pick<Engine, 'policyChanged'>;
 /** What the Executor tells the Engine, and what its workers ask of it. */

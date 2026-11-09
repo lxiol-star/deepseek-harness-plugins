@@ -440,6 +440,8 @@ interface Ticket {
     outcome: TicketOutcome;
     reason?: string;
   };
+  /** A person dismissed the record: lists leave it out and an open ticket is ended first; the stored history keeps it. */
+  dismissed?: boolean;
   /** Open question for a person; cleared by the executor or when the ticket ends. */
   attention?: Attention;
   assignments: Assignment[];

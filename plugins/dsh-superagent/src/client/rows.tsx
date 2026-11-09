@@ -38,6 +38,9 @@ export function TicketLine({ ticket, question, onChanged, context }: {
         {ticket.actions.stop && <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('stopConfirmTitle')}
           message={t('stopConfirm', { title: ticket.title })}
           onConfirm={() => after(call('POST tickets/:id/stop', { id: ticket.id }))} />}
+        {ticket.actions.dismiss && <ConfirmButton variant="outline" icon="stop" label={t('dismissTicket')} title={t('dismissTicketTitle')}
+          message={t('dismissTicketConfirm', { title: ticket.title })}
+          onConfirm={() => after(call('POST tickets/:id/dismiss', { id: ticket.id }))} />}
       </>}</div>
     </div>
   </li>

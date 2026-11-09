@@ -20,7 +20,7 @@ const RoutingNoteSchema = z.string().trim()
   .describe(`Optional routing background or explicit human constraint, at most ${NOTE_WORDS} words. Never add implementation instructions or replace the original source.`)
 export interface MainToolsHost {
   readonly context: Context
-  readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask'> & EngineForPeople
+  readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note' | 'operatorTask' | 'dismissTicket'> & EngineForPeople
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'replyStatus' | 'settings'>
   readonly prompts: Pick<Prompts, 'preview' | 'save'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
@@ -169,7 +169,7 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
     routeTool(host),
     tool({
       name: 'orchestrator_task',
-      description: 'Open a ticket for work the operator asks for in this Session. Use it when the operator states a task here instead of a Source event; do not do the work yourself. The worker runs in a child worktree under the operator workspace.',
+      description: 'Open a ticket for the operator\'s task here; its worker runs in a child worktree under the operator workspace.',
       schema: z.object({
         title: z.string().trim().min(1).max(200).describe('A short label of the request, without added requirements.'),
         instruction: z.string().trim().min(1).max(20000).describe('The request as the operator stated it.'),
@@ -189,6 +189,12 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       description: 'Start a new assignment on an explicit human request to retry a ticket whose worker reported failed or blocked, or whose input was not delivered; the stalled one ends.',
       schema: z.object({ ticket_id: z.string() }).strict(),
       execute: async args => routed(host, { reason: 'Started a new assignment', ticketId: host.engine.retryTicket(args.ticket_id).id }),
+    }),
+    tool({
+      name: 'orchestrator_ticket_dismiss',
+      description: 'Clear a failed, blocked or finished ticket from the lists when asked; an open one is stopped first.',
+      schema: z.object({ ticket_id: z.string() }).strict(),
+      execute: async args => routed(host, { reason: 'Dismissed the ticket record', ticketId: host.engine.dismissTicket(args.ticket_id).id }),
     }),
     tool({
       name: 'orchestrator_ticket_request_status',

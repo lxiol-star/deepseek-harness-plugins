@@ -162,6 +162,19 @@ export class Tickets extends EnginePart {
     return this.require(ticketId)
   }
   /**
+   * A person dismisses a ticket's record: an open ticket is ended as stopped by a person first, then the record is marked so
+   * lists and the panel leave it out. The stored history keeps it for audit.
+   * @throws UserError when the ticket is unknown.
+   */
+  dismiss(ticketId: string): Ticket {
+    if (liveTicket(this.require(ticketId))) this.end(ticketId, 'human', 'stopped', this.now(), 'dismissed')
+    const ticket = this.require(ticketId)
+    ticket.dismissed = true
+    ticket.updatedAt = this.now()
+    this.repo.tickets.save(ticket)
+    return ticket
+  }
+  /**
    * Ends the stalled assignment of a retryable open ticket (`failed`, `blocked`, or failed input delivery) and starts a new one.
    * @throws UserError when the ticket is unknown or not retryable.
    */

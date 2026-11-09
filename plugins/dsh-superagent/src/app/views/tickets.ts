@@ -36,7 +36,8 @@ export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'],
   const view = snapshot(host)
   const { store } = view
   const shown = (ticket: Ticket) => stage === 'open' ? liveTicket(ticket) : ticketStage(ticket).stage === stage
-  const tickets = (stage === 'ended' ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst)
+  const tickets = (stage === 'ended' ? store.tickets.list() : store.tickets.open())
+    .filter(ticket => !ticket.dismissed).filter(shown).sort(newestFirst)
   const result = page(tickets, offset, limit)
   return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
 }

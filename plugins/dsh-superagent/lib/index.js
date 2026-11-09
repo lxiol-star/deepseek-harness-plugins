@@ -416,6 +416,19 @@ var Tickets = class extends EnginePart {
 		return this.require(ticketId);
 	}
 	/**
+	* A person dismisses a ticket's record: an open ticket is ended as stopped by a person first, then the record is marked so
+	* lists and the panel leave it out. The stored history keeps it for audit.
+	* @throws UserError when the ticket is unknown.
+	*/
+	dismiss(ticketId) {
+		if (liveTicket(this.require(ticketId))) this.end(ticketId, "human", "stopped", this.now(), "dismissed");
+		const ticket = this.require(ticketId);
+		ticket.dismissed = true;
+		ticket.updatedAt = this.now();
+		this.repo.tickets.save(ticket);
+		return ticket;
+	}
+	/**
 	* Ends the stalled assignment of a retryable open ticket (`failed`, `blocked`, or failed input delivery) and starts a new one.
 	* @throws UserError when the ticket is unknown or not retryable.
 	*/
@@ -1783,6 +1796,14 @@ var Engine = class {
 	*/
 	stopTicket(ticketId, reason) {
 		return this.repo.atomic(() => this.tickets.stop(ticketId, reason));
+	}
+	/**
+	* A person clears a ticket from the panel: an open one is ended as stopped by a person first, and the record is marked
+	* dismissed so lists leave it out. The stored history keeps it.
+	* @throws UserError when the ticket is unknown.
+	*/
+	dismissTicket(ticketId) {
+		return this.repo.atomic(() => this.tickets.dismiss(ticketId));
 	}
 	/**
 	* A person retries a ticket whose worker reported failed or blocked (or whose input delivery failed): the stalled
@@ -3412,7 +3433,8 @@ function ticketSummary(ticket) {
 		...note ? { note } : {},
 		actions: {
 			retry: canRetry(ticket),
-			stop: liveTicket(ticket)
+			stop: liveTicket(ticket),
+			dismiss: ticket.dismissed !== true
 		},
 		strength: ticket.mandate.strength,
 		ended: ticket.ended,
@@ -7418,7 +7440,7 @@ function ticketList(host, stage, offset, limit) {
 	const view = snapshot(host);
 	const { store } = view;
 	const shown = (ticket) => stage === "open" ? liveTicket(ticket) : ticketStage(ticket).stage === stage;
-	const tickets = (stage === "ended" ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst);
+	const tickets = (stage === "ended" ? store.tickets.list() : store.tickets.open()).filter((ticket) => !ticket.dismissed).filter(shown).sort(newestFirst);
 	const result = page(tickets, offset, limit);
 	return {
 		...result,
@@ -7588,7 +7610,7 @@ function overview(host, health, policyVersionValue, load, setup) {
 			}
 		}))
 	];
-	const open = store.tickets.open().sort(newestFirst);
+	const open = store.tickets.open().filter((ticket) => !ticket.dismissed).sort(newestFirst);
 	const stats = Object.values(store.read.triggerStats(since));
 	const received = stats.reduce((sum, item) => sum + item.received, 0), filtered = stats.reduce((sum, item) => sum + item.filtered, 0);
 	const judgement = store.read.flow(since);
@@ -8744,6 +8766,11 @@ function routes(runtime) {
 			const id = ticket(params.id);
 			runtime.engine.stopTicket(id);
 			return { stopped: true };
+		},
+		"POST tickets/:id/dismiss": ({ params }) => {
+			const id = ticket(params.id);
+			runtime.engine.dismissTicket(id);
+			return { dismissed: true };
 		},
 		"POST executor/pause": async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).parse(await body()).paused, "panel"),
 		"PUT settings/:block": async ({ params, body }) => {
@@ -9910,7 +9937,7 @@ function mainTools(host, agent) {
 		routeTool(host),
 		tool({
 			name: "orchestrator_task",
-			description: "Open a ticket for work the operator asks for in this Session. Use it when the operator states a task here instead of a Source event; do not do the work yourself. The worker runs in a child worktree under the operator workspace.",
+			description: "Open a ticket for the operator's task here; its worker runs in a child worktree under the operator workspace.",
 			schema: z.object({
 				title: z.string().trim().min(1).max(200).describe("A short label of the request, without added requirements."),
 				instruction: z.string().trim().min(1).max(2e4).describe("The request as the operator stated it."),
@@ -9942,6 +9969,15 @@ function mainTools(host, agent) {
 			execute: async (args) => routed(host, {
 				reason: "Started a new assignment",
 				ticketId: host.engine.retryTicket(args.ticket_id).id
+			})
+		}),
+		tool({
+			name: "orchestrator_ticket_dismiss",
+			description: "Clear a failed, blocked or finished ticket from the lists when asked; an open one is stopped first.",
+			schema: z.object({ ticket_id: z.string() }).strict(),
+			execute: async (args) => routed(host, {
+				reason: "Dismissed the ticket record",
+				ticketId: host.engine.dismissTicket(args.ticket_id).id
 			})
 		}),
 		tool({

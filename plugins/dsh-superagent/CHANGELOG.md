@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-11-09
+
+- **工单记录可以清除了**：新增「清除」动作（面板工单行与工单详情页），把失败/阻塞/已结束的工单从列表里移走；仍在运行的会先按「人停止」结束，记录保留在历史里、不删除数据。
+- 新增 `POST tickets/:id/dismiss` 与主会话工具 `orchestrator_ticket_dismiss`，`Ticket.dismissed` 字段用于列表过滤（概览、工单列表）。
+- 修复：来源为另一台设备时，模型配置错误造成的失败工单此前没有任何清理入口，只能一直挂在「待处理失败」。
+- 测试：新增 dismiss 单测；`docs/007-architecture.md` 补上 workspace/session 源；主线 prompt 预算内。
+
 ## 0.2.0 — 2026-11-09
 
 从 `hxh230802/dsh-superagent-prototype` 的 fork 收编进本仓库，并加上「本地工作区 + 主会话任务」两条不依赖 GitHub 的链路。

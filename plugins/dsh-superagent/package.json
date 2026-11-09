@@ -2,9 +2,9 @@
   "name": "dsh-superagent",
   "author": "DeepSeek Harness Team <team@dsh.dev>",
   "license": "MIT",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
-  "description": "A proactive agent as a DSH (DeepSeek Harness) bundle: an operator asks for work in the main Session or a Source (local workspace tree, MSP signals, GitHub, Feishu) reports an event, a Policy evaluates it, a Ticket is opened, and its worker runs in a child worktree under the workspace.",
+  "description": "A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -133,14 +133,5 @@
     "url": "git+https://github.com/lxiol-star/deepseek-harness-plugins.git",
     "directory": "plugins/dsh-superagent"
   },
-  "homepage": "https://github.com/lxiol-star/deepseek-harness-plugins/tree/main/plugins/dsh-superagent",
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "superagent",
-    "agent",
-    "msp",
-    "workspace"
-  ]
+  "homepage": "https://github.com/lxiol-star/deepseek-harness-plugins/tree/main/plugins/dsh-superagent"
 }

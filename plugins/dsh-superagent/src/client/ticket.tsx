@@ -194,5 +194,10 @@ export function TicketPage({ id }: { id: string }) {
       <ConfirmButton variant="outline" label={t('stop')} title={t('stopConfirmTitle')} message={t('stopConfirm', { title: data.title })}
         onConfirm={() => after(call('POST tickets/:id/stop', { id }))} />
     </div>}
+    {data.actions.dismiss && <div className="dt-danger-zone">
+      <span className="dt-hint">{t('dismissTicketHint')}</span>
+      <ConfirmButton variant="outline" label={t('dismissTicket')} title={t('dismissTicketTitle')} message={t('dismissTicketConfirm', { title: data.title })}
+        onConfirm={() => after(call('POST tickets/:id/dismiss', { id }))} />
+    </div>}
   </>
 }

@@ -1619,3 +1619,16 @@ describe('ignores from the card', () => {
     expect(() => h.engine.decide('5', { kind: 'accept', title: 'Fix', scope: 'small', reason: 'chat' })).toThrow(new UserError('notExplicit'))
   })
 })
+
+describe('dismissing a ticket', () => {
+  it('ends an open ticket as stopped by a person and marks the record dismissed', async () => {
+    const h = harness()
+    const decision = accepted(h)
+    const ticketId = decision.ticketId!
+    const dismissed = h.engine.dismissTicket(ticketId)
+    expect(dismissed.ended).toMatchObject({ by: 'human', outcome: 'stopped' })
+    expect(dismissed.dismissed).toBe(true)
+    // Dismissing again only re-marks the same record; an ended ticket is not re-ended.
+    expect(h.engine.dismissTicket(ticketId).dismissed).toBe(true)
+  })
+})

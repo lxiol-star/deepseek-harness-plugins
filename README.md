@@ -34,7 +34,7 @@
 
 ```text
 # 主动式 Super-agent
-github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.0&path:/plugins/dsh-superagent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.1&path:/plugins/dsh-superagent
 # 会话看板
 github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.10&path:/plugins/dsh-session-board
 # 推理强度滑条

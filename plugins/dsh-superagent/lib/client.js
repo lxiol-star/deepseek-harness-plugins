@@ -1956,6 +1956,14 @@ window.__ModuleLoader__.load({
 									title: t("stopConfirmTitle"),
 									message: t("stopConfirm", { title: ticket.title }),
 									onConfirm: () => after(call("POST tickets/:id/stop", { id: ticket.id }))
+								}),
+								ticket.actions.dismiss && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ConfirmButton, {
+									variant: "outline",
+									icon: "stop",
+									label: t("dismissTicket"),
+									title: t("dismissTicketTitle"),
+									message: t("dismissTicketConfirm", { title: ticket.title }),
+									onConfirm: () => after(call("POST tickets/:id/dismiss", { id: ticket.id }))
 								})
 							] })
 						})
@@ -3465,6 +3473,10 @@ window.__ModuleLoader__.load({
 			none: ["暂无。", "None."],
 			openSession: ["打开 Session", "Open Session"],
 			stop: ["停止", "Stop"],
+			dismissTicket: ["清除", "Dismiss"],
+			dismissTicketTitle: ["清除工单记录", "Dismiss ticket record"],
+			dismissTicketConfirm: ["清除「{title}」的记录？运行中的会先停止，记录从列表移除（历史仍保留）。", "Dismiss the record of \"{title}\"? Running work stops first, and the record leaves the lists; history stays."],
+			dismissTicketHint: ["清除后不再出现在列表里，历史记录保留。", "After dismissing it leaves the lists; the stored history stays."],
 			policyVersion: ["策略版本", "Policy version"],
 			mediaMarker: ["[媒体]", "[Media]"],
 			forwardMarker: ["[合并转发]", "[Merged forward]"],
@@ -6354,6 +6366,19 @@ window.__ModuleLoader__.load({
 						title: t("stopConfirmTitle"),
 						message: t("stopConfirm", { title: data.title }),
 						onConfirm: () => after(call("POST tickets/:id/stop", { id }))
+					})]
+				}),
+				data.actions.dismiss && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "dt-danger-zone",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "dt-hint",
+						children: t("dismissTicketHint")
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ConfirmButton, {
+						variant: "outline",
+						label: t("dismissTicket"),
+						title: t("dismissTicketTitle"),
+						message: t("dismissTicketConfirm", { title: data.title }),
+						onConfirm: () => after(call("POST tickets/:id/dismiss", { id }))
 					})]
 				})
 			] });
