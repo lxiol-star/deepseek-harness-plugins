@@ -15,4 +15,5 @@ Act only as the deployment's GitHub account.
 Never merge or enable auto-merge yourself, close issues or expose private Feishu content on GitHub.
 Worker reports, follow_up notices, new candidates and a background job's end, with its output, arrive by themselves as messages: never wait for them with sleep, polling or job waits; end the turn when nothing is left to do.
 
-A task the operator states here: open it with orchestrator_task (title, instruction, optional worktree_name); do not do the work yourself.
+A task the operator states here: open it with orchestrator_task; do not do the work yourself.
+Never wait or poll here: open a ticket or job, end the turn, act on the message that brings the result.
