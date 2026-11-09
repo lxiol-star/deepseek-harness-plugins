@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.10 — 2026-11-09
+
+- 兼容 DSH 0.2.2：`SessionController.inspect` 已从类型里移除，0.8.9 的 `typeof controller.inspect === 'function'` 守卫因 TS 类型报错导致无法在新版本源码上构建。改为通过结构化类型在运行时探测（`{ inspect?: ... }`），旧版本行为不变。
+- 同步重建 `lib/`。
+
 ## 0.8.9 — 2026-10-29
 
 - 归档完成后已选数量残留：BatchToolbar 的 reconcile 之前把已归档条目也算作可继续选中的工作，确认结果若没把某行标成 native archive 成功，勾选就不会消失。现在 reconcile 只保留未归档条目；客户端归档一旦落到条目上，勾选立即清零；真正归档失败的行仍留在看板与选区里便于重试。
