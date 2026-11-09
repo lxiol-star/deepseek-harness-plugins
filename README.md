@@ -13,6 +13,7 @@
 | [dsh-think-bounce-pet](plugins/dsh-think-bounce-pet/) | 思考弹球桌宠：常驻球/思考球、拍飞与拖拽投掷、鼠标碰撞、重力与物理参数实时可调 | 上游 0.1.1，修复 macOS 窗口顶栏拖拽；收录社区插件（MIT），已在本地验证 |
 | [dsh-pet](plugins/dsh-pet/) | 桌面透明动画宠物（蓝毛小女仆等）：多开、大小/位置/显示位置可配、点击拖拽甩抛物理、余额动画、碎碎念与对话、表情包、DSH 工作状态联动，支持脱离浏览器的 Electron 桌面小窗 | 上游 0.3.8（MIT，`PC2005-cloud/dsh-pet`），完整发布包 vendored 到本仓库；已在 macOS Harness 0.2.1-rc.2 验证安装与运行 |
 | [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏视图切换（进行中 / 已归档 / 工作空间）：已归档档按工作区分组（默认折叠），展开可查看并取消归档/打开会话，工作空间档可挑历史工作区开新会话；没有可见会话的工作区在进行中视图隐藏 | 0.3.9，视图选择持久化；空白会话宽限期、设置页可改默认视图与诊断；插件更新后可在设置页「重新加载客户端插件」，强制卸载/重挂载第三方客户端插件（旧标签页也会重建），不刷新页面/不重启/不丢会话 |
+| [dsh-superagent](plugins/dsh-superagent/) | 主动式 Agent（Super-agent）：主会话里直接下任务开单，worker 在**该会话当前工作区**下的 `.dsh-superagent/work/` 子工作树执行；另有本地工作区树 Source、MSP 信号、GitHub、飞书四类事件来源；带经验库（ReActive fork）与策略评估 | 0.2.0，fork 自 `hxh230802/dsh-superagent-prototype`（MIT）并新增主会话任务直通与工作区树 Source；已在 Harness Dev 0.2.2-alpha.3 与 DSH 0.2.2-rc.1 验证「主会话下任务 → 工单 → 子工作树执行」全链路；实验性 |
 | [dsh-workspace-autoregister](plugins/dsh-workspace-autoregister/) | 会话中新建的工作区目录自动加入工作区列表，并创建首个空会话，无需在侧栏手动添加 | 0.1.0，Host-only，Node 测试 + desktop profile Host 侧端到端收录验证通过；窗口渲染未做 DOM 核对 |
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。
@@ -26,6 +27,8 @@
 也可通过支持 GitHub 子目录的 DSH 插件管理器安装指定版本：
 
 ```text
+# 主动式 Super-agent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.0&path:/plugins/dsh-superagent
 # 会话看板
 github:lxiol-star/deepseek-harness-plugins#dsh-session-board-v0.8.9&path:/plugins/dsh-session-board
 # 推理强度滑条
