@@ -1013,13 +1013,15 @@ window.__ModuleLoader__.load({
           }
           for (const sessionRow of document.querySelectorAll(`[data-row-key^="${SESSION_PREFIX}"]`)) {
             const id = (sessionRow.getAttribute('data-row-key') || '').slice(SESSION_PREFIX.length)
-            const keep = mode === 'active'
+            // The workspaces view lists every Workspace as a tree; its Session rows stay visible so the
+            // tree can be browsed. Only the archived view replaces the list and hides native rows.
+            const keep = mode === 'workspaces' ? true : mode === 'active'
               && stateVisible(stateOf(id, archived, summaries, includeBlank, graceMs, now))
             if (keep) sessionRow.removeAttribute(ATTR)
             else sessionRow.setAttribute(ATTR, '')
           }
           for (const overflowRow of document.querySelectorAll(`[data-row-key^="${OVERFLOW_PREFIX}"]`)) {
-            if (mode === 'workspaces') overflowRow.setAttribute(ATTR, '')
+            if (mode === 'archived') overflowRow.setAttribute(ATTR, '')
             else overflowRow.removeAttribute(ATTR)
           }
 

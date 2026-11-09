@@ -44,7 +44,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-think-bounce-pet-v0.1.1&path:/plu
 # 桌面宠物
 github:lxiol-star/deepseek-harness-plugins#dsh-pet-v0.3.8&path:/plugins/dsh-pet
 # 隐藏空工作区
-github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.0&path:/plugins/dsh-hide-empty-workspaces
+github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.1&path:/plugins/dsh-hide-empty-workspaces
 # 工作区自动收录
 github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.2&path:/plugins/dsh-workspace-autoregister
 ```

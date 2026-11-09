@@ -471,7 +471,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   await wait()
   check('workspaces view drops the archive mask', !world.listArea().hasAttribute('data-dsh-hew-archive'))
   check('workspaces view keeps every Workspace row', !world.hidden('ws-a') && !world.hidden('ws-b') && !world.hidden('ws-c'))
-  check('workspaces view hides Session rows', world.sessionHidden('s1'))
+  check('workspaces view keeps Session rows so the tree can be browsed', !world.sessionHidden('s1'))
   world.dispose()
   world.window.close()
 }
