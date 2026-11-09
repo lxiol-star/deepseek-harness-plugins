@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#e9dcc6" />
+  <meta name="description" content="微港 · Port Aurora —— 一座可自由旋转的超高精度微缩港口模型。岸桥、集装箱船、防波堤灯塔、老城与鱼市，全部由程序实时构建。" />
+  <title>微港 · Port Aurora — A Miniature Harbour</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23efe4d2'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%233c6b63' stroke-width='2.5'/%3E%3Cpath d='M32 10v44M10 32h44' stroke='%23b9935a' stroke-width='1.2'/%3E%3Cpath d='M32 18l4.6 9.4 10.4 1.5-7.5 7.3 1.8 10.3L32 41.6l-9.3 4.9 1.8-10.3-7.5-7.3 10.4-1.5z' fill='%23a65f47'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <canvas id="scene" aria-label="一座微缩港口模型：集装箱码头、岸桥、货轮、防波堤灯塔与老城，可拖拽自由旋转"></canvas>
+
+  <div class="screen-fx" aria-hidden="true">
+    <div class="grain"></div>
+    <div class="vignette"></div>
+    <div class="frame"></div>
+  </div>
+
+  <main class="ui" id="ui">
+    <header class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 68 68" fill="none">
+          <circle cx="34" cy="34" r="27" stroke="currentColor" stroke-width="1" opacity=".55" />
+          <circle cx="34" cy="34" r="21.5" stroke="currentColor" stroke-width=".6" opacity=".3" stroke-dasharray="1.5 3.5" />
+          <path d="M34 5v5M34 58v5M5 34h5M58 34h5" stroke="currentColor" stroke-width="1" opacity=".6" />
+          <path d="M34 15l4.9 14.1L53 34l-14.1 4.9L34 53l-4.9-14.1L15 34l14.1-4.9z" fill="none" stroke="currentColor" stroke-width="1.1" />
+          <circle cx="34" cy="34" r="2.1" fill="currentColor" />
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1 class="cn">微港<span class="dot">·</span><span class="sub-cn">壹号</span></h1>
+        <p class="en">PORT AURORA <span class="sep">/</span> A STUDY IN MINIATURE</p>
+        <p class="meta"><span>SCALE 1:1000</span><span class="rule"></span><span>程序实时建模 · 可自由环视</span></p>
+      </div>
+    </header>
+
+    <nav class="controls" aria-label="场景控制">
+      <button class="ctl" id="btn-orbit" type="button" aria-pressed="true" title="自动旋转 (空格)">
+        <span class="ctl-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke-linecap="round"/><path d="M20 4v4.5h-4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="ctl-text"><b>自动旋转</b><i>ORBIT</i></span>
+      </button>
+      <button class="ctl" id="btn-labels" type="button" aria-pressed="false" title="图解标注 (L)">
+        <span class="ctl-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6.5h9M4 12h14M4 17.5h7" stroke-linecap="round"/><circle cx="18.5" cy="6.5" r="1.6"/><circle cx="19" cy="17.5" r="1.6"/></svg>
+        </span>
+        <span class="ctl-text"><b>图解</b><i>EXPLODE</i></span>
+      </button>
+      <button class="ctl" id="btn-night" type="button" aria-pressed="false" title="昼 / 夜 (N)">
+        <span class="ctl-icon">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7" stroke-linecap="round"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.2 8.2 0 1 0 20 14.2z" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="ctl-text"><b class="day-label">夜航</b><b class="night-label">白昼</b><i>LIGHT</i></span>
+      </button>
+      <button class="ctl" id="btn-postcard" type="button" title="保存明信片 (P)">
+        <span class="ctl-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5.5" width="18" height="13" rx="1.5"/><circle cx="8.6" cy="10.2" r="1.6"/><path d="M3.6 16l4.6-4 3.4 3 2.8-2.4 5.8 5" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="ctl-text"><b>明信片</b><i>POSTCARD</i></span>
+      </button>
+    </nav>
+
+    <aside class="dossier" aria-label="模型档案">
+      <div class="dossier-head">
+        <span>模型档案</span><em>MODEL DOSSIER</em>
+      </div>
+      <dl class="dossier-grid">
+        <div><dt>部件</dt><dd data-stat="parts">—</dd><small>PARTS</small></div>
+        <div><dt>集装箱</dt><dd data-stat="containers">—</dd><small>TEU</small></div>
+        <div><dt>岸桥</dt><dd data-stat="cranes">—</dd><small>STS</small></div>
+        <div><dt>船舶</dt><dd data-stat="vessels">—</dd><small>VESSELS</small></div>
+        <div><dt>建筑</dt><dd data-stat="buildings">—</dd><small>BUILDINGS</small></div>
+        <div><dt>人物</dt><dd data-stat="people">—</dd><small>FIGURES</small></div>
+      </dl>
+      <p class="dossier-foot">露港海事博物馆 · 馆藏 01<br /><span>THE AURORA HARBOUR MUSEUM</span></p>
+    </aside>
+
+    <div class="compass" id="compass" aria-hidden="true">
+      <div class="compass-dial">
+        <span class="c-n">N</span><span class="c-e">E</span><span class="c-s">S</span><span class="c-w">W</span>
+        <svg class="compass-rose" viewBox="0 0 80 80" fill="none">
+          <circle cx="40" cy="40" r="31" stroke="currentColor" stroke-width=".6" opacity=".5" />
+          <circle cx="40" cy="40" r="25" stroke="currentColor" stroke-width=".5" opacity=".25" stroke-dasharray="1 4" />
+          <path class="needle" d="M40 14l5.2 20.5L40 40l-5.2-5.5z" fill="currentColor" />
+          <path d="M40 66l-5.2-20.5L40 40l5.2 5.5z" fill="currentColor" opacity=".35" />
+          <circle cx="40" cy="40" r="2" fill="currentColor" />
+        </svg>
+      </div>
+      <div class="scalebar">
+        <span class="scalebar-line" id="scalebar-line"></span>
+        <span class="scalebar-text" id="scalebar-text">100 m</span>
+      </div>
+    </div>
+
+    <div class="hint" id="hint">
+      <span class="hint-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V11m0-2.2a1.5 1.5 0 0 1 3 0V11m0-1.2a1.5 1.5 0 0 1 3 0v4.4c0 3.4-2.2 5.8-5.6 5.8S6 17.6 6 14.2V13a1.5 1.5 0 0 1 3 0" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="hint-copy"><b>拖拽旋转</b><i>拖拽环视 · 滚轮缩放 · 双击复位</i></span>
+    </div>
+
+    <div class="labels" id="labels" aria-hidden="true">
+      <svg class="label-lines" id="label-lines"></svg>
+      <div class="label-cards" id="label-cards"></div>
+    </div>
+  </main>
+
+  <div class="loader" id="loader">
+    <div class="loader-card">
+      <div class="loader-mark" aria-hidden="true">
+        <svg viewBox="0 0 96 96" fill="none">
+          <circle cx="48" cy="48" r="36" stroke="currentColor" stroke-width=".8" opacity=".35" />
+          <circle class="loader-ring" cx="48" cy="48" r="44" stroke="currentColor" stroke-width="1.2" />
+          <circle class="loader-ring b" cx="48" cy="48" r="40" stroke="currentColor" stroke-width=".6" opacity=".5" />
+          <path d="M48 9v7M48 80v7M9 48h7M80 48h7" stroke="currentColor" stroke-width="1" opacity=".6" />
+          <path d="M48 24l6.4 17.2L71 48l-16.6 6.8L48 72l-6.4-17.2L25 48l16.6-6.8z" fill="none" stroke="currentColor" stroke-width="1" />
+          <circle cx="48" cy="48" r="2.4" fill="currentColor" />
+        </svg>
+      </div>
+      <p class="loader-kicker">AURORA HARBOUR MUSEUM · COLLECTION 01</p>
+      <h2 class="loader-title">微港</h2>
+      <p class="loader-sub">正在组装一座微缩港口…</p>
+      <div class="loader-progress"><span id="loader-bar"></span></div>
+      <div class="loader-meta"><span id="loader-step">准备底板与海面</span><span id="loader-pct">0%</span></div>
+      <p class="loader-foot">PORT AURORA <span>·</span> SCALE 1:1000</p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="./vendor/three.min.js"></script>
+  <script src="./js/layout.js"></script>
+  <script src="./js/kit.js"></script>
+  <script src="./js/studio.js"></script>
+  <script src="./js/water.js"></script>
+  <script src="./js/post.js"></script>
+  <script src="./js/world/terrain.js"></script>
+  <script src="./js/world/terminal.js"></script>
+  <script src="./js/world/fleet.js"></script>
+  <script src="./js/world/town.js"></script>
+  <script src="./js/effects.js"></script>
+  <script src="./js/ui.js"></script>
+  <script src="./js/main.js"></script>
+</body>
+</html>

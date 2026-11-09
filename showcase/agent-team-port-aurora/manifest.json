@@ -1,0 +1,61 @@
+{
+  "name": "微港 · Port Aurora",
+  "slug": "agent-team-port-aurora",
+  "version": "1.0.0",
+  "type": "generated-showcase",
+  "generated_at": "2026-11-09T02:25:00+08:00",
+  "archived_at": "2026-11-09T14:20:00+08:00",
+  "generator": "DeepSeek Harness Agent Teams",
+  "runtime": {
+    "renderer": "Three.js r160 (UMD, vendored)",
+    "offline": true,
+    "entry": "source/index.html",
+    "standalone": "dist/aurora-harbour-standalone.html",
+    "requires_network": false
+  },
+  "agents": [
+    { "role": "Lead", "scope": "coordination, layout/contract, studio, water, post, UI, integration, QA" },
+    { "role": "terrain-civils", "scope": "island, coastline, quay walls, breakwater, lighthouse, roads, rail" },
+    { "role": "terminal-yard", "scope": "4 STS cranes, container yard, RTGs, terminal buildings, rail" },
+    { "role": "fleet", "scope": "container ship, tug, pilot boat, fishing boats, sailboat, buoys" },
+    { "role": "town", "scope": "old town, fish market, church, warehouses, people, trees, vehicles" },
+    { "role": "effects", "scope": "gulls, smoke, lighthouse beam, beacons, dust, flags" },
+    { "role": "verifier", "scope": "QA harness, screenshot matrix, interaction/perf/visual QA" }
+  ],
+  "stats": {
+    "parts": 14263,
+    "containers": 369,
+    "cranes": 4,
+    "vessels": 6,
+    "buildings": 45,
+    "people": 43,
+    "trees": 51,
+    "vehicles": 18,
+    "labels": 13,
+    "island_triangles": 19493
+  },
+  "qa": {
+    "report": "qa/report.json",
+    "result": "66 pass / 3 warn / 0 fail / 0 skip",
+    "fps_day": 60,
+    "fps_night": 60,
+    "draw_calls": 325,
+    "triangles": 489466,
+    "page_errors": 0,
+    "build_errors": [],
+    "warnings": [
+      "325 draw calls exceeds the self-imposed 220 target (60 fps held)",
+      "mobile post-processing contrast 0.71x vs post=0 (bloom veil on paper backdrop)"
+    ]
+  },
+  "scale": "1:1000, 1 world unit = 10 m",
+  "license": "Apache-2.0 (repository); third-party notices in THIRD_PARTY_NOTICES.md",
+  "files": {
+    "prompts": "prompts/",
+    "docs": "docs/",
+    "source": "source/",
+    "dist": "dist/aurora-harbour-standalone.html",
+    "screenshots": "screenshots/",
+    "qa": "qa/"
+  }
+}

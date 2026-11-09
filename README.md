@@ -18,6 +18,12 @@
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。
 
+## 生成案例 / Showcase
+
+| 案例 | 内容 | 说明 |
+| --- | --- | --- |
+| [agent-team-port-aurora](showcase/agent-team-port-aurora/) | 由 Lead + 6 个 DSH 智能体协作生成的「微港 · Port Aurora」：可自由旋转、可昼夜切换、可导出明信片的超高精度微型港口 | 完整提示词、可运行源码、单文件离线版、多角度截图、QA 矩阵与全分辨率明信片；本身不是插件包，作为 Agent Teams 产物归档/展示 |
+
 ## 安装
 
 从 [Releases](https://github.com/lxiol-star/deepseek-harness-plugins/releases) 下载所需插件的 `.tgz` 文件，在 DSH 的 **设置 → 插件 → 添加插件** 中选择本地包或填入绝对路径。
