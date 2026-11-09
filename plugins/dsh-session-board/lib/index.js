@@ -2633,9 +2633,10 @@ var ProjectCoordinators = class {
       return listed.items.some((item) => item.sessionId === sessionId) ? "live" : "missing";
     } catch {
     }
-    if (typeof controller.inspect === "function") {
+    const maybeInspect = controller.inspect;
+    if (typeof maybeInspect === "function") {
       try {
-        await controller.inspect(sessionId, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS));
+        await maybeInspect.call(controller, sessionId, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS));
         return "live";
       } catch {
       }

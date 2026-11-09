@@ -363,9 +363,11 @@ export class ProjectCoordinators {
     } catch {
       // A failed listing is not proof of absence; confirm through the log read.
     }
-    if (typeof controller.inspect === 'function') {
+    // `inspect` is optional across DSH versions: newer controllers dropped it, so probe at runtime.
+    const maybeInspect = (controller as { inspect?: (id: SessionId, signal: AbortSignal) => Promise<unknown> }).inspect
+    if (typeof maybeInspect === 'function') {
       try {
-        await controller.inspect(sessionId as SessionId, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS))
+        await maybeInspect.call(controller, sessionId as SessionId, AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS))
         return 'live'
       } catch {
         // Both reads failed: keep the record rather than creating a duplicate.
