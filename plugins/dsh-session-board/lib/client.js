@@ -2817,8 +2817,16 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   flex: 0 0 auto;
 }
 .sb-card-title {
+  display: flex;
+  align-items: center;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
   font-weight: 600;
   font-size: 13px;
   overflow: hidden;
@@ -2948,7 +2956,25 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   color: var(--dsw-alias-label-secondary);
   font-size: 11px;
 }
-.sb-batchbar__action, .sb-batchbar__clear { margin-left: auto; background: transparent; border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
+.sb-batchbar__action, .sb-batchbar__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: auto;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-batchbar__action:focus-visible, .sb-batchbar__clear:focus-visible {
+  outline: 2px solid var(--sb-focus-ring);
+  outline-offset: 1px;
+}
 .sb-batchbar__action:not(:disabled) { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, var(--dsw-alias-border-l2)); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, transparent); color: var(--dsw-alias-label-primary); }
 .sb-batchbar__action:not(:disabled):hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent); }
 .sb-batchbar__action.sb-batchbar__secondary { border-color: var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-secondary); }
