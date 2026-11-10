@@ -65,6 +65,7 @@ import {
   IconFolder,
   IconInfo,
   IconLayers,
+  IconLayoutGrid,
   IconMaximize,
   IconPanelLeftClose,
   IconPanelLeftOpen,
@@ -158,8 +159,9 @@ function workspaceRows(groups: readonly BoardGroup[], workspaces: WorkspaceSnaps
     }
     row.entries.push(entry)
   }
-  if (rows.size === 0 && workspaces !== null) {
+  if (workspaces !== null) {
     for (const item of workspaces.items) {
+      if (rows.has(item.workspaceId)) continue
       rows.set(item.workspaceId, {
         id: item.workspaceId,
         title: item.title ?? baseName(item.path),
@@ -348,12 +350,14 @@ function useManagerLayout(): {
   ))
   const persisted = useRef(false)
   useEffect(() => {
-    // The first render only loads state; writing it back is redundant.
+    // The first render only loads state; writing it back is redundant. The
+    // delay coalesces pointer drag frames into one storage write.
     if (!persisted.current) {
       persisted.current = true
       return
     }
-    writeManagerLayout(layout)
+    const timer = setTimeout(() => writeManagerLayout(layout), 160)
+    return () => clearTimeout(timer)
   }, [layout])
   useEffect(() => {
     const onResize = (): void => setViewportWidth(window.innerWidth)
@@ -402,6 +406,8 @@ export function ManagerDrawer({
   const [workspaceFilter, setWorkspaceFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const drag = useRef<ResizeDrag | null>(null)
+  const dragFrame = useRef<number | null>(null)
+  const dragPending = useRef<Partial<ManagerLayout> | null>(null)
   const [resizing, setResizing] = useState<ResizeDrag['kind'] | null>(null)
   const drawerWidthRef = useRef(drawerWidth)
   const navWidthRef = useRef(navWidth)
@@ -478,6 +484,9 @@ export function ManagerDrawer({
   const clearSelection = useCallback(() => { manager.clearSelection() }, [manager])
   const sendSelection = useCallback(() => { void manager.sendSelection() }, [manager])
   const refresh = useCallback(() => { manager.retry() }, [manager])
+  const openBoard = useCallback(() => {
+    face.view.set(current => ({ ...current, board: { open: true } }))
+  }, [face])
   const close = useCallback(() => { manager.close() }, [manager])
   const openInMain = useCallback(() => {
     if (snapshot.managerSessionId !== null) face.openSession(snapshot.managerSessionId)
@@ -493,6 +502,15 @@ export function ManagerDrawer({
     else update({ navCollapsed: true, maximized: true })
   }, [focusedChat, update])
   const togglePaths = useCallback(() => { update({ showPaths: !layout.showPaths }) }, [update, layout.showPaths])
+
+  /** Return focus to the manager entry when the panel closes. */
+  useEffect(() => {
+    if (!snapshot.open) return
+    return () => {
+      const entry = document.querySelector<HTMLElement>('[data-session-board-manager-toggle]')
+      if (entry !== null && entry.isConnected) entry.focus({ preventScroll: true })
+    }
+  }, [snapshot.open])
 
   /** Escape closes the panel unless the chat or a text field owns the key. */
   useEffect(() => {
@@ -529,12 +547,23 @@ export function ManagerDrawer({
   const moveResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const current = drag.current
     if (current === null || current.pointerId !== event.pointerId) return
-    if (current.kind === 'drawer') {
-      update({ width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) })
-    } else {
-      update({ navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) })
-    }
+    // One state update per animation frame: the drawer re-renders the official
+    // chat subtree, so pointer-rate updates would burn frames for no visual gain.
+    dragPending.current = current.kind === 'drawer'
+      ? { width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) }
+      : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) }
+    if (dragFrame.current !== null) return
+    dragFrame.current = requestAnimationFrame(() => {
+      dragFrame.current = null
+      const pending = dragPending.current
+      dragPending.current = null
+      if (pending !== null) update(pending)
+    })
   }, [update])
+
+  useEffect(() => () => {
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current)
+  }, [])
 
   const endResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (drag.current === null) return
@@ -580,14 +609,24 @@ export function ManagerDrawer({
     }
   }, [update])
 
-  if (!snapshot.open) return null
-
   const chatReady = snapshot.reference !== null
     && typeof SessionProvider === 'function'
     && typeof renderSlot === 'function'
   const chatFailed = snapshot.phase === 'error'
     || snapshot.chat === 'error'
     || (snapshot.phase === 'ready' && snapshot.managerSessionId === null)
+  /** The official chat element, kept stable across layout-only re-renders. */
+  const chatBody = useMemo(() => {
+    if (!chatReady || snapshot.reference === null || SessionProvider === undefined || renderSlot === undefined) return null
+    return (
+      <SessionProvider session={snapshot.reference}>
+        {renderSlot('session-board.manager.chat', {})}
+      </SessionProvider>
+    )
+  }, [chatReady, snapshot.reference, SessionProvider, renderSlot])
+
+  if (!snapshot.open) return null
+
   const showWorkspaceFilter = filterOpen || visibleRows.length >= WORKSPACE_FILTER_THRESHOLD || workspaceFilter !== ''
   const focusTitle = focused === null ? undefined : (focused.title !== '' ? focused.title : baseName(focused.path))
 
@@ -649,6 +688,9 @@ export function ManagerDrawer({
             onClick={toggleMaximized}
           >
             {layout.maximized ? <IconRestore size={16} /> : <IconMaximize size={16} />}
+          </IconAction>
+          <IconAction label={t('action.openBoard')} onClick={openBoard}>
+            <IconLayoutGrid size={16} />
           </IconAction>
           <IconAction label={t('manager.refresh')} onClick={refresh}>
             <IconRefresh size={16} />
@@ -937,14 +979,8 @@ export function ManagerDrawer({
               <span className="sb-manager-btn-label">{focusedChat ? t('manager.focusChatExit') : t('manager.focusChat')}</span>
             </IconAction>
           </header>
-          {chatReady && snapshot.reference !== null && SessionProvider !== undefined && renderSlot !== undefined
-            ? (
-              <div className="sb-manager-chat-body">
-                <SessionProvider session={snapshot.reference}>
-                  {renderSlot('session-board.manager.chat', {})}
-                </SessionProvider>
-              </div>
-            )
+          {chatBody !== null
+            ? <div className="sb-manager-chat-body">{chatBody}</div>
             : chatFailed
               ? (
                 <div className="sb-manager-notice" role="alert">

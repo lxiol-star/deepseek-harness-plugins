@@ -381,6 +381,10 @@ export class ManagerController {
     const open = this.persistence.getSnapshot().open
     this.state = { ...initialState(), open }
     if (open) {
+      // A drawer restored as open must keep watching the host, exactly like
+      // one the user opened: tasks, wake budgets and selection are host facts
+      // that other windows change.
+      this.startPolling()
       queueMicrotask(() => {
         if (this.disposed || !this.state.open) return
         void this.refresh()

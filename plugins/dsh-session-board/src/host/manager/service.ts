@@ -84,6 +84,9 @@ const WAKE_INSTRUCTION = [
 
 /** Prompt request shape recovered from the host service (type-only). */
 type PromptRequest = Parameters<Context['sessionController']['prompt']>[0]
+
+/** Bound on the manager session existence read before a durable pointer is trusted. */
+const MANAGER_SESSION_CHECK_TIMEOUT_MS = 5_000
 /** Request-id brand recovered from the same call. */
 type RequestId = PromptRequest['requestId']
 
@@ -157,9 +160,18 @@ export class ManagerService {
    */
   ensure(): Promise<{ managerSessionId: string; managerWorkspaceId?: string }> {
     if (this.managerSessionId !== undefined) {
-      return Promise.resolve({
-        managerSessionId: this.managerSessionId,
-        ...(this.state.managerWorkspaceId === undefined ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }),
+      const persisted = this.managerSessionId
+      // A persisted pointer is a suspicion, not proof: the manager session may
+      // have been deleted outside this panel. Confirm it before pinning the
+      // panel to a row that no longer exists.
+      return this.managerSessionState(persisted).then(async (state) => {
+        if (state === 'missing') await this.forgetManagerSession()
+        if (state === 'missing') return await this.ensure()
+        if (this.managerSessionId === undefined) return await this.ensure()
+        return {
+          managerSessionId: this.managerSessionId,
+          ...(this.state.managerWorkspaceId === undefined ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }),
+        }
       })
     }
     this.provisioning ??= this.provision().finally(() => { this.provisioning = undefined })
@@ -167,6 +179,47 @@ export class ManagerService {
       this.scheduler.notify()
       return result
     })
+  }
+
+  /**
+   * Whether a persisted manager id still names a Session.
+   *
+   * A successful listing that omits the id is proof it is gone; a failed read
+   * is `unknown` on purpose, so transport trouble never recreates a manager
+   * and strands the durable selection behind a second session.
+   * @param sessionId - persisted manager session id.
+   * @returns `live`, `missing`, or `unknown` when existence cannot be checked.
+   */
+  private async managerSessionState(sessionId: SessionId): Promise<'live' | 'missing' | 'unknown'> {
+    if (this.deps.ctx.agents.get(sessionId) !== undefined) return 'live'
+    const controller = this.deps.ctx.sessionController
+    try {
+      const listed = await controller.list({}, AbortSignal.timeout(MANAGER_SESSION_CHECK_TIMEOUT_MS))
+      return listed.items.some(item => item.sessionId === sessionId) ? 'live' : 'missing'
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: manager session check failed: ${describe(error)}`)
+      return 'unknown'
+    }
+  }
+
+  /**
+   * Drop a manager pointer whose Session no longer exists.
+   *
+   * The in-memory pointer is cleared even when the durable write fails; the
+   * next start then re-checks the stale row and clears it again, so the panel
+   * always recovers without a manual reset.
+   * @returns completion after the best-effort durable write.
+   */
+  private async forgetManagerSession(): Promise<void> {
+    this.managerSessionId = undefined
+    const next: ManagerStateRecord = { ...this.state, revision: this.state.revision + 1 }
+    delete (next as { managerSessionId?: string }).managerSessionId
+    this.state = next
+    try {
+      await this.deps.state.put(MANAGER_STATE_KEY, next)
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: manager pointer reset was not persisted: ${describe(error)}`)
+    }
   }
 
   /**
@@ -430,6 +483,12 @@ export class ManagerService {
         ...(this.state.managerWorkspaceId === undefined ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }),
       }
     } catch (error) {
+      // The pointer was persisted before creation so the first Agent is
+      // recognizable; a failed creation must take it back, otherwise every
+      // later open pins the panel to a session that was never created.
+      if (this.managerSessionId !== undefined && this.managerSessionId === this.state.managerSessionId) {
+        await this.forgetManagerSession()
+      }
       this.lastError = describe(error)
       this.deps.warn(`dsh-session-board: manager provisioning failed: ${describe(error)}`)
       throw error

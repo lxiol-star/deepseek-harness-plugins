@@ -230,6 +230,18 @@ export function IconEyeOff(props: ManagerIconProps): ReactElement {
   )
 }
 
+/** Board overview: four tiles. */
+export function IconLayoutGrid(props: ManagerIconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.6" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" />
+    </Glyph>
+  )
+}
+
 /** Empty-state mark for a pane with nothing to show. */
 export function IconSparkle(props: ManagerIconProps): ReactElement {
   return (
