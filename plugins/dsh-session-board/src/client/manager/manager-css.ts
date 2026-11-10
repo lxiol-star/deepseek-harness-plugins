@@ -39,7 +39,9 @@ export const MANAGER_STYLESHEET = `
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
   line-height: 1.4;
-  transition: top .2s ease, right .2s ease, bottom .2s ease, left .2s ease, width .2s ease, border-radius .2s ease;
+  /* Geometry snaps: a transition here would trail the pointer during a drag
+     and stall while the window is occluded. Colour and opacity still animate. */
+  transition: border-color .18s ease, box-shadow .18s ease;
 }
 .sb-manager *,
 .sb-manager *::before,
@@ -55,10 +57,8 @@ export const MANAGER_STYLESHEET = `
   border-radius: 0;
   box-shadow: none;
 }
-/* No transitions while a pointer drag owns the geometry. */
+/* A pointer drag owns text selection. */
 .sb-manager[data-resizing] { user-select: none; }
-.sb-manager[data-resizing='drawer'],
-.sb-manager[data-resizing='nav'] { transition: none; }
 
 /* The outer resize strip sits inside the rounded corner so it cannot be
    clipped at the window edge. */
@@ -272,7 +272,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 }
 .sb-manager-view {
   min-width: 0;
-  height: 26px;
+  height: 28px;
   padding: 0 6px;
   border: 0;
   border-radius: 6px;
@@ -326,7 +326,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 26px;
+  min-height: 30px;
   padding: 0 4px;
   margin-bottom: 3px;
 }
@@ -345,7 +345,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10.5px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-badge {
   display: inline-flex;
@@ -369,7 +369,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin-left: auto;
   flex: none;
 }
-.sb-manager-section-actions .sb-manager-iconbtn { height: 24px; min-width: 24px; padding: 0 5px; }
+.sb-manager-section-actions .sb-manager-iconbtn { height: 28px; min-width: 28px; padding: 0 6px; }
 
 /* -------------------------------------------------------------- filter --- */
 
@@ -401,7 +401,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   font: inherit;
   font-size: 11.5px;
 }
-.sb-manager-filter input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.sb-manager-filter input::placeholder { color: var(--dsw-alias-label-secondary); }
 .sb-manager-filter input::-webkit-search-cancel-button { display: none; }
 .sb-manager-filter-clear {
   display: inline-flex;
@@ -535,7 +535,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.25;
 }
 .sb-manager-meta {
@@ -543,7 +543,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10.5px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
@@ -585,7 +585,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin: 2px 4px 4px;
   padding: 6px 6px;
   font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.4;
 }
 .sb-manager-empty svg { flex: none; }
@@ -599,7 +599,9 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  min-width: 34px;
+  min-height: 28px;
+  padding: 4px 2px;
   margin-left: auto;
   border: 0;
   border-radius: 999px;
@@ -638,7 +640,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin: 2px 6px 6px;
   font-size: 10.5px;
   line-height: 1.45;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
 .sb-manager-wake-foot {
@@ -650,7 +652,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-textbtn {
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: 28px;
   padding: 0 8px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 7px;
@@ -704,7 +706,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 }
 .sb-manager-selection[data-empty] .sb-manager-count {
   font-weight: 400;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-btn {
   display: inline-flex;
@@ -712,7 +714,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   justify-content: center;
   gap: 5px;
   flex: none;
-  height: 26px;
+  height: 28px;
   padding: 0 9px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 7px;
@@ -754,7 +756,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-ok { font-size: 10px; color: var(--dsw-alias-state-success-primary); }
 .sb-manager-error {

@@ -406,8 +406,6 @@ export function ManagerDrawer({
   const [workspaceFilter, setWorkspaceFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const drag = useRef<ResizeDrag | null>(null)
-  const dragFrame = useRef<number | null>(null)
-  const dragPending = useRef<Partial<ManagerLayout> | null>(null)
   const [resizing, setResizing] = useState<ResizeDrag['kind'] | null>(null)
   const drawerWidthRef = useRef(drawerWidth)
   const navWidthRef = useRef(navWidth)
@@ -547,23 +545,13 @@ export function ManagerDrawer({
   const moveResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const current = drag.current
     if (current === null || current.pointerId !== event.pointerId) return
-    // One state update per animation frame: the drawer re-renders the official
-    // chat subtree, so pointer-rate updates would burn frames for no visual gain.
-    dragPending.current = current.kind === 'drawer'
+    // Apply immediately rather than in requestAnimationFrame: the panel is one
+    // grid track, React batches the pointer-rate updates, and rAF is suspended
+    // for occluded windows, which would silently freeze the drag.
+    update(current.kind === 'drawer'
       ? { width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) }
-      : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) }
-    if (dragFrame.current !== null) return
-    dragFrame.current = requestAnimationFrame(() => {
-      dragFrame.current = null
-      const pending = dragPending.current
-      dragPending.current = null
-      if (pending !== null) update(pending)
-    })
+      : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) })
   }, [update])
-
-  useEffect(() => () => {
-    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current)
-  }, [])
 
   const endResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (drag.current === null) return

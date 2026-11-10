@@ -1470,7 +1470,9 @@ var MANAGER_STYLESHEET = `
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
   line-height: 1.4;
-  transition: top .2s ease, right .2s ease, bottom .2s ease, left .2s ease, width .2s ease, border-radius .2s ease;
+  /* Geometry snaps: a transition here would trail the pointer during a drag
+     and stall while the window is occluded. Colour and opacity still animate. */
+  transition: border-color .18s ease, box-shadow .18s ease;
 }
 .sb-manager *,
 .sb-manager *::before,
@@ -1486,10 +1488,8 @@ var MANAGER_STYLESHEET = `
   border-radius: 0;
   box-shadow: none;
 }
-/* No transitions while a pointer drag owns the geometry. */
+/* A pointer drag owns text selection. */
 .sb-manager[data-resizing] { user-select: none; }
-.sb-manager[data-resizing='drawer'],
-.sb-manager[data-resizing='nav'] { transition: none; }
 
 /* The outer resize strip sits inside the rounded corner so it cannot be
    clipped at the window edge. */
@@ -1703,7 +1703,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 }
 .sb-manager-view {
   min-width: 0;
-  height: 26px;
+  height: 28px;
   padding: 0 6px;
   border: 0;
   border-radius: 6px;
@@ -1757,7 +1757,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 26px;
+  min-height: 30px;
   padding: 0 4px;
   margin-bottom: 3px;
 }
@@ -1776,7 +1776,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10.5px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-badge {
   display: inline-flex;
@@ -1800,7 +1800,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin-left: auto;
   flex: none;
 }
-.sb-manager-section-actions .sb-manager-iconbtn { height: 24px; min-width: 24px; padding: 0 5px; }
+.sb-manager-section-actions .sb-manager-iconbtn { height: 28px; min-width: 28px; padding: 0 6px; }
 
 /* -------------------------------------------------------------- filter --- */
 
@@ -1832,7 +1832,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   font: inherit;
   font-size: 11.5px;
 }
-.sb-manager-filter input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.sb-manager-filter input::placeholder { color: var(--dsw-alias-label-secondary); }
 .sb-manager-filter input::-webkit-search-cancel-button { display: none; }
 .sb-manager-filter-clear {
   display: inline-flex;
@@ -1966,7 +1966,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.25;
 }
 .sb-manager-meta {
@@ -1974,7 +1974,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10.5px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
@@ -2016,7 +2016,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin: 2px 4px 4px;
   padding: 6px 6px;
   font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.4;
 }
 .sb-manager-empty svg { flex: none; }
@@ -2030,7 +2030,9 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  min-width: 34px;
+  min-height: 28px;
+  padding: 4px 2px;
   margin-left: auto;
   border: 0;
   border-radius: 999px;
@@ -2069,7 +2071,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   margin: 2px 6px 6px;
   font-size: 10.5px;
   line-height: 1.45;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
 .sb-manager-wake-foot {
@@ -2081,7 +2083,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 .sb-manager-textbtn {
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: 28px;
   padding: 0 8px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 7px;
@@ -2135,7 +2137,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
 }
 .sb-manager-selection[data-empty] .sb-manager-count {
   font-weight: 400;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-btn {
   display: inline-flex;
@@ -2143,7 +2145,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   justify-content: center;
   gap: 5px;
   flex: none;
-  height: 26px;
+  height: 28px;
   padding: 0 9px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 7px;
@@ -2185,7 +2187,7 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 .sb-manager-ok { font-size: 10px; color: var(--dsw-alias-state-success-primary); }
 .sb-manager-error {
@@ -2512,8 +2514,8 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 26px;
-  height: 26px;
+  min-width: 28px;
+  height: 28px;
   padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -2574,7 +2576,7 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 /* --------------------------------------------------------------- groups --- */
 
 .sb-group + .sb-group { margin-top: 14px; }
-.sb-group-head {
+.sb-group-head { min-height: 28px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2603,9 +2605,9 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-group-accent, var(--dsw-alias-label-tertiary)) 22%, transparent);
   flex: 0 0 auto;
 }
-.sb-group[data-group="attention"] .sb-group-head { --sb-group-accent: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-label-primary); }
-.sb-group[data-group="running"]   .sb-group-head { --sb-group-accent: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }
-.sb-group[data-group="done"]      .sb-group-head { --sb-group-accent: var(--dsw-alias-state-success-primary); }
+.sb-group[data-group="attention"] .sb-group-head { min-height: 28px; --sb-group-accent: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-label-primary); }
+.sb-group[data-group="running"]   .sb-group-head { min-height: 28px; --sb-group-accent: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }
+.sb-group[data-group="done"]      .sb-group-head { min-height: 28px; --sb-group-accent: var(--dsw-alias-state-success-primary); }
 .sb-group-chevron { flex: 0 0 auto; opacity: .65; transition: transform 120ms ease; }
 .sb-group[data-open="false"] .sb-group-chevron { transform: rotate(-90deg); }
 .sb-group[data-open="false"] .sb-group-body { display: none; }
@@ -2616,7 +2618,7 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   line-height: 18px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -2826,7 +2828,7 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-card-where {
   flex: 0 0 auto;
   max-width: 100%;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2850,8 +2852,9 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   white-space: nowrap;
 }
 .sb-pill--state {
-  color: var(--sb-accent);
-  border-color: color-mix(in srgb, var(--sb-accent) 30%, transparent);
+  /* Keep state colour in the dot and border; primary text keeps contrast. */
+  color: var(--dsw-alias-label-primary);
+  border-color: color-mix(in srgb, var(--sb-accent) 34%, transparent);
   background: color-mix(in srgb, var(--sb-accent) 8%, transparent);
 }
 .sb-card[data-state="done"] .sb-pill--state { display: none; }
@@ -2920,8 +2923,8 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 
 .sb-ack {
   align-self: flex-start;
-  padding: 0 8px;
-  height: 22px;
+  padding: 0 9px;
+  height: 28px;
   border-radius: 7px;
   border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
@@ -3040,7 +3043,7 @@ html[data-platform='darwin'] .sb-overlay-title { font-size: 14px; font-weight: 6
 .sb-batch-result { margin: 0 0 8px; }
 .sb-batch-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 0 10px; }
 .sb-batch-result-count { font-size: 11px; }
-.sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
+.sb-batch-dismiss { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
 .sb-batch-dismiss:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
 .sb-batch-detail { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 10px; overflow-wrap: anywhere; }
@@ -3113,13 +3116,17 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
   height: 100%;
   padding: 0;
   border: 0;
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
   font-size: 12px;
   outline: none;
 }
-.sb-filter-search input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.sb-filter-search input::placeholder { color: var(--dsw-alias-label-secondary); }
+.sb-filter-search input:focus-visible { outline-color: var(--sb-focus-ring); }
 .sb-filter-controls {
   order: 2;
   display: flex;
@@ -3184,7 +3191,7 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-filter-count {
   order: 4;
   margin-left: auto;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -3210,10 +3217,10 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-card-details { align-self: flex-start; font-size: 11px; }
 .sb-workspace-node { min-width: 0; margin-bottom: 10px; }
 .sb-workspace-head-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.sb-workspace-head-row > .sb-group-head { flex: 1; min-width: 0; }
+.sb-workspace-head-row > .sb-group-head { min-height: 28px; flex: 1; min-width: 0; }
 .sb-workspace-action {
   flex: none;
-  min-height: 22px;
+  min-height: 28px;
   padding: 2px 7px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
@@ -3233,7 +3240,7 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }
 .sb-workspace-body { padding-left: 10px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 6px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }
-.sb-workspace-node > .sb-group-head { width: 100%; }
+.sb-workspace-node > .sb-group-head { min-height: 28px; width: 100%; }
 /* A branch with no sessions has nothing to disclose: no pointer affordance. */
 .sb-workspace-node > .sb-group-head--static { cursor: default; }
 .sb-workspace-node > .sb-group-head--static:hover { color: var(--dsw-alias-label-secondary); }
@@ -3244,7 +3251,6 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
   display: flex; align-items: center; gap: 6px;
   color: var(--dsw-alias-label-secondary);
   font-style: italic;
-  opacity: .72;
   padding: 2px 0;
 }
 .sb-line--empty::before {
@@ -6719,7 +6725,7 @@ function ManagerDrawer({
   SessionProvider,
   renderSlot
 }) {
-  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), { layout, update, viewportWidth, drawerWidth, navWidth } = useManagerLayout(), [viewMode, setViewMode] = (0, import_react10.useState)(readManagerView), [workspaceFilter, setWorkspaceFilter] = (0, import_react10.useState)(""), [filterOpen, setFilterOpen] = (0, import_react10.useState)(!1), drag = (0, import_react10.useRef)(null), dragFrame = (0, import_react10.useRef)(null), dragPending = (0, import_react10.useRef)(null), [resizing, setResizing] = (0, import_react10.useState)(null), drawerWidthRef = (0, import_react10.useRef)(drawerWidth), navWidthRef = (0, import_react10.useRef)(navWidth), viewportWidthRef = (0, import_react10.useRef)(viewportWidth);
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), { layout, update, viewportWidth, drawerWidth, navWidth } = useManagerLayout(), [viewMode, setViewMode] = (0, import_react10.useState)(readManagerView), [workspaceFilter, setWorkspaceFilter] = (0, import_react10.useState)(""), [filterOpen, setFilterOpen] = (0, import_react10.useState)(!1), drag = (0, import_react10.useRef)(null), [resizing, setResizing] = (0, import_react10.useState)(null), drawerWidthRef = (0, import_react10.useRef)(drawerWidth), navWidthRef = (0, import_react10.useRef)(navWidth), viewportWidthRef = (0, import_react10.useRef)(viewportWidth);
   drawerWidthRef.current = drawerWidth, navWidthRef.current = navWidth, viewportWidthRef.current = viewportWidth, (0, import_react10.useEffect)(() => {
     let apply2 = (value) => {
       (value === "active" || value === "archived" || value === "workspaces") && setViewMode(value);
@@ -6816,16 +6822,8 @@ function ManagerDrawer({
     }
   }, []), moveResize = (0, import_react10.useCallback)((event) => {
     let current = drag.current;
-    current === null || current.pointerId !== event.pointerId || (dragPending.current = current.kind === "drawer" ? { width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) } : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) }, dragFrame.current === null && (dragFrame.current = requestAnimationFrame(() => {
-      dragFrame.current = null;
-      let pending = dragPending.current;
-      dragPending.current = null, pending !== null && update(pending);
-    })));
-  }, [update]);
-  (0, import_react10.useEffect)(() => () => {
-    dragFrame.current !== null && cancelAnimationFrame(dragFrame.current);
-  }, []);
-  let endResize = (0, import_react10.useCallback)((event) => {
+    current === null || current.pointerId !== event.pointerId || update(current.kind === "drawer" ? { width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) } : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) });
+  }, [update]), endResize = (0, import_react10.useCallback)((event) => {
     if (drag.current !== null) {
       drag.current = null, setResizing(null);
       try {
