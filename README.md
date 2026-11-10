@@ -75,6 +75,10 @@ Python/Wiki 集成测试依赖 `python3`、`zstd` 和兼容的 `wiki-archive.py`
 bash plugins/dsh-think-bounce-pet/tests/drag-guard/run.sh
 ```
 
+## 推荐配置
+
+第三方插件的落地配置示例：[dsh-progress-rules 配置说明](docs/progress-rules-setup.md)（上游地址、安装命令、`text` / `everySteps` / `reminder` 等配置项与验证记录）。
+
 ## 贡献
 
 欢迎通过 Issue 提交问题，提供 DSH 版本、操作系统、插件版本和复现步骤。分享日志前请移除密钥、个人路径和会话正文中的敏感信息。
