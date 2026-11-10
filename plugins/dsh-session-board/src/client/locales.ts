@@ -1,4 +1,5 @@
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import { managerEn, managerZh } from './manager/manager-locales.ts'
 /**
  * Every user-visible string in this plugin.
  *
@@ -12,6 +13,7 @@ export const NS = 'session-board'
 
 /** English copy. */
 export const en = {
+  ...managerEn,
   'batch.error.SCOPE_FAILED': 'Could not resolve the selected sessions and their children. Check the local Wiki scripts.',
   'batch.error.SYNTHESIS_FAILED': 'Synthesis step failed. Raw archives are kept.',
   'batch.error.INDEX_FAILED': 'Knowledge pages were written but the index update failed.',
@@ -66,6 +68,7 @@ export const en = {
   'filter.running': 'Running',
   'filter.workspace': 'Workspace',
   'filter.allWorkspaces': 'All workspaces',
+  'filter.unknownWorkspace': 'Workspace no longer listed',
   'filter.clear': 'Reset',
   'filter.count': '{shown} of {total} sessions',
   'empty.noMatches': 'No matching sessions. Try another search or reset the filters.',
@@ -291,6 +294,7 @@ export const en = {
 
 /** Chinese copy. */
 export const zh: Record<keyof typeof en, string> = {
+  ...managerZh,
   'batch.error.SCOPE_FAILED': '无法核对所选会话及其子会话，请检查本地 Wiki 脚本。',
   'batch.error.SYNTHESIS_FAILED': '提炼步骤失败，原文归档已保留。',
   'batch.error.INDEX_FAILED': '知识页已写入，但索引更新失败。',
@@ -345,6 +349,7 @@ export const zh: Record<keyof typeof en, string> = {
   'filter.running': '运行中',
   'filter.workspace': '工作区',
   'filter.allWorkspaces': '全部工作区',
+  'filter.unknownWorkspace': '工作区已不在列表',
   'filter.clear': '重置',
   'filter.count': '显示 {shown} / {total} 个会话',
   'empty.noMatches': '没有匹配的会话，请更换关键词或重置筛选。',
