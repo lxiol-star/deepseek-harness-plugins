@@ -878,9 +878,18 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   .sb-manager-section-actions { gap: 0; }
 }
 
-/* A narrow frame pins the drawer to the window edges. */
-@media (max-width: 900px) {
-  .sb-manager { top: 0; right: 0; bottom: 0; border-radius: 0; }
+/* A narrow frame turns the drawer into the whole workspace rather than a
+   floating panel with a sliver of the shell behind it. */
+@media (max-width: 720px) {
+  .sb-manager {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100vw !important;
+    border: 0;
+    border-radius: 0;
+  }
   .sb-manager-resize { display: none; }
 }
 

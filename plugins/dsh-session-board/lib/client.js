@@ -126,36 +126,87 @@ function filterGroups(groups, filters) {
     return terms.every((term) => text.includes(term));
   }) }));
 }
+function pathTail(path) {
+  return path.replaceAll("\\", "/").replace(/\/+$/u, "").split("/").filter(Boolean).at(-1) ?? "";
+}
+function isPathTitle(title, path) {
+  if (title.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(title)) return !0;
+  let normalized = path.replaceAll("\\", "/").replace(/\/+$/u, ""), chain = title.replaceAll("\\", "/");
+  return chain !== "" && normalized !== "" && (normalized === chain || normalized.endsWith(`/${chain}`));
+}
+function displayTitle(title, path) {
+  return title === "" ? pathTail(path) : isPathTitle(title, path) ? pathTail(title) : title;
+}
 function workspaceChoices(groups) {
-  let options = /* @__PURE__ */ new Map();
+  let byValue = /* @__PURE__ */ new Map();
   for (let entry of groups.flatMap((group) => group.entries)) {
     let value = entry.workspaceId || entry.workspacePath || entry.workspaceTitle;
-    !value || options.has(value) || options.set(value, { value, label: entry.workspaceTitle + (entry.workspacePath ? ` \xB7 ${entry.workspacePath}` : "") });
+    if (!value || byValue.has(value)) continue;
+    let path = entry.workspacePath ?? "";
+    byValue.set(value, { value, title: displayTitle(entry.workspaceTitle, path) || pathTail(path) || value, path });
   }
-  return [...options.values()].sort((a, b) => a.label.localeCompare(b.label));
+  let titles = /* @__PURE__ */ new Map();
+  for (let option of byValue.values()) titles.set(option.title, (titles.get(option.title) ?? 0) + 1);
+  let labelled = /* @__PURE__ */ new Set(), labelOf = /* @__PURE__ */ new Map();
+  for (let option of byValue.values()) {
+    let label = option.title;
+    if ((titles.get(option.title) ?? 0) > 1) {
+      let parts = option.path.replaceAll("\\", "/").replace(/\/+$/u, "").split("/").filter(Boolean);
+      for (let depth = 1; depth <= parts.length; depth += 1) {
+        let tail = parts.slice(-depth).join("/");
+        if (depth === 1 && tail === option.title) continue;
+        let candidate = `${option.title} \xB7 ${tail}`;
+        if (!labelled.has(candidate)) {
+          label = candidate;
+          break;
+        }
+      }
+    }
+    labelled.add(label), labelOf.set(option.value, label);
+  }
+  return [...byValue.values()].map((option) => ({ value: option.value, label: labelOf.get(option.value) ?? option.title })).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // src/client/BoardFilterBar.tsx
 var import_jsx_runtime = require("react/jsx-runtime");
+function FilterSelect({ label, value, onChange, className, children }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: className === void 0 ? "sb-select" : `sb-select ${className}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("select", { "aria-label": label, value, onChange: (event) => onChange(event.target.value), children }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "sb-select-chevron", "aria-hidden": "true" })
+  ] });
+}
 function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, onGrouping }) {
-  let workspaces = (0, import_react.useMemo)(() => workspaceChoices(groups), [groups]), total = groups.reduce((sum, group) => sum + group.entries.length, 0), active = filters.query !== "" || filters.status !== "all" || filters.workspace !== "" || (filters.archive ?? "active") !== "active", archivedOnly = (filters.archive ?? "active") === "archived";
+  let workspaces = (0, import_react.useMemo)(() => workspaceChoices(groups), [groups]), total = groups.reduce((sum, group) => sum + group.entries.length, 0), active = filters.query !== "" || filters.status !== "all" || filters.workspace !== "" || (filters.archive ?? "active") !== "active", archivedOnly = (filters.archive ?? "active") === "archived", staleWorkspace = filters.workspace !== "" && !workspaces.some((option) => option.value === filters.workspace);
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filters", role: "search", "aria-label": t("filter.label"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { type: "search", className: "sb-filter-search", "aria-label": t("filter.search"), placeholder: t("filter.search"), value: filters.query, onChange: (event) => onChange({ ...filters, query: event.target.value }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filter-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { "aria-label": t("filter.status"), value: filters.status, onChange: (event) => onChange({ ...filters, status: event.target.value }), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filter-search", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { className: "sb-filter-search-icon", width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("circle", { cx: "6.2", cy: "6.2", r: "4.2", fill: "none", stroke: "currentColor", strokeWidth: "1.4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M9.4 9.4l3 3", fill: "none", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round" })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "input",
+        {
+          type: "search",
+          "aria-label": t("filter.search"),
+          placeholder: t("filter.search"),
+          value: filters.query,
+          onChange: (event) => onChange({ ...filters, query: event.target.value })
+        }
+      )
+    ] }),
+    active ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "sb-filter-clear", onClick: () => onChange({ ...DEFAULT_FILTERS }), children: t("filter.clear") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filter-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(FilterSelect, { label: t("filter.status"), value: filters.status, onChange: (value) => onChange({ ...filters, status: value }), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "all", children: t("filter.all") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "blocked", children: t("filter.blocked") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "running", children: t("filter.running") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { "aria-label": t("filter.workspace"), value: filters.workspace, onChange: (event) => onChange({ ...filters, workspace: event.target.value }), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(FilterSelect, { label: t("filter.workspace"), value: filters.workspace, className: "sb-select--workspace", onChange: (value) => onChange({ ...filters, workspace: value }), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "", children: t("filter.allWorkspaces") }),
-        filters.workspace !== "" && !workspaces.some((option) => option.value === filters.workspace) ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: filters.workspace, children: filters.workspace }) : null,
+        staleWorkspace ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: filters.workspace, children: t("filter.unknownWorkspace") }) : null,
         workspaces.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: workspace.value, children: workspace.label }, workspace.value))
       ] }),
-      active ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "sb-btn", onClick: () => onChange({ ...DEFAULT_FILTERS }), children: t("filter.clear") }) : null
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "sb-filter-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { "aria-label": t("filter.archive"), value: filters.archive ?? "active", onChange: (event) => onChange({ ...filters, archive: event.target.value }), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(FilterSelect, { label: t("filter.archive"), value: filters.archive ?? "active", onChange: (value) => onChange({ ...filters, archive: value }), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "active", children: t("filter.archiveActive") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "archived", children: t("filter.archiveOnly") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "all", children: t("filter.archiveAll") })
@@ -164,14 +215,14 @@ function BoardFilterBar({ groups, filters, onChange, shown, t, grouping, onGroup
         "button",
         {
           type: "button",
-          className: "sb-btn",
+          className: "sb-filter-toggle",
           "aria-pressed": archivedOnly,
           title: t("filter.onlyArchived"),
           onClick: () => onChange({ ...filters, archive: archivedOnly ? "active" : "archived" }),
           children: t("filter.onlyArchived")
         }
       ),
-      onGrouping ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { "aria-label": t("filter.grouping"), value: grouping ?? "status", onChange: (event) => onGrouping(event.target.value), children: [
+      onGrouping ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(FilterSelect, { label: t("filter.grouping"), value: grouping ?? "status", onChange: (value) => onGrouping(value), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "status", children: t("filter.byStatus") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "workspace", children: t("filter.byWorkspace") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "tree", children: t("filter.byTree") })
@@ -513,6 +564,7 @@ function SessionCardBody({
         ) : null,
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-card__halo", "aria-hidden": "true" }),
         /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-card-head", style: FIXED_STYLE, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-state-dot", "aria-hidden": "true" }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "button",
             {
@@ -529,10 +581,7 @@ function SessionCardBody({
           ),
           entry.workspaceTitle === "" ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-card-where", title: entry.workspaceTitle, children: entry.workspaceTitle })
         ] }),
-        pills.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-pill-row", style: FIXED_STYLE, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-state-dot", "aria-hidden": "true" }),
-          pills
-        ] }) : null,
+        pills.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "sb-pill-row", style: FIXED_STYLE, children: pills }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-card-content", style: CONTENT_STYLE, tabIndex: expanded ? 0 : void 0, role: "group", "aria-label": t("a11y.cardContent"), children: [
           expanded && (preview.jobs?.length ?? 0) > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "sb-job-preview", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "sb-line-label", children: t("card.background") }),
@@ -585,6 +634,14 @@ var SessionCard = (0, import_react3.memo)(SessionCardBody, (previous, next) => p
 
 // src/client/BoardList.tsx
 var import_jsx_runtime3 = require("react/jsx-runtime");
+function pathTail2(value) {
+  return value.replaceAll("\\", "/").replace(/\/+$/u, "").split("/").filter(Boolean).at(-1) ?? value;
+}
+function visibleName(title, path) {
+  if (title.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(title)) return pathTail2(title);
+  let normalized = path.replaceAll("\\", "/").replace(/\/+$/u, ""), chain = title.replaceAll("\\", "/");
+  return chain !== "" && normalized !== "" && (normalized === chain || normalized.endsWith(`/${chain}`)) ? pathTail2(chain) : title;
+}
 function GroupHeader({
   group,
   t,
@@ -624,7 +681,16 @@ function BoardList({
   onOpenCoordinator
 }) {
   let total = groups.reduce((sum, group) => sum + group.entries.length, 0), hasProjectNodes = grouping === "tree" && Object.values(workspaceMeta ?? {}).some((info) => info.projectKey !== void 0), [coordinator, setCoordinator] = (0, import_react4.useState)({}), coordinatorBusy = (0, import_react4.useRef)(/* @__PURE__ */ new Set());
-  if (total === 0 && !hasProjectNodes) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "sb-empty", children: t(emptyKey) });
+  if (total === 0 && !hasProjectNodes)
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-empty", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-empty-glyph", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("svg", { width: "24", height: "24", viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("rect", { x: "3", y: "4.5", width: "8", height: "6.5", rx: "1.6", fill: "none", stroke: "currentColor", strokeWidth: "1.4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("rect", { x: "13", y: "4.5", width: "8", height: "6.5", rx: "1.6", fill: "none", stroke: "currentColor", strokeWidth: "1.4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("rect", { x: "3", y: "13", width: "8", height: "6.5", rx: "1.6", fill: "none", stroke: "currentColor", strokeWidth: "1.4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("rect", { x: "13", y: "13", width: "8", height: "6.5", rx: "1.6", fill: "none", stroke: "currentColor", strokeWidth: "1.4" })
+      ] }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-empty-text", children: t(emptyKey) })
+    ] });
   let clearCoordinator = (projectKey) => {
     setCoordinator((current) => {
       if (!(projectKey in current)) return current;
@@ -658,14 +724,14 @@ function BoardList({
   };
   if (grouping !== "status") {
     let renderNode = (node) => {
-      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), expandable = node.kind === "project" || node.entries.length > 0 || node.children.length > 0, label = node.subtitle === void 0 ? t("a11y.groupCount", { group: title, count: node.count }) : t("a11y.groupBranchCount", { group: title, branch: node.subtitle, count: node.count }), content = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: title }),
-        node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", children: node.subtitle }) : null,
+      let open = collapsed?.[node.key] !== !0, title = node.title || t("workspace.unassigned"), shown = node.kind === "path" ? pathTail2(title) : visibleName(title, node.path), expandable = node.kind === "project" || node.entries.length > 0 || node.children.length > 0, label = node.subtitle === void 0 ? t("a11y.groupCount", { group: title, count: node.count }) : t("a11y.groupBranchCount", { group: title, branch: node.subtitle, count: node.count }), content = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-name", children: shown }),
+        node.subtitle ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-subtitle", title: node.subtitle, children: node.subtitle }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-count", children: node.count })
-      ] }), header = expandable ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: node.path, onClick: () => onToggleGroup?.(node.key), "aria-label": label, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+      ] }), tip = node.path === "" ? title : node.path, header = expandable ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "sb-group-head", "aria-expanded": open, title: tip, onClick: () => onToggleGroup?.(node.key), "aria-label": label, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-group-chevron", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
         content
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-group-head sb-group-head--static", title: node.path, children: [
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "sb-group-head sb-group-head--static", title: tip, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "sb-workspace-spacer", "aria-hidden": "true" }),
         content
       ] }), projectKey = node.projectKey, state = projectKey === void 0 ? void 0 : coordinator[projectKey], pending = state === "pending", failed = state === "failed";
@@ -793,7 +859,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.9",
+      "data-session-board-version": "0.9.0",
       "data-dsh-session-board": "",
       "data-collapsed": "true",
       "data-density": density,
@@ -817,7 +883,7 @@ function BoardDock(props) {
     "aside",
     {
       className: "sb-dock sb-root",
-      "data-session-board-version": "0.8.9",
+      "data-session-board-version": "0.9.0",
       "data-dsh-session-board": "",
       "data-collapsed": "false",
       "data-density": density,
@@ -1313,7 +1379,7 @@ function BoardOverlay(props) {
       "div",
       {
         className: "sb-overlay sb-root",
-        "data-session-board-version": "0.8.9",
+        "data-session-board-version": "0.9.0",
         "data-density": density,
         "data-quiet": hidden ? "true" : void 0,
         role: "dialog",
@@ -1379,254 +1445,793 @@ function BoardOverlay(props) {
 }
 
 // src/client/manager/manager-css.ts
-var MANAGER_STYLESHEET = `/* -------------------------------------------------------------- manager --- */
+var MANAGER_STYLESHEET = `
+/* ------------------------------------------------------------- manager --- */
 
 /* Fixed right-hand drawer. The shell overlay layer ignores pointer events for
    empty space, so the drawer restores them for itself and its descendants. */
 .sb-manager {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: clamp(420px, 46vw, 860px);
-  max-width: 100vw;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
   z-index: 900;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   pointer-events: auto;
   -webkit-app-region: no-drag;
-  color: var(--dsw-alias-label-primary);
+  container-type: inline-size;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg, 16px);
   background: var(--dsw-alias-bg-layer-1);
-  border-left: 1px solid var(--dsw-alias-border-l1);
-  box-shadow: -18px 0 40px color-mix(in srgb, var(--dsw-alias-bg-base) 40%, transparent);
-  contain: layout style;
+  box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  transition: top .2s ease, right .2s ease, bottom .2s ease, left .2s ease, width .2s ease, border-radius .2s ease;
 }
+.sb-manager *,
+.sb-manager *::before,
+.sb-manager *::after { box-sizing: border-box; }
+/* Maximized: the panel becomes the workspace instead of floating over it. */
+.sb-manager[data-maximized='true'] {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* No transitions while a pointer drag owns the geometry. */
+.sb-manager[data-resizing] { user-select: none; }
+.sb-manager[data-resizing='drawer'],
+.sb-manager[data-resizing='nav'] { transition: none; }
+
+/* The outer resize strip sits inside the rounded corner so it cannot be
+   clipped at the window edge. */
+.sb-manager-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  width: 10px;
+  cursor: col-resize;
+  background: transparent;
+  outline: none;
+  touch-action: none;
+}
+.sb-manager-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 2px;
+  height: 40px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: var(--dsw-alias-state-business-primary);
+  opacity: 0;
+  transition: opacity .14s ease;
+}
+.sb-manager-resize:hover::after,
+.sb-manager-resize:focus-visible::after { opacity: 1; }
+.sb-manager-resize:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -4px; border-radius: var(--dsw-radius-sm); }
+
+/* ---------------------------------------------------------------- head --- */
 
 .sb-manager-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  padding: 10px 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 16px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
 }
 /* The drawer starts at the window edge, so the macOS chrome strip is padded
    instead of being covered by the header controls. */
 html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh-frame-chrome-top, 0px)); }
+.sb-manager-phase {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-label-tertiary) 16%, transparent);
+}
+.sb-manager-phase[data-phase='running'] {
+  background: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+}
+.sb-manager-phase[data-phase='waiting'] {
+  background: var(--dsw-alias-state-warn-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, transparent);
+}
 .sb-manager-title {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+.sb-manager-status {
+  flex: none;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
 }
-.sb-manager-phase {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dsw-alias-label-secondary);
+.sb-manager-status[data-phase='running'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-state-business-primary);
 }
-.sb-manager-phase[data-phase='running'] { background: var(--dsw-alias-state-business-primary); }
-.sb-manager-phase[data-phase='waiting'] { background: var(--dsw-alias-state-warn-primary); }
+.sb-manager-status[data-phase='waiting'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
+}
+.sb-manager-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  min-width: 0;
+}
 
-.sb-manager-btn {
-  flex: none;
+/* ------------------------------------------------------------- controls --- */
+
+.sb-manager-iconbtn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 7px;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--dsw-radius-sm);
   background: transparent;
-  color: inherit;
+  color: var(--dsw-alias-label-secondary);
   font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background-color .14s ease, color .14s ease, border-color .14s ease;
 }
-.sb-manager-btn--icon { padding: 4px; }
-.sb-manager-btn--primary {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, var(--dsw-alias-border-l1));
+.sb-manager-iconbtn:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
-.sb-manager-btn:disabled { opacity: .45; cursor: not-allowed; }
-.sb-manager button:focus-visible,
-.sb-manager input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.sb-manager-iconbtn[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 26%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+}
+.sb-manager-iconbtn[data-tone='accent'] {
+  border-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+.sb-manager-iconbtn[data-tone='accent']:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.sb-manager-iconbtn:disabled { opacity: .4; cursor: not-allowed; }
+.sb-manager-iconbtn:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+.sb-manager-btn-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-.sb-manager-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.sb-manager-left {
+/* ---------------------------------------------------------------- body --- */
+
+.sb-manager-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------- navigator ---- */
+
+.sb-manager-nav {
   display: flex;
   flex-direction: column;
-  flex: 0 0 340px;
-  width: 340px;
+  flex: none;
+  min-width: 0;
   min-height: 0;
+  background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-layer-2));
   border-right: 1px solid var(--dsw-alias-border-l1);
 }
+.sb-manager-nav-resize {
+  position: relative;
+  flex: none;
+  width: 6px;
+  margin-left: -3px;
+  margin-right: -3px;
+  z-index: 3;
+  cursor: col-resize;
+  background: transparent;
+  outline: none;
+  touch-action: none;
+}
+.sb-manager-nav-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 2px;
+  height: 32px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: var(--dsw-alias-state-business-primary);
+  opacity: 0;
+  transition: opacity .14s ease;
+}
+.sb-manager-nav-resize:hover::after,
+.sb-manager-nav-resize:focus-visible::after { opacity: 1; }
+.sb-manager-nav-resize:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+  border-radius: 999px;
+}
+
+/* Segmented view switcher. */
 .sb-manager-views {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 2px;
-  padding: 8px 10px 0;
+  flex: none;
+  margin: 10px 10px 6px;
+  padding: 3px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-specific-selector, var(--dsw-alias-bg-layer-3));
 }
 .sb-manager-view {
-  flex: 1 1 0;
   min-width: 0;
-  padding: 5px 4px;
+  height: 26px;
+  padding: 0 6px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
+  transition: background-color .14s ease, color .14s ease;
 }
-.sb-manager-view:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
-.sb-manager-view[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
-.sb-manager-section {
+.sb-manager-view:hover { color: var(--dsw-alias-label-primary); }
+.sb-manager-view[data-active='true'] {
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+  box-shadow: var(--dsw-shadow-lv1);
+}
+.sb-manager-view:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -1px;
+}
+
+.sb-manager-scroll {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  padding: 2px 8px 10px;
+  scrollbar-gutter: stable;
 }
-.sb-manager-workspaces { flex: 0 1 auto; max-height: 34%; }
-.sb-manager-sessions { flex: 1 1 auto; }
-.sb-manager-tasks { flex: 0 1 auto; max-height: 30%; }
+.sb-manager-scroll::-webkit-scrollbar { width: 8px; }
+.sb-manager-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-label-tertiary) 30%, transparent);
+  background-clip: content-box;
+}
+.sb-manager-scroll::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--dsw-alias-label-tertiary) 50%, transparent); }
+
+/* ------------------------------------------------------------ sections --- */
+
+.sb-manager-section { padding: 6px 0 4px; }
+.sb-manager-section + .sb-manager-section {
+  border-top: 1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 78%, transparent);
+}
 .sb-manager-section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 4px;
+  margin-bottom: 3px;
 }
-.sb-manager-section-head .sb-manager-section-title { margin: 0; }
+.sb-manager-section-icon { display: inline-flex; flex: none; color: var(--dsw-alias-label-tertiary); }
+.sb-manager-section-title {
+  margin: 0;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-manager-section-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.sb-manager-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-label-tertiary) 14%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sb-manager-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  flex: none;
+}
+.sb-manager-section-actions .sb-manager-iconbtn { height: 24px; min-width: 24px; padding: 0 5px; }
+
+/* -------------------------------------------------------------- filter --- */
+
 .sb-manager-filter {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--dsw-alias-label-secondary);
+  gap: 6px;
+  height: 28px;
+  margin: 0 2px 6px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.sb-manager-filter:focus-within {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l1));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+}
+.sb-manager-filter-icon { flex: none; color: var(--dsw-alias-label-tertiary); }
+.sb-manager-filter input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+}
+.sb-manager-filter input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.sb-manager-filter input::-webkit-search-cancel-button { display: none; }
+.sb-manager-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
-  white-space: nowrap;
 }
-.sb-manager-filter input { width: 12px; height: 12px; margin: 0; }
-.sb-manager-section-title {
-  margin: 0 0 6px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--dsw-alias-label-secondary);
+.sb-manager-filter-clear:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* ----------------------------------------------------------- nav rows --- */
+
+.sb-manager-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
-.sb-manager-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .sb-manager-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
-  padding: 1px 2px;
-  border-radius: 7px;
+  border-radius: var(--dsw-radius-sm);
+  transition: background-color .12s ease;
 }
 .sb-manager-item[data-focused='true'] {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--dsw-alias-state-business-primary);
 }
-.sb-manager-check { flex: none; margin: 0; accent-color: var(--dsw-alias-state-business-primary); }
-.sb-manager-workspace {
+.sb-manager-check {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 2px 0 5px;
+  accent-color: var(--dsw-alias-button-primary-fill);
+  cursor: pointer;
+}
+.sb-manager-check:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+.sb-manager-workspace,
+.sb-manager-session,
+.sb-manager-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 4px 6px;
+  padding: 6px 6px 6px 3px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--dsw-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
+  transition: background-color .12s ease;
 }
-.sb-manager-workspace-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
+.sb-manager-task { padding-left: 6px; }
+.sb-manager-workspace:hover,
+.sb-manager-session:hover,
+.sb-manager-task:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.sb-manager-workspace:focus-visible,
+.sb-manager-session:focus-visible,
+.sb-manager-task:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
 }
-.sb-manager-meta {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+.sb-manager-task:disabled { cursor: default; }
+.sb-manager-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-label-tertiary) 12%, transparent);
 }
-.sb-manager-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-secondary); }
-.sb-manager-dot[data-state='running'] { background: var(--dsw-alias-state-business-primary); }
-.sb-manager-dot[data-state='blocked'] { background: var(--dsw-alias-state-warn-primary); }
-.sb-manager-dot[data-state='error'] { background: var(--dsw-alias-state-error-primary); }
-.sb-manager-dot[data-state='unread'] { background: var(--dsw-alias-state-warn-primary); }
-.sb-manager-dot[data-state='done'] { background: var(--dsw-alias-state-success-primary); }
-.sb-manager-session-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sb-manager-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-manager-empty { margin: 4px 0; color: var(--dsw-alias-label-secondary); font-size: 11px; }
-
-.sb-manager-task {
+.sb-manager-dot[data-state='running'] {
+  background: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+}
+.sb-manager-dot[data-state='blocked'],
+.sb-manager-dot[data-state='unread'] {
+  background: var(--dsw-alias-state-warn-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, transparent);
+}
+.sb-manager-dot[data-state='error'] {
+  background: var(--dsw-alias-state-error-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
+}
+.sb-manager-dot[data-state='done'] {
+  background: var(--dsw-alias-state-success-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+}
+.sb-manager-workspace-main,
+.sb-manager-session-main,
+.sb-manager-task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   flex: 1 1 auto;
   min-width: 0;
+}
+.sb-manager-workspace-title,
+.sb-manager-session-title,
+.sb-manager-task-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--dsw-alias-label-primary);
+}
+.sb-manager-session-title { font-weight: 400; }
+.sb-manager-item[data-state='blocked'] .sb-manager-session-title,
+.sb-manager-item[data-state='error'] .sb-manager-session-title { font-weight: 500; }
+.sb-manager-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.25;
+}
+.sb-manager-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.sb-manager-chevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.sb-manager-workspace:hover .sb-manager-chevron,
+.sb-manager-item[data-focused='true'] .sb-manager-chevron { opacity: 1; }
+.sb-manager-chip {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-label-tertiary) 12%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sb-manager-chip[data-status='running'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+}
+.sb-manager-chip[data-status='blocked'],
+.sb-manager-chip[data-status='failed'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+}
+.sb-manager-chip[data-status='done'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+  color: var(--dsw-alias-state-success-primary);
+}
+.sb-manager-empty {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  margin: 2px 4px 4px;
+  padding: 6px 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
 }
-.sb-manager-task:disabled { cursor: default; }
-.sb-manager-task-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sb-manager-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-manager-chip {
-  flex: none;
-  padding: 1px 6px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 999px;
-  font-size: 10px;
-  color: var(--dsw-alias-label-secondary);
-}
-.sb-manager-chip[data-status='running'] {
-  color: var(--dsw-alias-state-business-primary);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, var(--dsw-alias-border-l1));
-}
-.sb-manager-chip[data-status='blocked'] { color: var(--dsw-alias-state-warn-primary); }
-.sb-manager-chip[data-status='done'] { color: var(--dsw-alias-state-success-primary); }
-.sb-manager-chip[data-status='failed'],
-.sb-manager-chip[data-status='orphaned'] { color: var(--dsw-alias-state-error-primary); }
+.sb-manager-empty svg { flex: none; }
 
-.sb-manager-wake-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.sb-manager-wake-actions .sb-manager-btn { flex: 0 0 auto; }
+/* --------------------------------------------------------------- wake --- */
+
+.sb-manager-wake { padding-bottom: 8px; }
+.sb-manager-switch,
+.sb-manager-textbtn { cursor: pointer; font: inherit; }
+.sb-manager-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+.sb-manager-switch:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+.sb-manager-switch-track {
+  position: relative;
+  display: block;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--dsw-alias-border-l3);
+  transition: background-color .16s ease;
+}
+.sb-manager-switch-track > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--dsw-alias-switch-thumb);
+  box-shadow: var(--dsw-shadow-lv1);
+  transition: transform .16s ease, background-color .16s ease;
+}
+.sb-manager-switch[aria-checked='true'] .sb-manager-switch-track { background: var(--dsw-alias-brand-primary); }
+.sb-manager-switch[aria-checked='true'] .sb-manager-switch-track > span {
+  background: var(--dsw-alias-label-primary-foreground);
+  transform: translateX(13px);
+}
+.sb-manager-wake-status {
+  margin: 2px 6px 6px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.sb-manager-wake-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+.sb-manager-textbtn {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+  transition: background-color .14s ease, color .14s ease;
+}
+.sb-manager-textbtn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.sb-manager-textbtn:disabled { opacity: .45; cursor: not-allowed; }
+.sb-manager-textbtn:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+.sb-manager-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: help;
+}
+
+/* ---------------------------------------------------------- selection --- */
+
 .sb-manager-selection {
-  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 8px 10px;
+  flex: none;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
 }
-.sb-manager-selection-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.sb-manager-count { margin-right: auto; font-variant-numeric: tabular-nums; }
-.sb-manager-hint { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 10px; }
-.sb-manager-error { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 11px; }
-.sb-manager-ok { margin: 0; color: var(--dsw-alias-state-success-primary); font-size: 11px; }
+.sb-manager-selection-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sb-manager-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+.sb-manager-selection[data-empty] .sb-manager-count {
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+.sb-manager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: none;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .14s ease, color .14s ease, opacity .14s ease;
+}
+.sb-manager-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.sb-manager-btn:disabled { opacity: .45; cursor: not-allowed; }
+.sb-manager-btn:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+.sb-manager-btn--primary {
+  border-color: var(--dsw-alias-button-primary-fill);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+.sb-manager-btn--primary:hover:not(:disabled) {
+  border-color: var(--dsw-alias-button-primary-hover);
+  background: var(--dsw-alias-button-primary-hover);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+.sb-manager-selection-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 14px;
+}
+.sb-manager-hint-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.sb-manager-ok { font-size: 10px; color: var(--dsw-alias-state-success-primary); }
+.sb-manager-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--dsw-alias-state-error-primary);
+}
 
-.sb-manager-chat { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.sb-manager-chat-body { flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.sb-manager-chat-body > * { flex: 1 1 auto; min-height: 0; }
+/* --------------------------------------------------------------- chat --- */
+
+.sb-manager-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.sb-manager-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 4px 10px 4px 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.sb-manager-chat-title {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-manager-chat-head .sb-manager-status { font-size: 10px; }
+.sb-manager-chat-spacer { flex: 1 1 auto; min-width: 0; }
+.sb-manager-chat-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.sb-manager-chat-body > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
 .sb-manager-notice {
   margin: auto;
   padding: 20px;
@@ -1638,7 +2243,16 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   text-align: center;
   color: var(--dsw-alias-label-secondary);
 }
-.sb-manager-notice p { margin: 0; }
+.sb-manager-notice p { margin: 0; font-size: 12px; }
+.sb-manager-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--dsw-alias-label-tertiary) 30%, transparent);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  animation: sb-manager-spin .8s linear infinite;
+}
+@keyframes sb-manager-spin { to { transform: rotate(360deg); } }
 
 /* Sidebar-foot entry point: one full-width row beside Settings while the
    sidebar is wide, a centred icon in the rail. Occupants own their geometry
@@ -1670,42 +2284,63 @@ html[data-platform='darwin'] .sb-manager-head { padding-top: max(10px, var(--dsh
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
   color: var(--dsw-alias-label-primary);
 }
-.sb-manager-entry:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-manager-entry:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
 .sb-manager-entry-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Hover states are gated: touch frames never get a sticky hover. */
 @media (hover: hover) {
-  .sb-manager-btn:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
-  .sb-manager-btn--primary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent);
-  }
-  .sb-manager-workspace:hover,
-  .sb-manager-task:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
-  .sb-manager-entry:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+  .sb-manager-entry:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 }
 
-/* A narrow frame stacks the two panes; the drawer takes the whole width. */
-@media (max-width: 860px) {
-  .sb-manager { width: 100%; }
-  .sb-manager-body { flex-direction: column; }
-  .sb-manager-left {
-    width: 100%;
-    flex: 0 0 auto;
-    max-height: 48%;
-    border-right: 0;
-    border-bottom: 1px solid var(--dsw-alias-border-l1);
+/* The drawer is a size container: collapse labels by its own width. */
+@container (max-width: 760px) {
+  .sb-manager-btn-label { display: none; }
+  .sb-manager-iconbtn { padding: 0 6px; }
+}
+@container (max-width: 620px) {
+  .sb-manager-status { display: none; }
+  .sb-manager-head { padding-left: 12px; }
+}
+@container (max-width: 460px) {
+  .sb-manager-title { font-size: 12px; }
+  .sb-manager-section-actions { gap: 0; }
+}
+
+/* A narrow frame turns the drawer into the whole workspace rather than a
+   floating panel with a sliver of the shell behind it. */
+@media (max-width: 720px) {
+  .sb-manager {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100vw !important;
+    border: 0;
+    border-radius: 0;
   }
-  .sb-manager-workspaces { max-height: 40%; }
-  .sb-manager-chat { min-height: 240px; }
+  .sb-manager-resize { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sb-manager,
-  .sb-manager-btn,
+  .sb-manager-iconbtn,
+  .sb-manager-view,
   .sb-manager-workspace,
-  .sb-manager-task { transition: none; animation: none; }
+  .sb-manager-session,
+  .sb-manager-task,
+  .sb-manager-btn,
+  .sb-manager-textbtn,
+  .sb-manager-switch-track,
+  .sb-manager-switch-track > span,
+  .sb-manager-chip,
+  .sb-manager-chevron,
+  .sb-manager-resize::after,
+  .sb-manager-nav-resize::after { transition: none; }
+  .sb-manager-spinner { animation: none; }
 }
-
 `;
 
 // src/client/css.ts
@@ -1721,20 +2356,31 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
    clipped by a neighbouring card.
 
    --sb-tint is the share of the accent mixed into the card surface; it stays
-   well under 15% so text contrast survives in both themes, and it is mixed
-   against the theme's own layer colour rather than a literal.
-   The fallback chain keeps a card coloured if a future theme drops the token. */
-.sb-card[data-state="running"]  { --sb-accent: var(--dsw-alias-state-business-primary, var(--dsw-alias-button-info-fill, var(--dsw-alias-brand-primary))); --sb-glow: .72; --sb-breathe: 2.4s; --sb-tint: 10%; --sb-aura: var(--dsw-alias-state-business-primary); }
-.sb-card[data-state="blocked"]  { --sb-accent: var(--dsw-alias-state-warn-primary);   --sb-glow: .92; --sb-breathe: 1.25s; --sb-tint: 14%; --sb-aura: var(--dsw-alias-state-error-primary); }
-.sb-card[data-state="error"]    { --sb-accent: var(--dsw-alias-state-error-primary);  --sb-glow: .90; --sb-breathe: 1.25s; --sb-tint: 14%; --sb-aura: var(--dsw-alias-state-warn-primary); }
-.sb-card[data-state="unread"]   { --sb-accent: var(--dsw-alias-state-warn-primary);   --sb-glow: .72; --sb-breathe: 2.2s; --sb-tint: 10%; --sb-aura: var(--dsw-alias-state-success-primary); }
-.sb-card[data-state="done"]     { --sb-accent: var(--dsw-alias-state-success-primary);--sb-glow: .42; --sb-breathe: 0s;   --sb-tint: 6%; --sb-aura: var(--dsw-alias-state-business-primary); }
+   well under 10% so text contrast survives in both themes, and it is mixed
+   against a token-derived surface rather than a literal.
+   The fallback chain keeps a card coloured if a future theme drops the token.
+
+   --sb-glow is the halo budget: the stylesheet scales it down to a faint
+   pulse, so a wall of cards reads as quiet status rather than a light show. */
+.sb-card[data-state="running"]   { --sb-accent: var(--dsw-alias-state-business-primary, var(--dsw-alias-button-info-fill, var(--dsw-alias-brand-primary))); --sb-glow: .58; --sb-breathe: 2.6s; --sb-tint: 5%; --sb-aura: var(--dsw-alias-state-business-primary); }
+.sb-card[data-state="blocked"]   { --sb-accent: var(--dsw-alias-state-warn-primary); --sb-glow: .74; --sb-breathe: 1.4s; --sb-tint: 7%; --sb-aura: var(--dsw-alias-state-warn-primary); }
+.sb-card[data-state="error"]     { --sb-accent: var(--dsw-alias-state-error-primary); --sb-glow: .72; --sb-breathe: 1.4s; --sb-tint: 7%; --sb-aura: var(--dsw-alias-state-error-primary); }
+.sb-card[data-state="unread"]    { --sb-accent: var(--dsw-alias-state-warn-primary); --sb-glow: .56; --sb-breathe: 2.4s; --sb-tint: 5%; --sb-aura: var(--dsw-alias-state-warn-primary); }
+.sb-card[data-state="done"]      { --sb-accent: var(--dsw-alias-state-success-primary); --sb-glow: .30; --sb-breathe: 0s; --sb-tint: 3%; --sb-aura: var(--dsw-alias-state-success-primary); }
 `, STYLESHEET = `
 .sb-root {
   box-sizing: border-box;
-  --sb-radius: 14px;
-  --sb-gap: 10px;
-  --sb-card-pad: 11px;
+  --sb-radius: 12px;
+  --sb-gap: 12px;
+  --sb-card-pad: 12px;
+  /* One step above the base surface, derived from the theme's own ink and
+     surface tokens: light and dark both get a quiet raised plane without a
+     literal colour. Layer tokens alone collapse to white in the light theme,
+     so the mix is what makes the hierarchy readable in both modes. */
+  --sb-surface-1: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, var(--dsw-alias-bg-base));
+  --sb-surface-2: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, var(--dsw-alias-bg-base));
+  --sb-hover: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent));
+  --sb-focus-ring: var(--dsw-alias-brand-primary);
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
   line-height: 1.45;
@@ -1763,10 +2409,8 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
   width: 100%;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 72%, var(--dsw-alias-state-business-primary));
-  background:
-    radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, transparent), transparent 65%),
-    var(--dsw-alias-bg-layer-1);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  background: var(--sb-surface-1);
   contain: layout style;
 }
 .sb-dock[data-collapsed="true"] {
@@ -1826,9 +2470,10 @@ var STYLE_ID = "dsh-session-board-style", ACCENTS = `
 .sb-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--sb-surface-2);
   flex: 0 0 auto;
   user-select: none;
 }
@@ -1853,26 +2498,36 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 }
 .sb-count {
   color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sb-head .sb-count, .sb-overlay-head .sb-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
 }
 .sb-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 5px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
+  font-size: 11px;
   cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.sb-btn:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
-.sb-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
-.sb-btn[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-btn:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
+.sb-btn:focus-visible { outline: 2px solid var(--sb-focus-ring); outline-offset: 1px; }
+.sb-btn:disabled { opacity: .45; cursor: not-allowed; }
+.sb-btn[aria-pressed="true"] { background: var(--sb-surface-2); border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-primary); }
 
 .sb-offline {
   padding: 4px 10px;
@@ -1890,7 +2545,7 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  padding: 8px;
+  padding: 10px;
 }
 .sb-scroll::-webkit-scrollbar { width: 8px; }
 .sb-scroll::-webkit-scrollbar-thumb {
@@ -1900,16 +2555,16 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 
 .sb-top {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: 16px;
+  bottom: 16px;
   z-index: 4;
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-overlay, var(--sb-surface-2));
   color: var(--dsw-alias-label-primary);
-  box-shadow: 0 2px 10px var(--dsw-alias-bg-mask-2, rgba(0,0,0,.18));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1918,43 +2573,71 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 
 /* --------------------------------------------------------------- groups --- */
 
-.sb-group + .sb-group { margin-top: 10px; }
+.sb-group + .sb-group { margin-top: 14px; }
 .sb-group-head {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 2px;
+  min-height: 26px;
+  padding: 3px 6px;
   border: 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
+  font-size: 11px;
   font-weight: 600;
   text-transform: none;
   cursor: pointer;
   text-align: left;
+  transition: background-color 120ms ease, color 120ms ease;
 }
-.sb-group-head:hover { color: var(--dsw-alias-label-primary); }
-.sb-group-head:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-group-head:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
+.sb-group-head:focus-visible { outline: 2px solid var(--sb-focus-ring); outline-offset: 1px; }
 .sb-group-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--sb-group-accent, var(--dsw-alias-border-l2));
+  background: var(--sb-group-accent, var(--dsw-alias-label-tertiary));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-group-accent, var(--dsw-alias-label-tertiary)) 22%, transparent);
   flex: 0 0 auto;
 }
 .sb-group[data-group="attention"] .sb-group-head { --sb-group-accent: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-label-primary); }
 .sb-group[data-group="running"]   .sb-group-head { --sb-group-accent: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }
 .sb-group[data-group="done"]      .sb-group-head { --sb-group-accent: var(--dsw-alias-state-success-primary); }
-.sb-group-chevron { transition: transform var(--ds-transition-duration-fast, 120ms) var(--ds-ease-in-out, ease); }
+.sb-group-chevron { flex: 0 0 auto; opacity: .65; transition: transform 120ms ease; }
 .sb-group[data-open="false"] .sb-group-chevron { transform: rotate(-90deg); }
 .sb-group[data-open="false"] .sb-group-body { display: none; }
-.sb-group-count { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+.sb-group-count {
+  margin-left: auto;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 
 .sb-empty {
-  padding: 10px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 200px;
+  margin: 4px;
+  padding: 28px 20px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 14px;
   color: var(--dsw-alias-label-secondary);
+  text-align: center;
 }
+.sb-empty-glyph { display: inline-flex; color: var(--dsw-alias-label-tertiary); opacity: .85; }
+.sb-empty-text { font-size: 12px; line-height: 1.5; max-width: 40ch; }
 
 /* ---------------------------------------------------------------- cards --- */
 
@@ -1976,36 +2659,38 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   --sb-accent: var(--dsw-alias-state-idle-primary);
   --sb-aura: var(--dsw-alias-state-idle-primary);
   --sb-glow: .24;
-  --sb-tint: 4%;
-  border: 1px solid color-mix(in srgb, var(--sb-accent) 42%, var(--dsw-alias-border-l1));
+  --sb-tint: 3%;
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: var(--sb-radius);
-  background:
-    linear-gradient(145deg,
-      color-mix(in srgb, var(--sb-accent) var(--sb-tint), var(--dsw-alias-bg-layer-2)),
-      var(--dsw-alias-bg-layer-2) 58%,
-      color-mix(in srgb, var(--sb-aura) 6%, var(--dsw-alias-bg-layer-1)));
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--sb-accent) var(--sb-tint), var(--sb-surface-1)),
+      var(--sb-surface-1) 64%);
   box-shadow:
-    0 8px 20px color-mix(in srgb, var(--sb-accent) 10%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent);
+    0 1px 2px color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
   cursor: pointer;
   text-align: left;
   width: 100%;
   font: inherit;
   color: inherit;
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
   contain: layout style;
 }
-.sb-card::after {
+/* A slim state rail instead of a coloured border ring: the tint and the dot
+   carry the state, the card outline stays neutral in both themes. */
+.sb-card::before {
   content: "";
   position: absolute;
-  inset: 0;
-  z-index: 0;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  z-index: 2;
   pointer-events: none;
-  background:
-    radial-gradient(90% 75% at 100% 0%, color-mix(in srgb, var(--sb-aura) 12%, transparent), transparent 70%),
-    linear-gradient(110deg, transparent 35%, color-mix(in srgb, var(--sb-accent) 5%, transparent), transparent 68%);
-  opacity: .9;
+  background: color-mix(in srgb, var(--sb-accent) 62%, transparent);
 }
+
 .sb-card > * { position: relative; z-index: 1; }
 .sb-card-content {
   /* Let trackpad scrolling reach the list when this preview cannot scroll further. */
@@ -2030,66 +2715,62 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   width: 20px;
   height: 20px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--sb-accent) 48%, var(--dsw-alias-border-l2));
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 78%, transparent);
+  background: var(--sb-surface-2);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
-.sb-card-select span { width: 8px; height: 8px; border-radius: 3px; border: 1px solid var(--sb-accent); }
-.sb-card-select:hover { background: color-mix(in srgb, var(--sb-accent) 18%, var(--dsw-alias-bg-layer-2)); }
-.sb-card[data-selected="true"] { border-color: var(--sb-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-accent) 28%, transparent), 0 10px 30px color-mix(in srgb, var(--sb-aura) 22%, transparent); }
-.sb-card[data-selected="true"] .sb-card-select { background: var(--sb-accent); border-color: var(--sb-accent); }
-.sb-card[data-selected="true"] .sb-card-select span { border-color: var(--dsw-alias-bg-layer-2); background: var(--dsw-alias-bg-layer-2); }
+.sb-card-select span { width: 8px; height: 8px; border-radius: 3px; border: 1px solid var(--dsw-alias-label-tertiary); }
+.sb-card-select:hover { border-color: var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); }
+/* Selection is an interaction state, not a session state: it uses the
+   business accent so an amber "waiting" card and a selected card never read
+   as the same thing. */
+.sb-card[data-selected="true"] { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent), 0 2px 8px color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent); }
+.sb-card[data-selected="true"] .sb-card-select { background: var(--dsw-alias-state-business-primary); border-color: var(--dsw-alias-state-business-primary); }
+.sb-card[data-selected="true"] .sb-card-select span { border-color: var(--dsw-alias-label-primary-inverted); background: var(--dsw-alias-label-primary-inverted); }
 
 .sb-card:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--sb-accent) 68%, var(--dsw-alias-border-l1));
+  border-color: var(--dsw-alias-border-l3);
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--sb-accent) calc(var(--sb-tint) + 2%), var(--sb-surface-2)),
+      var(--sb-surface-2) 64%);
   box-shadow:
-    0 12px 28px color-mix(in srgb, var(--sb-accent) 17%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--sb-aura) 18%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent);
+    0 6px 16px color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent);
 }
-.sb-card:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 2px; }
+.sb-card:focus-visible { outline: 2px solid var(--sb-focus-ring); outline-offset: 2px; }
 
 /* The halo: its own compositor layer, animated on opacity/transform only. */
 .sb-card__halo {
   position: absolute;
   z-index: 0;
-  inset: -2px;
-  padding: 3px;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  inset: -1px;
+  padding: 1px;
+  -webkit-mask: linear-gradient(var(--dsw-alias-bg-base) 0 0) content-box, linear-gradient(var(--dsw-alias-bg-base) 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   border-radius: inherit;
   pointer-events: none;
-  opacity: var(--sb-glow);
-  will-change: opacity, transform;
-  background: linear-gradient(125deg, var(--sb-accent), var(--sb-aura), var(--sb-accent));
-  background-size: 220% 220%;
-  filter: blur(9px) saturate(1.35);
+  opacity: calc(var(--sb-glow) * .32);
+  will-change: opacity;
+  background: var(--sb-accent);
+  filter: blur(8px);
   animation: none;
 }
-.sb-card__halo::after {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border-radius: inherit;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--sb-accent) 72%, transparent),
-    0 0 20px 3px color-mix(in srgb, var(--sb-accent) 58%, transparent),
-    0 0 34px 4px color-mix(in srgb, var(--sb-aura) 28%, transparent);
-}
+
 .sb-card[data-state="running"] .sb-card__halo,
 .sb-card[data-state="blocked"] .sb-card__halo,
 .sb-card[data-state="error"] .sb-card__halo,
 .sb-card[data-state="unread"] .sb-card__halo {
   animation: sb-breathe var(--sb-breathe) var(--ds-ease-in-out, ease-in-out) infinite;
 }
-.sb-card[data-state="done"] .sb-card__halo { opacity: .42; filter: blur(7px) saturate(1.1); animation: none; }
-.sb-card[data-current="true"] .sb-card__halo { opacity: calc(var(--sb-glow) + .08); }
+.sb-card[data-state="done"] .sb-card__halo { opacity: calc(var(--sb-glow) * .18); filter: blur(6px); animation: none; }
+.sb-card[data-current="true"] .sb-card__halo { opacity: calc(var(--sb-glow) * .42); }
 
 /* Pause every animation while the user drags the divider or the page is
    hidden: the gesture owns the frame budget. */
@@ -2098,22 +2779,19 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-overlay[data-quiet="true"] .sb-card__halo { animation-play-state: paused; }
 
 @keyframes sb-breathe {
-  0%, 100% { opacity: calc(var(--sb-glow) * .46); transform: scale(.994); }
-  50%      { opacity: var(--sb-glow);            transform: scale(1.012); }
+  0%, 100% { opacity: calc(var(--sb-glow) * .14); }
+  50%      { opacity: calc(var(--sb-glow) * .32); }
 }
-@keyframes sb-spectrum {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
+
 
 /* Current session: a left bar plus a slightly stronger border. */
 .sb-card[data-current="true"] {
-  /* The current session sits on the raised layer, but it keeps its state tint:
-     the tint is re-mixed onto layer-3 rather than replaced, so a highlighted
-     card still shows whether it is running, waiting or done. */
-  border-color: color-mix(in srgb, var(--sb-accent) 45%, var(--dsw-alias-border-l2));
-  background-color: color-mix(in srgb, var(--sb-accent) var(--sb-tint), var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2)));
+  /* The current session keeps its state tint but sits a step above the
+     resting surface, with a stronger rail. */
+  border-color: color-mix(in srgb, var(--sb-accent) 34%, var(--dsw-alias-border-l2));
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--sb-accent) var(--sb-tint), var(--sb-surface-2)),
+      var(--sb-surface-2) 64%);
 }
 .sb-card[data-current="true"]::before {
   content: "";
@@ -2124,16 +2802,23 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   width: 3px;
   border-radius: 0 3px 3px 0;
   z-index: 2;
-  background: linear-gradient(180deg, var(--sb-accent), var(--sb-aura));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--sb-accent) 70%, transparent);
+  background: var(--sb-accent);
 }
 
-.sb-card-head { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding-right: 28px; position: relative; min-height: 38px; }
+.sb-card-head { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 0 28px 0 14px; min-height: 38px; }
+.sb-card-head .sb-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sb-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-accent) 20%, transparent);
+  flex: 0 0 auto;
+}
 .sb-card-title {
   flex: 1 1 auto;
   min-width: 0;
-  font-weight: 700;
-  letter-spacing: -.01em;
+  font-weight: 600;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2141,7 +2826,7 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-card-where {
   flex: 0 0 auto;
   max-width: 100%;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2153,20 +2838,24 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
 .sb-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   padding: 0 7px;
-  height: 19px;
-  border-radius: 10px;
+  height: 18px;
+  border-radius: 999px;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .01em;
-  color: var(--sb-accent, var(--dsw-alias-label-secondary));
-  border: 1px solid color-mix(in srgb, var(--sb-accent, var(--dsw-alias-border-l2)) 45%, transparent);
-  background: color-mix(in srgb, var(--sb-accent, var(--dsw-alias-bg-layer-1)) 12%, transparent);
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent);
   white-space: nowrap;
 }
+.sb-pill--state {
+  color: var(--sb-accent);
+  border-color: color-mix(in srgb, var(--sb-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--sb-accent) 8%, transparent);
+}
 .sb-card[data-state="done"] .sb-pill--state { display: none; }
-.sb-pill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; position: relative; min-height: 19px; }
+.sb-pill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; position: relative; min-height: 18px; }
 
 /* The attention dot: a small filled circle that breathes with the halo. */
 .sb-state-dot {
@@ -2203,75 +2892,64 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 4px 10px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   padding-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--sb-accent) 20%, transparent);
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 .sb-metric { white-space: nowrap; }
-.sb-metric--strong { color: var(--dsw-alias-label-primary); }
+.sb-metric--strong { color: var(--dsw-alias-label-primary); font-weight: 500; }
 
 .sb-progress {
   position: relative;
   height: 4px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--sb-accent) 12%, var(--dsw-alias-bg-layer-1));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent);
   overflow: hidden;
 }
 .sb-progress-fill {
   height: 100%;
   width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--sb-accent), var(--sb-aura));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--sb-accent) 70%, transparent);
+  background: var(--sb-accent);
   transition: width var(--ds-transition-duration, 200ms) linear;
 }
 .sb-card[data-state="done"] .sb-progress { display: none; }
 
 .sb-ack {
   align-self: flex-start;
-  padding: 1px 7px;
-  height: 20px;
-  border-radius: 6px;
+  padding: 0 8px;
+  height: 22px;
+  border-radius: 7px;
   border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.sb-ack:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l3, var(--dsw-alias-border-l2)); }
+.sb-ack:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l3); background: var(--sb-hover); }
 
 .sb-batchbar {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 5px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 24%, var(--dsw-alias-border-l1));
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, var(--dsw-alias-bg-layer-1));
-  color: var(--dsw-alias-label-primary);
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--sb-surface-1);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
 }
-.sb-batchbar__action, .sb-batchbar__clear {
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 42%, var(--dsw-alias-border-l1));
-  border-radius: 7px;
-  padding: 3px 8px;
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  cursor: pointer;
-}
-.sb-batchbar__action:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent); }
-.sb-batchbar__secondary {
-  border-color: var(--dsw-alias-border-l1);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-}
-.sb-batchbar__secondary:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-batchbar__action, .sb-batchbar__clear { margin-left: auto; background: transparent; border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
+.sb-batchbar__action:not(:disabled) { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, var(--dsw-alias-border-l2)); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, transparent); color: var(--dsw-alias-label-primary); }
+.sb-batchbar__action:not(:disabled):hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent); }
+.sb-batchbar__action.sb-batchbar__secondary { border-color: var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-secondary); }
+.sb-batchbar__action.sb-batchbar__secondary:not(:disabled):hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
 .sb-batchbar__clear { margin-left: auto; background: transparent; border-color: var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
 
 /* -------------------------------------------------------------- overlay --- */
@@ -2287,8 +2965,11 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   -webkit-app-region: no-drag;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent);
-  backdrop-filter: blur(6px);
+  /* Opaque by design: the board is a page-level surface, so the conversation
+     behind it must never read as ghost text through the panel. The blur stays
+     as a defensive layer for any future translucent token. */
+  background: var(--dsw-alias-bg-base);
+  backdrop-filter: blur(18px);
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
 }
@@ -2296,14 +2977,16 @@ html[data-platform='darwin'] .sb-resize { -webkit-app-region: no-drag; }
   display: flex;
   align-items: center;
   /* A portal outside #root otherwise covers the native drag region. */
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 10px;
+  min-height: 54px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--sb-surface-1);
   flex: 0 0 auto;
 }
 .sb-overlay-head button, .sb-overlay-head input { -webkit-app-region: no-drag; }
 html[data-platform='darwin'] .sb-overlay-head { -webkit-app-region: drag; padding-left: 90px; min-height: 52px; }
-html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
+html[data-platform='darwin'] .sb-overlay-title { font-size: 14px; font-weight: 600; letter-spacing: -.01em; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-overlay-head { padding-top: max(12px, var(--dsh-frame-chrome-top, 0px)); }
 .sb-overlay-title { font-size: 14px; font-weight: 600; flex: 1 1 auto; }
 .sb-overlay-body {
@@ -2312,50 +2995,45 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 0;
   overflow: hidden;
+  background: var(--dsw-alias-bg-base);
 }
-.sb-overlay .sb-group-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: var(--sb-gap);
-  align-items: start;
-}
+
 /* The list is only a grouping wrapper; display:contents lets its items be
    the grid's own cells. Leaving it as a second grid would nest one column
    inside the first cell and defeat the auto-fill. */
-.sb-overlay .sb-list { display: contents; }
+
 .sb-overlay .sb-line { -webkit-line-clamp: 3; }
 
 /* Compact density: one card line less, tighter metrics. */
 .sb-root[data-density="compact"] .sb-card { height: 212px; min-height: 212px; max-height: 212px; flex-basis: 212px; padding: 9px; gap: 6px; }
 .sb-root[data-density="compact"] .sb-line { -webkit-line-clamp: 1; }
 .sb-root[data-density="compact"] .sb-metrics { font-size: 10px; gap: 2px 6px; }
-.sb-root[data-density="compact"] .sb-card__halo::after { box-shadow: 0 0 0 1px color-mix(in srgb, var(--sb-accent) 72%, transparent), 0 0 16px 2px color-mix(in srgb, var(--sb-accent) 55%, transparent), 0 0 26px 3px color-mix(in srgb, var(--sb-aura) 26%, transparent); }
+
 .sb-overlay.sb-root[data-density="compact"] .sb-line { -webkit-line-clamp: 2; }
 
 
 /* Stable card interaction states and accessible fixed footer. */
 .sb-card-select:checked {
-  background: var(--sb-accent);
-  border-color: var(--sb-accent);
-  box-shadow: inset 0 0 0 4px var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-alias-state-business-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: inset 0 0 0 4px var(--sb-surface-2);
 }
 .sb-card-select:disabled { opacity: .45; cursor: not-allowed; }
 .sb-card-select:focus-visible, .sb-ack:focus-visible, .sb-card-title:focus-visible,
 .sb-card-content:focus-visible, .sb-resize:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px;
+  outline: 2px solid var(--sb-focus-ring);
+  outline-offset: 2px;
 }
 .sb-card-content .sb-line { display: block; -webkit-line-clamp: unset; flex-shrink: 0; }
-.sb-card-title { font-weight: 700; font-size: 13px; }
+.sb-card-title { font-weight: 600; font-size: 13px; }
 .sb-card-footer { flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; }
 .sb-card-footer .sb-metrics { margin: 0; }
 .sb-card-footer .sb-ack { align-self: flex-end; }
 .sb-batch { flex: 0 0 auto; min-width: 0; }
 .sb-batchbar { flex-wrap: wrap; }
-.sb-batch-preview { margin: 8px; padding: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+.sb-batch-preview { margin: 8px; padding: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--sb-surface-1); }
 .sb-batch-preview p { margin: 6px 0; font-size: 11px; }
 .sb-batch-preview ul { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
 .sb-batch-status:not(:empty), .sb-batch-error { padding: 6px 10px; font-size: 11px; }
@@ -2363,15 +3041,14 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-batch-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 0 10px; }
 .sb-batch-result-count { font-size: 11px; }
 .sb-batch-dismiss { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 14px; line-height: 1; }
-.sb-batch-dismiss:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-batch-dismiss:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
 .sb-batch-error { color: var(--dsw-alias-state-error-primary); }
 .sb-batch-detail { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 10px; overflow-wrap: anywhere; }
 .sb-batch button:disabled { opacity: .45; cursor: not-allowed; }
 .sb-overlay > .sb-batch .sb-batch-preview { max-width: 640px; }
 .sb-overlay .sb-group-body { display: block; }
-.sb-overlay .sb-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.sb-overlay .sb-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--sb-gap); }
 .sb-list > li { min-width: 0; }
-@media (prefers-reduced-motion: reduce) { .sb-card { transition: none; } .sb-card:hover { transform: none; } }
 
 /* On narrow frames retain a usable board opener instead of squeezed cards. */
 .sb-auto-rail { display: none; }
@@ -2386,23 +3063,144 @@ html[data-platform='darwin'] .sb-overlay-title { -webkit-app-region: drag; }
 .sb-overlay-head .sb-overlay-nodrag { -webkit-app-region: no-drag; }
 html[data-platform='darwin'] .sb-overlay-head { padding-left: 16px; }
 html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none; width: 64px; }
-.sb-overlay-body > .sb-scroll { padding: 16px 20px 40px; }
+.sb-overlay-body > .sb-scroll { padding: 16px 20px 48px; }
 .sb-batch-source { display: block; font-size: 10px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
-.sb-batchbar__count { font-variant-numeric: tabular-nums; margin-right: auto; }
+.sb-batchbar__count { margin-right: auto; color: var(--dsw-alias-label-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
 .sb-job-preview { margin-bottom: 5px; }
-.sb-job-row { padding: 4px 6px; border-radius: 6px; background: color-mix(in srgb, var(--sb-accent) 7%, var(--dsw-alias-bg-layer-1)); font-size: 11px; overflow-wrap: anywhere; margin-top: 3px; }
-/* Search and filters share the available width in either surface. */
-.sb-filters { padding: 8px 10px; border-bottom: 1px solid var(--dsw-alias-border-l1); flex: none; }
-.sb-filter-search, .sb-filter-row select { font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; padding: 6px 8px; min-width: 0; }
-.sb-filter-search { width: 100%; }
-.sb-filter-row { display: flex; gap: 6px; margin-top: 6px; }
-.sb-filter-row select { flex: 1 1 0; width: 0; }
-.sb-filter-count { display: block; margin-top: 5px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
-.sb-filters input:focus-visible, .sb-filters select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
-.sb-overlay .sb-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 20px; }
-.sb-overlay .sb-filter-search { flex: 1 1 240px; max-width: 480px; }
-.sb-overlay .sb-filter-row { flex: 1 1 300px; max-width: 560px; margin: 0; }
-.sb-overlay .sb-filter-count { margin: 0; }
+.sb-job-row { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l1); background: var(--sb-surface-1); font-size: 11px; overflow-wrap: anywhere; margin-top: 3px; }
+/* ---------------------------------------------------------------- filters --- */
+
+/* Search, filters, grouping and the match count. One row on a board-width
+   panel; below ~1020px the controls take their own row instead of squeezing
+   every select into an unreadable width. The docked column always uses the
+   two-row layout because it is narrow at every window width. */
+.sb-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  flex: none;
+}
+.sb-filter-search {
+  order: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 200px;
+  min-width: 150px;
+  max-width: 380px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-tertiary);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.sb-filter-search:hover { border-color: var(--dsw-alias-border-l3); }
+.sb-filter-search:focus-within {
+  border-color: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent);
+  color: var(--dsw-alias-label-secondary);
+}
+.sb-filter-search-icon { flex: 0 0 auto; }
+.sb-filter-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.sb-filter-search input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.sb-filter-controls {
+  order: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sb-select { position: relative; display: inline-flex; flex: 0 0 auto; }
+.sb-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  max-width: 100%;
+  padding: 0 26px 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.sb-select select:hover { border-color: var(--dsw-alias-border-l3); background: var(--sb-surface-1); }
+.sb-select select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-select--workspace select { width: 200px; text-overflow: ellipsis; }
+.sb-select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--dsw-alias-label-tertiary);
+  border-bottom: 1.5px solid var(--dsw-alias-label-tertiary);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.sb-filter-toggle,
+.sb-filter-clear {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.sb-filter-toggle:hover,
+.sb-filter-clear:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
+.sb-filter-toggle[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 40%, var(--dsw-alias-border-l2));
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+.sb-filter-toggle:focus-visible,
+.sb-filter-clear:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.sb-filter-clear { order: 3; }
+.sb-filter-count {
+  order: 4;
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sb-overlay > .sb-filters { padding: 10px 20px; }
+.sb-overlay > .sb-batch .sb-batchbar { padding: 6px 20px; }
+@media (max-width: 1020px) {
+  .sb-overlay .sb-filter-search { max-width: 420px; }
+  .sb-overlay .sb-filter-controls { order: 4; flex: 1 1 100%; }
+  .sb-overlay .sb-filter-clear { order: 2; }
+  .sb-overlay .sb-filter-count { order: 3; }
+}
+.sb-dock .sb-filter-search { max-width: none; }
+.sb-dock .sb-filter-controls { order: 4; flex: 1 1 100%; }
+.sb-dock .sb-filter-clear { order: 2; }
+.sb-dock .sb-filter-count { order: 3; }
 /* A summary card has no inner scrollbar; detail remains an explicit action. */
 .sb-root .sb-card[data-expanded="false"] { height: 194px; min-height: 194px; max-height: 194px; }
 .sb-root[data-density="compact"] .sb-card[data-expanded="false"] { height: 176px; min-height: 176px; max-height: 176px; flex-basis: 176px; }
@@ -2410,17 +3208,30 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 .sb-root .sb-card[data-expanded="false"] .sb-card-content .sb-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .sb-root .sb-card[data-expanded="true"] { height: 320px; min-height: 320px; max-height: 320px; flex-basis: 320px; }
 .sb-card-details { align-self: flex-start; font-size: 11px; }
-.sb-workspace-node { min-width: 0; margin-bottom: 8px; }
+.sb-workspace-node { min-width: 0; margin-bottom: 10px; }
 .sb-workspace-head-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .sb-workspace-head-row > .sb-group-head { flex: 1; min-width: 0; }
-.sb-workspace-action { flex: none; padding: 2px 6px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 10px; line-height: 16px; cursor: pointer; }
-.sb-workspace-action:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.sb-workspace-action {
+  flex: none;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.sb-workspace-action:hover { background: var(--sb-hover); color: var(--dsw-alias-label-primary); }
 .sb-workspace-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .sb-workspace-action:disabled { opacity: .55; cursor: default; }
 .sb-workspace-error { margin: 2px 0 4px 18px; color: var(--dsw-alias-state-error-primary); font-size: 10px; line-height: 14px; }
-.sb-workspace-subtitle { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
-.sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-workspace-body { padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 4px; }
+.sb-workspace-subtitle { flex: 0 1 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
+.sb-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }
+.sb-workspace-body { padding-left: 10px; border-left: 1px solid var(--dsw-alias-border-l1); margin-left: 6px; }
 .sb-workspace-body > .sb-group { margin-top: 4px; }
 .sb-workspace-node > .sb-group-head { width: 100%; }
 /* A branch with no sessions has nothing to disclose: no pointer affordance. */
@@ -2445,8 +3256,19 @@ html[data-platform='darwin'] .sb-overlay-dragspace { display: block; flex: none;
 ${ACCENTS}
 
 @media (prefers-reduced-motion: reduce) {
-  .sb-card__halo { animation: none !important; }
-  .sb-progress-fill { transition: none; }
+  .sb-card,
+  .sb-card:hover,
+  .sb-card::before,
+  .sb-card__halo,
+  .sb-group-chevron,
+  .sb-progress-fill,
+  .sb-btn,
+  .sb-filter-toggle,
+  .sb-filter-clear,
+  .sb-filter-search,
+  .sb-select select,
+  .sb-ack { transition: none; animation: none !important; }
+  .sb-card:hover { transform: none; }
   .sb-scroll { scroll-behavior: auto; }
 }
 
@@ -2905,8 +3727,54 @@ var BatchController = class {
 // src/client/BatchToolbar.tsx
 var import_react7 = require("react");
 
+// src/client/manager/manager-locales.ts
+var managerEn = {
+  "manager.chatTitle": "Manager agent",
+  "manager.status.idle": "Idle",
+  "manager.status.running": "Running",
+  "manager.status.waiting": "Needs you",
+  "manager.navCollapse": "Hide navigator",
+  "manager.navExpand": "Show navigator",
+  "manager.maximize": "Maximize panel",
+  "manager.restore": "Restore panel",
+  "manager.focusChat": "Expand chat",
+  "manager.focusChatExit": "Restore view",
+  "manager.resizeHorizontal": "Resize panel width",
+  "manager.resizeNavigator": "Resize navigator width",
+  "manager.resizeTip": "Drag to resize; double-click to reset",
+  "manager.showPaths": "Show project paths",
+  "manager.hidePaths": "Hide project paths",
+  "manager.filterWorkspaces": "Filter workspaces",
+  "manager.filterEmpty": "No workspaces match the filter.",
+  "manager.clearFilter": "Clear",
+  "manager.selectionHintShort": "Queues one message for the manager.",
+  "manager.openSession": "Open session {title}"
+}, managerZh = {
+  "manager.chatTitle": "\u7BA1\u7406 Agent",
+  "manager.status.idle": "\u7A7A\u95F2",
+  "manager.status.running": "\u8FD0\u884C\u4E2D",
+  "manager.status.waiting": "\u5F85\u4F60\u5904\u7406",
+  "manager.navCollapse": "\u6536\u8D77\u5BFC\u822A",
+  "manager.navExpand": "\u5C55\u5F00\u5BFC\u822A",
+  "manager.maximize": "\u6700\u5927\u5316\u9762\u677F",
+  "manager.restore": "\u8FD8\u539F\u9762\u677F",
+  "manager.focusChat": "\u653E\u5927\u5BF9\u8BDD",
+  "manager.focusChatExit": "\u8FD8\u539F\u89C6\u56FE",
+  "manager.resizeHorizontal": "\u8C03\u6574\u9762\u677F\u5BBD\u5EA6",
+  "manager.resizeNavigator": "\u8C03\u6574\u5BFC\u822A\u5BBD\u5EA6",
+  "manager.resizeTip": "\u62D6\u52A8\u8C03\u6574\u5BBD\u5EA6\uFF0C\u53CC\u51FB\u6062\u590D\u9ED8\u8BA4",
+  "manager.showPaths": "\u663E\u793A\u9879\u76EE\u8DEF\u5F84",
+  "manager.hidePaths": "\u9690\u85CF\u9879\u76EE\u8DEF\u5F84",
+  "manager.filterWorkspaces": "\u7B5B\u9009\u5DE5\u4F5C\u533A",
+  "manager.filterEmpty": "\u6CA1\u6709\u5339\u914D\u7684\u5DE5\u4F5C\u533A\u3002",
+  "manager.clearFilter": "\u6E05\u9664",
+  "manager.selectionHintShort": "\u4F1A\u4E3A\u7BA1\u7406\u5458\u6392\u961F\u4E00\u6761\u6D88\u606F\u3002",
+  "manager.openSession": "\u6253\u5F00\u4F1A\u8BDD {title}"
+};
+
 // src/client/locales.ts
 var NS = "session-board", en = {
+  ...managerEn,
   "batch.error.SCOPE_FAILED": "Could not resolve the selected sessions and their children. Check the local Wiki scripts.",
   "batch.error.SYNTHESIS_FAILED": "Synthesis step failed. Raw archives are kept.",
   "batch.error.INDEX_FAILED": "Knowledge pages were written but the index update failed.",
@@ -2956,6 +3824,7 @@ var NS = "session-board", en = {
   "filter.running": "Running",
   "filter.workspace": "Workspace",
   "filter.allWorkspaces": "All workspaces",
+  "filter.unknownWorkspace": "Workspace no longer listed",
   "filter.clear": "Reset",
   "filter.count": "{shown} of {total} sessions",
   "empty.noMatches": "No matching sessions. Try another search or reset the filters.",
@@ -3166,6 +4035,7 @@ var NS = "session-board", en = {
   "settings.errorInvalidSelection": "That selection is invalid. Pick a model from the list.",
   "settings.errorRequestFailed": "Could not reach the Harness host."
 }, zh = {
+  ...managerZh,
   "batch.error.SCOPE_FAILED": "\u65E0\u6CD5\u6838\u5BF9\u6240\u9009\u4F1A\u8BDD\u53CA\u5176\u5B50\u4F1A\u8BDD\uFF0C\u8BF7\u68C0\u67E5\u672C\u5730 Wiki \u811A\u672C\u3002",
   "batch.error.SYNTHESIS_FAILED": "\u63D0\u70BC\u6B65\u9AA4\u5931\u8D25\uFF0C\u539F\u6587\u5F52\u6863\u5DF2\u4FDD\u7559\u3002",
   "batch.error.INDEX_FAILED": "\u77E5\u8BC6\u9875\u5DF2\u5199\u5165\uFF0C\u4F46\u7D22\u5F15\u66F4\u65B0\u5931\u8D25\u3002",
@@ -3215,6 +4085,7 @@ var NS = "session-board", en = {
   "filter.running": "\u8FD0\u884C\u4E2D",
   "filter.workspace": "\u5DE5\u4F5C\u533A",
   "filter.allWorkspaces": "\u5168\u90E8\u5DE5\u4F5C\u533A",
+  "filter.unknownWorkspace": "\u5DE5\u4F5C\u533A\u5DF2\u4E0D\u5728\u5217\u8868",
   "filter.clear": "\u91CD\u7F6E",
   "filter.count": "\u663E\u793A {shown} / {total} \u4E2A\u4F1A\u8BDD",
   "empty.noMatches": "\u6CA1\u6709\u5339\u914D\u7684\u4F1A\u8BDD\uFF0C\u8BF7\u66F4\u6362\u5173\u952E\u8BCD\u6216\u91CD\u7F6E\u7B5B\u9009\u3002",
@@ -5058,9 +5929,9 @@ var ManagerController = class {
       revive: (stored, _initial) => ({ open: (typeof stored == "object" && stored !== null ? stored : {}).open === !0 })
     });
     let open = this.persistence.getSnapshot().open;
-    this.state = { ...initialState(), open }, open && queueMicrotask(() => {
+    this.state = { ...initialState(), open }, open && (this.startPolling(), queueMicrotask(() => {
       this.disposed || !this.state.open || this.refresh();
-    });
+    }));
   }
   /** Bound snapshot reader for `useSyncExternalStore`. */
   getSnapshot = () => this.state;
@@ -5420,19 +6291,273 @@ function createWorkspaceMeta() {
 
 // src/client/manager/ManagerDrawer.tsx
 var import_react10 = require("react");
-var import_jsx_runtime9 = require("react/jsx-runtime"), PHASE_LABEL = {
+
+// src/client/manager/layout.ts
+var MANAGER_LAYOUT_KEY = "dsh.sessionBoard.managerLayout.v1";
+var DEFAULT_MANAGER_LAYOUT = Object.freeze({
+  width: null,
+  navWidth: null,
+  navCollapsed: !1,
+  maximized: !1,
+  showPaths: !1
+});
+function clamp(value, min, max) {
+  let bounded = Number.isFinite(value) ? value : min;
+  return Math.round(Math.min(Math.max(bounded, min), max));
+}
+function clampDrawerWidth(width, viewportWidth) {
+  let upper = Math.min(1200, Math.max(320, viewportWidth - 12)), lower = Math.min(480, upper);
+  return clamp(width, lower, upper);
+}
+function defaultDrawerWidth(viewportWidth) {
+  return clampDrawerWidth(Math.round(viewportWidth * 0.64), viewportWidth);
+}
+function resolveDrawerWidth(layout, viewportWidth) {
+  return layout.width === null ? defaultDrawerWidth(viewportWidth) : clampDrawerWidth(layout.width, viewportWidth);
+}
+function clampNavWidth(width, drawerWidth) {
+  let lowerCap = Math.max(160, Math.floor(drawerWidth * 0.5)), lower = Math.min(244, lowerCap), upperCap = Math.max(lower, drawerWidth - 380), upper = Math.min(560, upperCap);
+  return clamp(width, lower, upper);
+}
+function resolveNavWidth(layout, drawerWidth) {
+  return layout.navWidth === null ? clampNavWidth(Math.min(300, Math.max(244, drawerWidth - 380)), drawerWidth) : clampNavWidth(layout.navWidth, drawerWidth);
+}
+function dragDrawerWidth(startWidth, startX, currentX, viewportWidth) {
+  return clampDrawerWidth(startWidth + (startX - currentX), viewportWidth);
+}
+function dragNavWidth(startWidth, startX, currentX, drawerWidth) {
+  return clampNavWidth(startWidth + (currentX - startX), drawerWidth);
+}
+function nudgeDrawerWidth(width, direction, viewportWidth) {
+  return clampDrawerWidth(width + direction * 24, viewportWidth);
+}
+function nudgeNavWidth(width, direction, drawerWidth) {
+  return clampNavWidth(width + direction * 24, drawerWidth);
+}
+function readDimension(value, minimum, maximum) {
+  return typeof value == "number" && Number.isFinite(value) && value >= minimum && value <= maximum ? value : null;
+}
+function parseManagerLayout(raw) {
+  if (raw === null) return { ...DEFAULT_MANAGER_LAYOUT };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { ...DEFAULT_MANAGER_LAYOUT };
+  }
+  if (typeof parsed != "object" || parsed === null) return { ...DEFAULT_MANAGER_LAYOUT };
+  let record2 = parsed;
+  return {
+    width: readDimension(record2.width, 240, 4e3),
+    navWidth: readDimension(record2.navWidth, 160, 1200),
+    navCollapsed: record2.navCollapsed === !0,
+    maximized: record2.maximized === !0,
+    showPaths: record2.showPaths === !0
+  };
+}
+function serializeManagerLayout(layout) {
+  return JSON.stringify({
+    width: layout.width,
+    navWidth: layout.navWidth,
+    navCollapsed: layout.navCollapsed,
+    maximized: layout.maximized,
+    showPaths: layout.showPaths
+  });
+}
+function browserStorage() {
+  try {
+    return typeof localStorage > "u" ? null : localStorage;
+  } catch (error) {
+    return null;
+  }
+}
+function readManagerLayout(storage = browserStorage()) {
+  if (storage === null) return { ...DEFAULT_MANAGER_LAYOUT };
+  try {
+    return parseManagerLayout(storage.getItem(MANAGER_LAYOUT_KEY));
+  } catch (error) {
+    return { ...DEFAULT_MANAGER_LAYOUT };
+  }
+}
+function writeManagerLayout(layout, storage = browserStorage()) {
+  if (storage !== null)
+    try {
+      storage.setItem(MANAGER_LAYOUT_KEY, serializeManagerLayout(layout));
+    } catch (error) {
+    }
+}
+
+// src/client/manager/icons.tsx
+var import_jsx_runtime9 = require("react/jsx-runtime");
+function Glyph({ children, size = 16, className }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+    "svg",
+    {
+      className,
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: "1.75",
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": "true",
+      focusable: "false",
+      children
+    }
+  );
+}
+function IconPanelLeftClose(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "3", y: "3", width: "18", height: "18", rx: "2.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M9.5 3v18" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m15.5 15.5-3-3.5 3-3.5" })
+  ] });
+}
+function IconPanelLeftOpen(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "3", y: "3", width: "18", height: "18", rx: "2.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M9.5 3v18" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m13.5 9 3 3.5-3 3.5" })
+  ] });
+}
+function IconMaximize(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M8 3H5a2 2 0 0 0-2 2v3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M21 8V5a2 2 0 0 0-2-2h-3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3 16v3a2 2 0 0 0 2 2h3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M16 21h3a2 2 0 0 0 2-2v-3" })
+  ] });
+}
+function IconRestore(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M8 3v3a2 2 0 0 1-2 2H3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M21 8h-3a2 2 0 0 1-2-2V3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3 16h3a2 2 0 0 1 2 2v3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M16 21v-3a2 2 0 0 1 2-2h3" })
+  ] });
+}
+function IconRefresh(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3.5 12a8.5 8.5 0 0 1 14.6-5.9L21 9" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M21 3.5V9h-5.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M20.5 12a8.5 8.5 0 0 1-14.6 5.9L3 15" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3 20.5V15h5.5" })
+  ] });
+}
+function IconExternal(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M15 3h6v6" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M10 14 21 3" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" })
+  ] });
+}
+function IconClose(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M18 6 6 18" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m6 6 12 12" })
+  ] });
+}
+function IconChevronRight(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Glyph, { ...props, children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m9 6 6 6-6 6" }) });
+}
+function IconSearch(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("circle", { cx: "11", cy: "11", r: "7" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m20 20-3.6-3.6" })
+  ] });
+}
+function IconSend(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M22 2 11 13" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M22 2 15 22l-4-9-9-4Z" })
+  ] });
+}
+function IconBell(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M10.3 21a1.94 1.94 0 0 0 3.4 0" })
+  ] });
+}
+function IconFolder(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Glyph, { ...props, children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M4 20h16a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1h-8l-2-2H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1Z" }) });
+}
+function IconLayers(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m12 2.5 9 5-9 5-9-5 9-5Z" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m3 12.5 9 5 9-5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m3 17.5 9 5 9-5" })
+  ] });
+}
+function IconTasks(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "3", y: "4.5", width: "6", height: "6", rx: "1.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m4.5 7.5 1 1 2-2" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M13 6.5h8" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M13 12h8" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M13 17.5h8" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3.5 16.5h5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M3.5 20h5" })
+  ] });
+}
+function IconEye(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("circle", { cx: "12", cy: "12", r: "2.85" })
+  ] });
+}
+function IconEyeOff(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m3 3 18 18" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M10.6 6.1A10.9 10.9 0 0 1 12 6c6 0 9.5 6 9.5 6a17.6 17.6 0 0 1-3.4 4" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M6.2 7.6C3.9 9.3 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.4 0 2.7-.3 3.8-.8" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M9.9 9.9a3 3 0 0 0 4.2 4.2" })
+  ] });
+}
+function IconLayoutGrid(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "3", y: "3", width: "7.5", height: "7.5", rx: "1.6" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "13.5", y: "3", width: "7.5", height: "7.5", rx: "1.6" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "3", y: "13.5", width: "7.5", height: "7.5", rx: "1.6" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("rect", { x: "13.5", y: "13.5", width: "7.5", height: "7.5", rx: "1.6" })
+  ] });
+}
+function IconSparkle(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "m12 3 1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3Z" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M5.5 15.5 6.4 18l2.5.9-2.5.9-.9 2.5-.9-2.5-2.5-.9 2.5-.9.9-2.5Z" })
+  ] });
+}
+function IconInfo(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(Glyph, { ...props, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("circle", { cx: "12", cy: "12", r: "9" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M12 16.5v-4.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M12 7.75h.01" })
+  ] });
+}
+
+// src/client/manager/paths.ts
+function shortenPath(path, max = 46) {
+  if (path.length <= max) return path;
+  let tail = path.slice(path.length - (max - 1)), boundary = tail.indexOf("/");
+  return `\u2026${boundary <= 0 ? tail : tail.slice(boundary)}`;
+}
+
+// src/client/manager/ManagerDrawer.tsx
+var import_jsx_runtime10 = require("react/jsx-runtime"), PHASE_LABEL = {
   idle: "manager.phase.idle",
   running: "manager.phase.running",
   waiting: "manager.phase.waiting"
-}, EMPTY_WORKSPACE_SNAPSHOT = { items: [] }, EMPTY_WORKSPACES = {
-  getSnapshot: () => EMPTY_WORKSPACE_SNAPSHOT,
-  subscribe: () => () => {
-  }
 }, EMPTY_STATUS_SNAPSHOT = /* @__PURE__ */ new Map(), EMPTY_STATUSES = {
   getSnapshot: () => EMPTY_STATUS_SNAPSHOT,
   subscribe: () => () => {
   }
-}, MANAGER_VIEW_MODES = ["active", "archived", "workspaces"], MANAGER_VIEW_KEY = "dsh.sessionBoard.managerView", SIDEBAR_VIEW_KEY = "dsh.hideEmptyWorkspaces.mode", SIDEBAR_VIEW_EVENT = "dsh:sidebar-view-mode";
+}, EMPTY_WORKSPACES_VALUE = { items: [] }, EMPTY_WORKSPACES = {
+  getSnapshot: () => EMPTY_WORKSPACES_VALUE,
+  subscribe: () => () => {
+  }
+}, MANAGER_VIEW_MODES = ["active", "archived", "workspaces"], MANAGER_VIEW_KEY = "dsh.sessionBoard.managerView", SIDEBAR_VIEW_KEY = "dsh.hideEmptyWorkspaces.mode", SIDEBAR_VIEW_EVENT = "dsh:sidebar-view-mode", WORKSPACE_FILTER_THRESHOLD = 7;
 function readManagerView() {
   try {
     let value = localStorage.getItem(MANAGER_VIEW_KEY) ?? localStorage.getItem(SIDEBAR_VIEW_KEY);
@@ -5446,21 +6571,20 @@ function baseName(path) {
 }
 function workspaceRows(groups, workspaces) {
   let rows = /* @__PURE__ */ new Map();
-  for (let group of groups)
-    for (let entry of group.entries) {
-      let id = entry.workspaceId !== void 0 && entry.workspaceId !== "" ? entry.workspaceId : entry.workspacePath ?? "";
-      if (id === "") continue;
-      let row = rows.get(id);
-      row === void 0 && (row = {
-        id,
-        title: entry.workspaceTitle !== "" ? entry.workspaceTitle : baseName(entry.workspacePath ?? ""),
-        path: entry.workspacePath ?? "",
-        entries: []
-      }, rows.set(id, row)), row.entries.push(entry);
-    }
-  if (rows.size === 0 && workspaces !== null)
+  for (let entry of groups.flatMap((group) => group.entries)) {
+    let id = entry.workspaceId ?? entry.workspacePath ?? entry.workspaceTitle;
+    if (id === "") continue;
+    let row = rows.get(id);
+    row === void 0 && (row = {
+      id,
+      title: entry.workspaceTitle !== "" ? entry.workspaceTitle : baseName(entry.workspacePath ?? ""),
+      path: entry.workspacePath ?? "",
+      entries: []
+    }, rows.set(id, row)), row.entries.push(entry);
+  }
+  if (workspaces !== null)
     for (let item of workspaces.items)
-      rows.set(item.workspaceId, {
+      rows.has(item.workspaceId) || rows.set(item.workspaceId, {
         id: item.workspaceId,
         title: item.title ?? baseName(item.path),
         path: item.path,
@@ -5473,41 +6597,51 @@ function activityText(at) {
   let date = new Date(at);
   return date.toDateString() === (/* @__PURE__ */ new Date()).toDateString() ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-function WorkspaceRowView({ row, mode, focused, selected, t, onToggle, onFocus }) {
-  let visible = row.entries.filter((entry) => managerSessionVisible(entry, mode)), running = visible.filter((entry) => entry.state === "running").length;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("li", { className: "sb-manager-item", "data-focused": focused, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+function aggregateState(entries) {
+  for (let state of ["blocked", "error", "unread", "running"])
+    if (entries.some((entry) => entry.state === state)) return state;
+  return "done";
+}
+function WorkspaceRowView({ row, mode, focused, selected, showPaths, t, onToggle, onFocus }) {
+  let visible = row.entries.filter((entry) => managerSessionVisible(entry, mode)), running = visible.filter((entry) => entry.state === "running").length, title = row.title !== "" ? row.title : baseName(row.path);
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("li", { className: "sb-manager-item", "data-focused": focused || void 0, "data-selected": selected || void 0, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
       "input",
       {
         type: "checkbox",
         className: "sb-manager-check",
         checked: selected,
         onChange: () => onToggle(row.id),
-        "aria-label": t("manager.selectWorkspace", { title: row.title })
+        "aria-label": t("manager.selectWorkspace", { title })
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
       "button",
       {
         type: "button",
         className: "sb-manager-workspace",
         "aria-pressed": focused,
-        title: row.path,
+        title: row.path !== "" ? row.path : void 0,
         onClick: () => onFocus(row.id),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-workspace-title", children: row.title }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: visible.length, running }) })
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-dot", "data-state": aggregateState(visible), "aria-hidden": "true" }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "sb-manager-workspace-main", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-workspace-title", children: title }),
+            showPaths && row.path !== "" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-path", title: row.path, children: shortenPath(row.path) }) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-meta", children: t("manager.workspaceMeta", { count: visible.length, running }) })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconChevronRight, { className: "sb-manager-chevron", size: 14 })
         ]
       }
     )
   ] });
 }
-function SessionRowView({ entry, selected, t, onToggle }) {
+function SessionRowView({ entry, selected, t, onToggle, onOpen }) {
   let statusKey = entry.pendingKey ?? entry.noteKey, parts = [];
   statusKey !== null && parts.push(t(statusKey));
   let activity = activityText(entry.lastActivityAt);
-  return activity !== "" && parts.push(activity), /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("li", { className: "sb-manager-item", "data-state": entry.state, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+  return activity !== "" && parts.push(activity), /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("li", { className: "sb-manager-item", "data-state": entry.state, "data-selected": selected || void 0, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
       "input",
       {
         type: "checkbox",
@@ -5517,16 +6651,76 @@ function SessionRowView({ entry, selected, t, onToggle }) {
         "aria-label": t("manager.selectSession", { title: entry.title })
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-dot", "data-state": entry.state, "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "sb-manager-session-main", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-session-title", title: entry.title, children: entry.title }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: parts.join(" \xB7 ") })
-    ] })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+      "button",
+      {
+        type: "button",
+        className: "sb-manager-session",
+        title: t("manager.openSession", { title: entry.title }),
+        onClick: () => onOpen(entry.id),
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-dot", "data-state": entry.state, "aria-hidden": "true" }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "sb-manager-session-main", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-session-title", children: entry.title }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-meta", children: parts.join(" \xB7 ") })
+          ] })
+        ]
+      }
+    )
   ] });
 }
-function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
-  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), [viewMode, setViewMode] = (0, import_react10.useState)(readManagerView);
+function SectionHead({ icon, title, count, subtitle, children }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("header", { className: "sb-manager-section-head", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-section-icon", "aria-hidden": "true", children: icon }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h2", { className: "sb-manager-section-title", children: title }),
+    count === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-badge", children: count }),
+    subtitle === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-section-subtitle", title: subtitle, children: subtitle }),
+    children === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-section-actions", children })
+  ] });
+}
+function IconAction({ label, onClick, children, pressed, disabled, tone = "plain" }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+    "button",
+    {
+      type: "button",
+      className: "sb-manager-iconbtn",
+      "data-tone": tone,
+      "aria-label": label,
+      title: label,
+      "aria-pressed": pressed,
+      disabled,
+      onClick,
+      children
+    }
+  );
+}
+function useManagerLayout() {
+  let [layout, setLayout] = (0, import_react10.useState)(readManagerLayout), [viewportWidth, setViewportWidth] = (0, import_react10.useState)(() => typeof window > "u" ? 1440 : window.innerWidth), persisted = (0, import_react10.useRef)(!1);
   (0, import_react10.useEffect)(() => {
+    if (!persisted.current) {
+      persisted.current = !0;
+      return;
+    }
+    let timer = setTimeout(() => writeManagerLayout(layout), 160);
+    return () => clearTimeout(timer);
+  }, [layout]), (0, import_react10.useEffect)(() => {
+    let onResize = () => setViewportWidth(window.innerWidth);
+    return window.addEventListener("resize", onResize), () => window.removeEventListener("resize", onResize);
+  }, []);
+  let update = (0, import_react10.useCallback)((patch) => {
+    setLayout((current) => ({ ...current, ...patch }));
+  }, []), drawerWidth = resolveDrawerWidth(layout, viewportWidth), navWidth = resolveNavWidth(layout, drawerWidth);
+  return { layout, update, viewportWidth, drawerWidth, navWidth };
+}
+function ManagerDrawer({
+  face,
+  manager,
+  t,
+  SessionProvider,
+  renderSlot
+}) {
+  let snapshot = useSnapshot(manager, (value) => value), board = useSnapshot(face.model, (value) => value), workspaceSnapshot = useSnapshot(face.workspaces?.list ?? EMPTY_WORKSPACES, (value) => value), statuses = useSnapshot(face.uiSession?.sessionStatus ?? EMPTY_STATUSES, (value) => value), { layout, update, viewportWidth, drawerWidth, navWidth } = useManagerLayout(), [viewMode, setViewMode] = (0, import_react10.useState)(readManagerView), [workspaceFilter, setWorkspaceFilter] = (0, import_react10.useState)(""), [filterOpen, setFilterOpen] = (0, import_react10.useState)(!1), drag = (0, import_react10.useRef)(null), dragFrame = (0, import_react10.useRef)(null), dragPending = (0, import_react10.useRef)(null), [resizing, setResizing] = (0, import_react10.useState)(null), drawerWidthRef = (0, import_react10.useRef)(drawerWidth), navWidthRef = (0, import_react10.useRef)(navWidth), viewportWidthRef = (0, import_react10.useRef)(viewportWidth);
+  drawerWidthRef.current = drawerWidth, navWidthRef.current = navWidth, viewportWidthRef.current = viewportWidth, (0, import_react10.useEffect)(() => {
     let apply2 = (value) => {
       (value === "active" || value === "archived" || value === "workspaces") && setViewMode(value);
     }, onEvent = (event) => {
@@ -5545,16 +6739,19 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
     } catch {
     }
     window.dispatchEvent(new CustomEvent(SIDEBAR_VIEW_EVENT, { detail: mode }));
-  }, selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), visibleRows = (0, import_react10.useMemo)(
+  }, rows = (0, import_react10.useMemo)(() => workspaceRows(board.groups, workspaceSnapshot), [board.groups, workspaceSnapshot]), selectedWorkspaces = (0, import_react10.useMemo)(() => new Set(snapshot.selection.workspaceIds), [snapshot.selection.workspaceIds]), selectedSessions = (0, import_react10.useMemo)(() => new Set(snapshot.selection.sessionIds), [snapshot.selection.sessionIds]), visibleRows = (0, import_react10.useMemo)(
     () => rows.filter((row) => managerWorkspaceVisible(row.entries, viewMode)),
     [rows, viewMode]
-  ), focused = (0, import_react10.useMemo)(() => {
+  ), filteredRows = (0, import_react10.useMemo)(() => {
+    let query = workspaceFilter.trim().toLocaleLowerCase();
+    return query === "" ? visibleRows : visibleRows.filter((row) => row.title.toLocaleLowerCase().includes(query) || row.path.toLocaleLowerCase().includes(query));
+  }, [visibleRows, workspaceFilter]), focused = (0, import_react10.useMemo)(() => {
     let row = rows.find((candidate) => candidate.id === snapshot.focusedWorkspaceId) ?? null;
     return row !== null && managerWorkspaceVisible(row.entries, viewMode) ? row : null;
   }, [rows, snapshot.focusedWorkspaceId, viewMode]), focusedEntries = (0, import_react10.useMemo)(
     () => focused === null ? [] : focused.entries.filter((entry) => managerSessionVisible(entry, viewMode)),
     [focused, viewMode]
-  ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), toggleWorkspace = (0, import_react10.useCallback)((id) => {
+  ), selectedCount = snapshot.selection.workspaceIds.length + snapshot.selection.sessionIds.length, managerStatus = snapshot.managerSessionId === null ? void 0 : statuses.get(snapshot.managerSessionId), phase = managerPhase(managerStatus?.running, managerStatus?.pendingInteraction !== void 0), navCollapsed = layout.navCollapsed, focusedChat = navCollapsed && layout.maximized, toggleWorkspace = (0, import_react10.useCallback)((id) => {
     manager.toggleWorkspaceId(id);
   }, [manager]), focusWorkspace = (0, import_react10.useCallback)((id) => {
     manager.setFocused(id);
@@ -5566,195 +6763,425 @@ function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }) {
     manager.sendSelection();
   }, [manager]), refresh = (0, import_react10.useCallback)(() => {
     manager.retry();
-  }, [manager]), close = (0, import_react10.useCallback)(() => {
+  }, [manager]), openBoard = (0, import_react10.useCallback)(() => {
+    face.view.set((current) => ({ ...current, board: { open: !0 } }));
+  }, [face]), close = (0, import_react10.useCallback)(() => {
     manager.close();
   }, [manager]), openInMain = (0, import_react10.useCallback)(() => {
     snapshot.managerSessionId !== null && face.openSession(snapshot.managerSessionId);
   }, [face, snapshot.managerSessionId]), openTask = (0, import_react10.useCallback)((sessionId) => {
     face.openSession(sessionId);
+  }, [face]), openSession = (0, import_react10.useCallback)((sessionId) => {
+    face.openSession(sessionId);
   }, [face]), toggleWake = (0, import_react10.useCallback)(() => {
     manager.setWake(!snapshot.wake.enabled);
   }, [manager, snapshot.wake.enabled]), wakeNow = (0, import_react10.useCallback)(() => {
     manager.wakeNow();
-  }, [manager]);
+  }, [manager]), toggleNav = (0, import_react10.useCallback)(() => {
+    update({ navCollapsed: !navCollapsed });
+  }, [update, navCollapsed]), toggleMaximized = (0, import_react10.useCallback)(() => {
+    update({ maximized: !layout.maximized });
+  }, [update, layout.maximized]), toggleFocusChat = (0, import_react10.useCallback)(() => {
+    update(focusedChat ? { navCollapsed: !1, maximized: !1 } : { navCollapsed: !0, maximized: !0 });
+  }, [focusedChat, update]), togglePaths = (0, import_react10.useCallback)(() => {
+    update({ showPaths: !layout.showPaths });
+  }, [update, layout.showPaths]);
+  (0, import_react10.useEffect)(() => {
+    if (snapshot.open)
+      return () => {
+        let entry = document.querySelector("[data-session-board-manager-toggle]");
+        entry !== null && entry.isConnected && entry.focus({ preventScroll: !0 });
+      };
+  }, [snapshot.open]), (0, import_react10.useEffect)(() => {
+    if (!snapshot.open) return;
+    let onKeyDown = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      let target = event.target;
+      target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"], .sb-manager-chat') || manager.close();
+    };
+    return document.addEventListener("keydown", onKeyDown), () => document.removeEventListener("keydown", onKeyDown);
+  }, [manager, snapshot.open]);
+  let startResize = (0, import_react10.useCallback)((kind) => (event) => {
+    if (event.button === 0) {
+      event.preventDefault(), event.stopPropagation(), drag.current = {
+        kind,
+        startX: event.clientX,
+        startWidth: kind === "drawer" ? drawerWidthRef.current : navWidthRef.current,
+        pointerId: event.pointerId
+      }, setResizing(kind);
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+      }
+    }
+  }, []), moveResize = (0, import_react10.useCallback)((event) => {
+    let current = drag.current;
+    current === null || current.pointerId !== event.pointerId || (dragPending.current = current.kind === "drawer" ? { width: dragDrawerWidth(current.startWidth, current.startX, event.clientX, viewportWidthRef.current) } : { navWidth: dragNavWidth(current.startWidth, current.startX, event.clientX, drawerWidthRef.current) }, dragFrame.current === null && (dragFrame.current = requestAnimationFrame(() => {
+      dragFrame.current = null;
+      let pending = dragPending.current;
+      dragPending.current = null, pending !== null && update(pending);
+    })));
+  }, [update]);
+  (0, import_react10.useEffect)(() => () => {
+    dragFrame.current !== null && cancelAnimationFrame(dragFrame.current);
+  }, []);
+  let endResize = (0, import_react10.useCallback)((event) => {
+    if (drag.current !== null) {
+      drag.current = null, setResizing(null);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch (error) {
+      }
+    }
+  }, []), resizeDrawerByKeyboard = (0, import_react10.useCallback)((event) => {
+    event.key === "ArrowLeft" ? (event.preventDefault(), update({ width: nudgeDrawerWidth(drawerWidthRef.current, 1, viewportWidthRef.current) })) : event.key === "ArrowRight" ? (event.preventDefault(), update({ width: nudgeDrawerWidth(drawerWidthRef.current, -1, viewportWidthRef.current) })) : event.key === "Home" ? (event.preventDefault(), update({ width: defaultDrawerWidth(viewportWidthRef.current) })) : event.key === "End" && (event.preventDefault(), update({ width: clampDrawerWidth(1200, viewportWidthRef.current) }));
+  }, [update]), resizeNavByKeyboard = (0, import_react10.useCallback)((event) => {
+    event.key === "ArrowRight" ? (event.preventDefault(), update({ navWidth: nudgeNavWidth(navWidthRef.current, 1, drawerWidthRef.current) })) : event.key === "ArrowLeft" ? (event.preventDefault(), update({ navWidth: nudgeNavWidth(navWidthRef.current, -1, drawerWidthRef.current) })) : event.key === "Home" ? (event.preventDefault(), update({ navWidth: null })) : event.key === "End" && (event.preventDefault(), update({ navWidth: clampNavWidth(560, drawerWidthRef.current) }));
+  }, [update]), chatReady = snapshot.reference !== null && typeof SessionProvider == "function" && typeof renderSlot == "function", chatFailed = snapshot.phase === "error" || snapshot.chat === "error" || snapshot.phase === "ready" && snapshot.managerSessionId === null, chatBody = (0, import_react10.useMemo)(() => !chatReady || snapshot.reference === null || SessionProvider === void 0 || renderSlot === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(SessionProvider, { session: snapshot.reference, children: renderSlot("session-board.manager.chat", {}) }), [chatReady, snapshot.reference, SessionProvider, renderSlot]);
   if (!snapshot.open) return null;
-  let chatReady = snapshot.reference !== null && typeof SessionProvider == "function" && typeof renderSlot == "function", chatFailed = snapshot.phase === "error" || snapshot.chat === "error" || snapshot.phase === "ready" && snapshot.managerSessionId === null;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-root sb-manager", role: "complementary", "aria-label": t("manager.ariaDrawer"), "data-open": "true", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("header", { className: "sb-manager-head", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        "span",
-        {
-          className: "sb-manager-phase",
-          "data-phase": phase,
-          role: "img",
-          "aria-label": t(PHASE_LABEL[phase]),
-          title: t(PHASE_LABEL[phase])
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-title", children: t("manager.title") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        "button",
-        {
-          type: "button",
-          className: "sb-manager-btn",
-          "aria-label": t("manager.refresh"),
-          title: t("manager.refresh"),
-          onClick: refresh,
-          children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinecap: "round", strokeLinejoin: "round" }) })
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        "button",
-        {
-          type: "button",
-          className: "sb-manager-btn",
-          disabled: snapshot.managerSessionId === null,
-          onClick: openInMain,
-          children: t("manager.openInMain")
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        "button",
-        {
-          type: "button",
-          className: "sb-manager-btn sb-manager-btn--icon",
-          "aria-label": t("manager.close"),
-          title: t("manager.close"),
-          onClick: close,
-          children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M2.5 2.5l7 7m0-7l-7 7", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round" }) })
-        }
-      )
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("aside", { className: "sb-manager-left", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-views", role: "tablist", "aria-label": t("manager.viewLabel"), children: MANAGER_VIEW_MODES.map((mode) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-          "button",
+  let showWorkspaceFilter = filterOpen || visibleRows.length >= WORKSPACE_FILTER_THRESHOLD || workspaceFilter !== "", focusTitle = focused === null ? void 0 : focused.title !== "" ? focused.title : baseName(focused.path);
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+    "section",
+    {
+      className: "sb-root sb-manager",
+      role: "complementary",
+      "aria-label": t("manager.ariaDrawer"),
+      "data-open": "true",
+      "data-maximized": layout.maximized ? "true" : void 0,
+      "data-nav-collapsed": navCollapsed ? "true" : void 0,
+      "data-resizing": resizing ?? void 0,
+      style: layout.maximized ? void 0 : { width: `${drawerWidth}px` },
+      children: [
+        layout.maximized ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          "div",
           {
-            type: "button",
-            role: "tab",
-            "aria-selected": mode === viewMode,
-            className: "sb-manager-view",
-            "data-active": mode === viewMode,
-            onClick: () => changeViewMode(mode),
-            children: t(`manager.view.${mode}`)
-          },
-          mode
-        )) }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.workspaces") }),
-          rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceEmpty") }) : visibleRows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceViewEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: visibleRows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-            WorkspaceRowView,
+            className: "sb-manager-resize",
+            role: "separator",
+            "aria-orientation": "vertical",
+            "aria-label": t("manager.resizeHorizontal"),
+            "aria-valuemin": 480,
+            "aria-valuemax": Math.min(1200, Math.max(480, viewportWidth - 12)),
+            "aria-valuenow": drawerWidth,
+            tabIndex: 0,
+            title: t("manager.resizeTip"),
+            onPointerDown: startResize("drawer"),
+            onPointerMove: moveResize,
+            onPointerUp: endResize,
+            onPointerCancel: endResize,
+            onLostPointerCapture: endResize,
+            onKeyDown: resizeDrawerByKeyboard,
+            onDoubleClick: () => update({ width: null })
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("header", { className: "sb-manager-head", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+            "span",
             {
-              row,
-              mode: viewMode,
-              focused: row.id === snapshot.focusedWorkspaceId,
-              selected: selectedWorkspaces.has(row.id),
-              t,
-              onToggle: toggleWorkspace,
-              onFocus: focusWorkspace
-            },
-            row.id
-          )) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-section-head", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.sessions") }) }),
-          focused === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focusedEntries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t(focused.entries.length === 0 ? "manager.sessionEmpty" : "manager.sessionViewEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: focusedEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-            SessionRowView,
-            {
-              entry,
-              selected: selectedSessions.has(entry.id),
-              t,
-              onToggle: toggleSession
-            },
-            entry.id
-          )) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-tasks", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.tasks") }),
-          snapshot.tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-empty", children: t("manager.taskEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "sb-manager-list", children: snapshot.tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("li", { className: "sb-manager-item", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
-            "button",
-            {
-              type: "button",
-              className: "sb-manager-task",
-              disabled: task.sessionId === void 0,
-              title: task.sessionId === void 0 ? void 0 : t("manager.openTask", { title: task.title }),
-              onClick: () => {
-                task.sessionId !== void 0 && openTask(task.sessionId);
-              },
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-chip", "data-status": task.status, children: t(TASK_STATUS_KEYS[task.status]) }),
-                /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "sb-manager-task-main", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-task-title", children: task.title }),
-                  task.note === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-meta", children: task.note })
-                ] })
-              ]
+              className: "sb-manager-phase",
+              "data-phase": phase,
+              role: "img",
+              "aria-label": t(PHASE_LABEL[phase]),
+              title: t(PHASE_LABEL[phase])
             }
-          ) }, task.id)) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "sb-manager-section sb-manager-wake", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { className: "sb-manager-section-title", children: t("manager.wake") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-wake-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: toggleWake, children: t(snapshot.wake.enabled ? "manager.wakeDisable" : "manager.wakeEnable") }),
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-              "button",
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-title", children: t("manager.title") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-status", "data-phase": phase, children: t(`manager.status.${phase}`) }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-head-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+              IconAction,
               {
-                type: "button",
-                className: "sb-manager-btn",
-                disabled: !snapshot.wake.enabled || snapshot.wake.pending === 0,
-                onClick: wakeNow,
-                children: t("manager.wakeNow")
-              }
-            )
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-meta", children: t("manager.wakeStatus", {
-            pending: snapshot.wake.pending,
-            urgent: snapshot.wake.urgent,
-            attention: snapshot.wake.attention,
-            completed: snapshot.wake.completed,
-            wakes: snapshot.wake.wakesThisHour
-          }) }),
-          snapshot.wake.error !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-error", children: t("manager.wakeDeliveryFailed") }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-hint", children: t("manager.wakeHint") })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("footer", { className: "sb-manager-selection", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-selection-row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-count", children: t("manager.selectionCount", { count: selectedCount }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-              "button",
-              {
-                type: "button",
-                className: "sb-manager-btn",
-                disabled: selectedCount === 0,
-                onClick: clearSelection,
-                children: t("manager.selectionClear")
+                label: t(navCollapsed ? "manager.navExpand" : "manager.navCollapse"),
+                pressed: !navCollapsed,
+                onClick: toggleNav,
+                children: [
+                  navCollapsed ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconPanelLeftOpen, { size: 16 }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconPanelLeftClose, { size: 16 }),
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-btn-label", children: t(navCollapsed ? "manager.navExpand" : "manager.navCollapse") })
+                ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+              IconAction,
+              {
+                label: layout.maximized ? t("manager.restore") : t("manager.maximize"),
+                pressed: layout.maximized,
+                onClick: toggleMaximized,
+                children: layout.maximized ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconRestore, { size: 16 }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconMaximize, { size: 16 })
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconAction, { label: t("action.openBoard"), onClick: openBoard, children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconLayoutGrid, { size: 16 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconAction, { label: t("manager.refresh"), onClick: refresh, children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconRefresh, { size: 16 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconAction, { label: t("manager.openInMain"), onClick: openInMain, disabled: snapshot.managerSessionId === null, children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconExternal, { size: 16 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconAction, { label: t("manager.close"), onClick: close, children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconClose, { size: 16 }) })
+          ] })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-body", children: [
+          navCollapsed ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("aside", { className: "sb-manager-nav", style: { width: `${navWidth}px` }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-views", role: "tablist", "aria-label": t("manager.viewLabel"), children: MANAGER_VIEW_MODES.map((mode) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
               "button",
               {
                 type: "button",
-                className: "sb-manager-btn sb-manager-btn--primary",
-                disabled: selectedCount === 0 || snapshot.sending || snapshot.managerSessionId === null,
-                onClick: sendSelection,
-                children: snapshot.sending ? t("manager.sending") : t("manager.selectionSend")
-              }
-            )
+                role: "tab",
+                "aria-selected": mode === viewMode,
+                className: "sb-manager-view",
+                "data-active": mode === viewMode,
+                onClick: () => changeViewMode(mode),
+                children: t(`manager.view.${mode}`)
+              },
+              mode
+            )) }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-scroll", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "sb-manager-section sb-manager-workspaces", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+                  SectionHead,
+                  {
+                    icon: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconFolder, { size: 14 }),
+                    title: t("manager.workspaces"),
+                    count: filteredRows.length,
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                        IconAction,
+                        {
+                          label: layout.showPaths ? t("manager.hidePaths") : t("manager.showPaths"),
+                          pressed: layout.showPaths,
+                          onClick: togglePaths,
+                          children: layout.showPaths ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconEye, { size: 15 }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconEyeOff, { size: 15 })
+                        }
+                      ),
+                      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                        IconAction,
+                        {
+                          label: t("manager.filterWorkspaces"),
+                          pressed: showWorkspaceFilter,
+                          onClick: () => setFilterOpen((open) => !open),
+                          children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconSearch, { size: 15 })
+                        }
+                      )
+                    ]
+                  }
+                ),
+                showWorkspaceFilter ? /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-filter", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconSearch, { size: 13, className: "sb-manager-filter-icon" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                    "input",
+                    {
+                      type: "search",
+                      value: workspaceFilter,
+                      placeholder: t("manager.filterWorkspaces"),
+                      "aria-label": t("manager.filterWorkspaces"),
+                      autoFocus: filterOpen,
+                      onChange: (event) => setWorkspaceFilter(event.target.value),
+                      onKeyDown: (event) => {
+                        event.key === "Escape" && workspaceFilter !== "" && (event.stopPropagation(), setWorkspaceFilter(""));
+                      }
+                    }
+                  ),
+                  workspaceFilter !== "" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                    "button",
+                    {
+                      type: "button",
+                      className: "sb-manager-filter-clear",
+                      "aria-label": t("manager.clearFilter"),
+                      title: t("manager.clearFilter"),
+                      onClick: () => setWorkspaceFilter(""),
+                      children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconClose, { size: 12 })
+                    }
+                  ) : null
+                ] }) : null,
+                rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { className: "sb-manager-empty", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconSparkle, { size: 14 }),
+                  t("manager.workspaceEmpty")
+                ] }) : visibleRows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-empty", children: t("manager.workspaceViewEmpty") }) : filteredRows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-empty", children: t("manager.filterEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("ul", { className: "sb-manager-list", children: filteredRows.map((row) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                  WorkspaceRowView,
+                  {
+                    row,
+                    mode: viewMode,
+                    focused: row.id === snapshot.focusedWorkspaceId,
+                    selected: selectedWorkspaces.has(row.id),
+                    showPaths: layout.showPaths,
+                    t,
+                    onToggle: toggleWorkspace,
+                    onFocus: focusWorkspace
+                  },
+                  row.id
+                )) })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "sb-manager-section sb-manager-sessions", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                  SectionHead,
+                  {
+                    icon: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconLayers, { size: 14 }),
+                    title: t("manager.sessions"),
+                    count: focusedEntries.length,
+                    ...focusTitle === void 0 ? {} : { subtitle: focusTitle }
+                  }
+                ),
+                focused === null ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-empty", children: t("manager.focusHint") }) : focusedEntries.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-empty", children: t(focused.entries.length === 0 ? "manager.sessionEmpty" : "manager.sessionViewEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("ul", { className: "sb-manager-list", children: focusedEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                  SessionRowView,
+                  {
+                    entry,
+                    selected: selectedSessions.has(entry.id),
+                    t,
+                    onToggle: toggleSession,
+                    onOpen: openSession
+                  },
+                  entry.id
+                )) })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "sb-manager-section sb-manager-tasks", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(SectionHead, { icon: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconTasks, { size: 14 }), title: t("manager.tasks"), count: snapshot.tasks.length }),
+                snapshot.tasks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-empty", children: t("manager.taskEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("ul", { className: "sb-manager-list", children: snapshot.tasks.map((task) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("li", { className: "sb-manager-item", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "sb-manager-task",
+                    disabled: task.sessionId === void 0,
+                    title: task.sessionId === void 0 ? void 0 : t("manager.openTask", { title: task.title }),
+                    onClick: () => {
+                      task.sessionId !== void 0 && openTask(task.sessionId);
+                    },
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-chip", "data-status": task.status, children: t(TASK_STATUS_KEYS[task.status]) }),
+                      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "sb-manager-task-main", children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-task-title", children: task.title }),
+                        task.note === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-meta", children: task.note })
+                      ] })
+                    ]
+                  }
+                ) }, task.id)) })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "sb-manager-section sb-manager-wake", "data-on": snapshot.wake.enabled || void 0, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                  SectionHead,
+                  {
+                    icon: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconBell, { size: 14 }),
+                    title: t("manager.wake"),
+                    children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                      "button",
+                      {
+                        type: "button",
+                        role: "switch",
+                        className: "sb-manager-switch",
+                        "aria-checked": snapshot.wake.enabled,
+                        "aria-label": t(snapshot.wake.enabled ? "manager.wakeDisable" : "manager.wakeEnable"),
+                        title: t(snapshot.wake.enabled ? "manager.wakeDisable" : "manager.wakeEnable"),
+                        onClick: toggleWake,
+                        children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-switch-track", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", {}) })
+                      }
+                    )
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-wake-status", children: t("manager.wakeStatus", {
+                  pending: snapshot.wake.pending,
+                  urgent: snapshot.wake.urgent,
+                  attention: snapshot.wake.attention,
+                  completed: snapshot.wake.completed,
+                  wakes: snapshot.wake.wakesThisHour
+                }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-wake-foot", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                    "button",
+                    {
+                      type: "button",
+                      className: "sb-manager-textbtn",
+                      disabled: !snapshot.wake.enabled || snapshot.wake.pending === 0,
+                      onClick: wakeNow,
+                      children: t("manager.wakeNow")
+                    }
+                  ),
+                  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-hint", title: t("manager.wakeHint"), "aria-label": t("manager.wakeHint"), children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconInfo, { size: 13 }) })
+                ] }),
+                snapshot.wake.error !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "sb-manager-error", children: t("manager.wakeDeliveryFailed") }) : null
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("footer", { className: "sb-manager-selection", "data-empty": selectedCount === 0 || void 0, children: [
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-selection-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-count", children: selectedCount === 0 ? t("manager.selectionEmpty") : t("manager.selectionCount", { count: selectedCount }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "sb-manager-btn",
+                    disabled: selectedCount === 0,
+                    onClick: clearSelection,
+                    children: t("manager.selectionClear")
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "sb-manager-btn sb-manager-btn--primary",
+                    disabled: selectedCount === 0 || snapshot.sending || snapshot.managerSessionId === null,
+                    onClick: sendSelection,
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconSend, { size: 14 }),
+                      snapshot.sending ? t("manager.sending") : t("manager.selectionSend")
+                    ]
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-selection-meta", children: [
+                snapshot.sent ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-ok", children: t("manager.selectionSent") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-hint-line", children: t("manager.selectionHintShort") }),
+                snapshot.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-error", title: snapshot.errorDetail ?? snapshot.stateError ?? void 0, children: t(snapshot.error) }) : null
+              ] })
+            ] })
           ] }),
-          snapshot.sent ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-ok", children: t("manager.selectionSent") }) : null,
-          snapshot.error !== null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-error", title: snapshot.errorDetail ?? snapshot.stateError ?? void 0, children: t(snapshot.error) }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "sb-manager-hint", children: t("manager.selectionHint") })
+          navCollapsed ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+            "div",
+            {
+              className: "sb-manager-nav-resize",
+              role: "separator",
+              "aria-orientation": "vertical",
+              "aria-label": t("manager.resizeNavigator"),
+              "aria-valuemin": 244,
+              "aria-valuemax": Math.max(244, drawerWidth - 380),
+              "aria-valuenow": navWidth,
+              tabIndex: 0,
+              title: t("manager.resizeTip"),
+              onPointerDown: startResize("nav"),
+              onPointerMove: moveResize,
+              onPointerUp: endResize,
+              onPointerCancel: endResize,
+              onLostPointerCapture: endResize,
+              onKeyDown: resizeNavByKeyboard,
+              onDoubleClick: () => update({ navWidth: null })
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "sb-manager-chat", "aria-label": t("manager.chatTitle"), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("header", { className: "sb-manager-chat-head", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-chat-title", children: t("manager.chatTitle") }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-chat-spacer" }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+                IconAction,
+                {
+                  label: t(focusedChat ? "manager.focusChatExit" : "manager.focusChat"),
+                  pressed: focusedChat,
+                  tone: "accent",
+                  onClick: toggleFocusChat,
+                  children: [
+                    focusedChat ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconRestore, { size: 15 }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconMaximize, { size: 15 }),
+                    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-btn-label", children: t(focusedChat ? "manager.focusChatExit" : "manager.focusChat") })
+                  ]
+                }
+              )
+            ] }),
+            chatBody !== null ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-chat-body", children: chatBody }) : chatFailed ? /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-notice", role: "alert", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IconInfo, { size: 18 }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { title: snapshot.stateError ?? void 0, children: snapshot.phase === "error" ? t("manager.errorState") : t("manager.chatUnavailable") }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: refresh, children: t("manager.chatRetry") })
+            ] }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "sb-manager-notice", role: "status", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-spinner", "aria-hidden": "true" }),
+              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("manager.loading") })
+            ] })
+          ] })
         ] })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("section", { className: "sb-manager-chat", children: chatReady && snapshot.reference !== null && SessionProvider !== void 0 && renderSlot !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-chat-body", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(SessionProvider, { session: snapshot.reference, children: renderSlot("session-board.manager.chat", {}) }) }) : chatFailed ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "sb-manager-notice", role: "alert", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { title: snapshot.stateError ?? void 0, children: snapshot.phase === "error" ? t("manager.errorState") : t("manager.chatUnavailable") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "sb-manager-btn", onClick: refresh, children: t("manager.chatRetry") })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.loading") }) })
-    ] })
-  ] });
+      ]
+    }
+  );
 }
 function ManagerToggle({ manager, t, wide }) {
   let open = useSnapshot(manager, (value) => value.open), label = t(open ? "manager.close" : "manager.open"), inSidebar = wide !== void 0;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
     "button",
     {
       type: "button",
@@ -5766,32 +7193,35 @@ function ManagerToggle({ manager, t, wide }) {
       "data-session-board-manager-toggle": "",
       onClick: () => manager.toggle(),
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("svg", { width: inSidebar ? 16 : 14, height: inSidebar ? 16 : 14, viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("path", { d: "M4.2 2.4h5.6v9.2H4.2zM6.6 4.2h1.2M6.6 6.6h1.2M6.6 9h1.2", fill: "none", stroke: "currentColor", strokeWidth: "1.2", strokeLinejoin: "round" }) }),
-        inSidebar && wide === !0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "sb-manager-entry-label", children: t("manager.entry") }) : null
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("svg", { width: inSidebar ? 16 : 14, height: inSidebar ? 16 : 14, viewBox: "0 0 14 14", "aria-hidden": "true", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("path", { d: "M4.2 2.4h5.6v9.2H4.2zM6.6 4.2h1.2M6.6 6.6h1.2M6.6 9h1.2", fill: "none", stroke: "currentColor", strokeWidth: "1.1", strokeLinecap: "round" }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("path", { d: "M11.2 2.4v9.2", fill: "none", stroke: "currentColor", strokeWidth: "1.1" })
+        ] }),
+        inSidebar ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "sb-manager-entry-label", children: label }) : null
       ]
     }
   );
 }
 
 // src/client/manager/ManagerChat.tsx
-var import_jsx_runtime10 = require("react/jsx-runtime");
+var import_jsx_runtime11 = require("react/jsx-runtime");
 function ManagerFixedChatView({ renderSlot }) {
-  return typeof renderSlot != "function" ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_jsx_runtime10.Fragment, { children: renderSlot("conversation.session", { view: "chat" }) });
+  return typeof renderSlot != "function" ? null : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_jsx_runtime11.Fragment, { children: renderSlot("conversation.session", { view: "chat" }) });
 }
 function ManagerChatPanel(props) {
   let { sessionId, useSession, useConversation, useSessions, renderFactorySlot, t } = props, session = useSession((value) => value), conversation = useConversation((value) => value), summary = useSessions((state) => state.byId[sessionId]), hero = !(conversation.activeTargets.size > 0 || session.blank !== !0 && session.awaitingFirstTurn !== !0 || session.running === !0 || summary?.blank === !1);
-  return typeof renderFactorySlot != "function" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_jsx_runtime10.Fragment, { children: renderFactorySlot(
+  return typeof renderFactorySlot != "function" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_jsx_runtime11.Fragment, { children: renderFactorySlot(
     "conversation.content",
     { variant: "embedded", phase: hero ? "hero" : "active", hero },
     {
       slots: { views: ManagerFixedChatView },
-      fallback: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") })
+      fallback: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "sb-manager-notice", role: "status", children: t("manager.chatUnavailable") })
     }
   ) });
 }
 
 // src/client/index.tsx
-var import_jsx_runtime11 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
+var import_jsx_runtime12 = require("react/jsx-runtime"), name = "dsh-session-board", inject = ["slots", "locale"], CORE_SERVICES = ["sessions", "uiSession", "uiWorkspace", "jobs", "workspaces"], DOCK_DEFAULT_WIDTH = 340;
 function initialView() {
   return {
     dock: { collapsed: !1, width: DOCK_DEFAULT_WIDTH },
@@ -5852,7 +7282,7 @@ async function openProjectCoordinator(face, projectKey) {
 }
 function DockRoot({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleCollapse, setWidth, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
     BoardDock,
     {
       grouping: view.grouping,
@@ -5874,11 +7304,11 @@ function DockRoot({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
           face.view.set((current) => ({ ...current, grouping })), grouping === "tree" && face.workspaceMeta.load(!0);
         } }),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -5889,7 +7319,7 @@ function OpenOverlayContent({ face }) {
   let { groups } = useSnapshot(face.model, (value) => value), { view, toggleDensity, setBoardOpen, toggleGroup } = useViewActions(face), feedState = useSnapshot(face.feed, (value) => value), selection = useSelection(face), filtering = useFilters(face, groups), t = useTranslation(face), close = (0, import_react11.useCallback)(() => setBoardOpen(!1), [setBoardOpen]), open = (0, import_react11.useCallback)((id) => {
     face.openSession(id), setBoardOpen(!1);
   }, [face, setBoardOpen]), workspaceMeta = useSnapshot(face.workspaceMeta.store, (value) => value.byId);
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
     BoardOverlay,
     {
       open: !0,
@@ -5910,11 +7340,11 @@ function OpenOverlayContent({ face }) {
       selected: selection.selected,
       onToggleSelect: selection.toggle,
       selectionDisabled: selection.busy,
-      toolbar: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
+      toolbar: /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(BoardFilterBar, { groups, filters: filtering.filters, onChange: filtering.change, shown: filtering.shown, t, grouping: view.grouping, onGrouping: (grouping) => {
           face.view.set((current) => ({ ...current, grouping })), grouping === "tree" && face.workspaceMeta.load(!0);
         } }),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(BatchToolbar, { controller: face.batch, groups, visibleGroups: filtering.filtered, t })
       ] }),
       collapsedGroups: view.collapsedGroups,
       onToggleGroup: toggleGroup
@@ -5923,11 +7353,11 @@ function OpenOverlayContent({ face }) {
 }
 function BoardOverlaySlot({ face }) {
   let { view } = useViewActions(face);
-  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(OpenOverlayContent, { face }) : null;
+  return view.board.open ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(OpenOverlayContent, { face }) : null;
 }
 function HeaderToggle({ face }) {
   let { view, setBoardOpen } = useViewActions(face), label = view.board.open ? face.t("action.closeBoard") : face.t("action.openBoard");
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
     "button",
     {
       type: "button",
@@ -5937,7 +7367,7 @@ function HeaderToggle({ face }) {
       "aria-pressed": view.board.open,
       "data-session-board-toggle": "",
       onClick: () => setBoardOpen(!view.board.open),
-      children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
+      children: /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("path", { d: "M2 2.5h4.2v4.2H2zM7.8 2.5H12v4.2H7.8zM2 7.8h4.2V12H2zM7.8 7.8H12V12H7.8z", fill: "none", stroke: "currentColor", strokeWidth: "1.2" }) })
     }
   );
 }
@@ -6175,7 +7605,7 @@ function apply(ctx) {
       host.setAttribute("data-dsh-session-board-host", "");
       let disposeDock = mountDock(host, (element) => {
         let root = (0, import_client.createRoot)(element);
-        return root.render(/* @__PURE__ */ (0, import_jsx_runtime11.jsx)(DockRoot, { face })), () => {
+        return root.render(/* @__PURE__ */ (0, import_jsx_runtime12.jsx)(DockRoot, { face })), () => {
           root.unmount();
         };
       }, warn);

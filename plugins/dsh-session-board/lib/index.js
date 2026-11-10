@@ -1676,6 +1676,7 @@ var WAKE_INSTRUCTION = [
   "\u8BF7\u6309\u4F18\u5148\u7EA7\u5904\u7406\uFF1A\u62A5\u9519\u4E0E\u7B49\u5F85\u5904\u7406\u7684\u4F1A\u8BDD\u4F18\u5148\uFF1B\u666E\u901A\u5B8C\u6210\u53EF\u4EE5\u5408\u5E76\u6C47\u62A5\u3002",
   "\u5904\u7406\u5B8C\u7528 update_task / report_progress \u8BB0\u5F55\u7ED3\u8BBA\uFF0C\u4E0D\u8981\u4E3A\u540C\u4E00\u6761\u53D8\u5316\u91CD\u590D\u5524\u9192\u3002"
 ].join("\n");
+var MANAGER_SESSION_CHECK_TIMEOUT_MS = 5e3;
 var ManagerService = class {
   /** @param deps - nested host context plus the durable tables. */
   constructor(deps) {
@@ -1742,9 +1743,15 @@ var ManagerService = class {
    */
   ensure() {
     if (this.managerSessionId !== void 0) {
-      return Promise.resolve({
-        managerSessionId: this.managerSessionId,
-        ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }
+      const persisted = this.managerSessionId;
+      return this.managerSessionState(persisted).then(async (state) => {
+        if (state === "missing") await this.forgetManagerSession();
+        if (state === "missing") return await this.ensure();
+        if (this.managerSessionId === void 0) return await this.ensure();
+        return {
+          managerSessionId: this.managerSessionId,
+          ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }
+        };
       });
     }
     this.provisioning ??= this.provision().finally(() => {
@@ -1754,6 +1761,45 @@ var ManagerService = class {
       this.scheduler.notify();
       return result;
     });
+  }
+  /**
+   * Whether a persisted manager id still names a Session.
+   *
+   * A successful listing that omits the id is proof it is gone; a failed read
+   * is `unknown` on purpose, so transport trouble never recreates a manager
+   * and strands the durable selection behind a second session.
+   * @param sessionId - persisted manager session id.
+   * @returns `live`, `missing`, or `unknown` when existence cannot be checked.
+   */
+  async managerSessionState(sessionId) {
+    if (this.deps.ctx.agents.get(sessionId) !== void 0) return "live";
+    const controller = this.deps.ctx.sessionController;
+    try {
+      const listed = await controller.list({}, AbortSignal.timeout(MANAGER_SESSION_CHECK_TIMEOUT_MS));
+      return listed.items.some((item) => item.sessionId === sessionId) ? "live" : "missing";
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: manager session check failed: ${describe(error)}`);
+      return "unknown";
+    }
+  }
+  /**
+   * Drop a manager pointer whose Session no longer exists.
+   *
+   * The in-memory pointer is cleared even when the durable write fails; the
+   * next start then re-checks the stale row and clears it again, so the panel
+   * always recovers without a manual reset.
+   * @returns completion after the best-effort durable write.
+   */
+  async forgetManagerSession() {
+    this.managerSessionId = void 0;
+    const next = { ...this.state, revision: this.state.revision + 1 };
+    delete next.managerSessionId;
+    this.state = next;
+    try {
+      await this.deps.state.put(MANAGER_STATE_KEY, next);
+    } catch (error) {
+      this.deps.warn(`dsh-session-board: manager pointer reset was not persisted: ${describe(error)}`);
+    }
   }
   /**
    * Install tools/prompt context on the manager Agent, whether it was just
@@ -1997,6 +2043,9 @@ ${WAKE_INSTRUCTION}`);
         ...this.state.managerWorkspaceId === void 0 ? {} : { managerWorkspaceId: this.state.managerWorkspaceId }
       };
     } catch (error) {
+      if (this.managerSessionId !== void 0 && this.managerSessionId === this.state.managerSessionId) {
+        await this.forgetManagerSession();
+      }
       this.lastError = describe(error);
       this.deps.warn(`dsh-session-board: manager provisioning failed: ${describe(error)}`);
       throw error;

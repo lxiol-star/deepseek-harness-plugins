@@ -1,11 +1,16 @@
 /**
- * The manager drawer: workspace/session selection on the left, the embedded
+ * The manager drawer: workspace/session navigation on the left, the embedded
  * official manager chat on the right.
  *
  * The drawer is an additive `shell.overlay` list entry, so it never competes
  * for a layout seat with the official UI and simply does not render if the
- * seat disappears upstream. It is a fixed right-hand surface over the frame
- * (the overlay layer itself ignores pointer events).
+ * seat disappears upstream. It floats over the frame (the overlay layer itself
+ * ignores pointer events) and owns its own geometry:
+ *
+ *  - the outer edge drags to resize, and the panel can fill the viewport;
+ *  - the navigator collapses so the chat gets the whole drawer, and the
+ *    navigator divider drags independently;
+ *  - "expand chat" is one click that does both, and everything persists.
  *
  * All data is read from snapshots the plugin already maintains: the board
  * model for workspaces/sessions, the uiSession status map for the manager
@@ -37,7 +42,7 @@ export interface ManagerDrawerProps {
  * @param props - face, controller, translator and the slot-provided render seats.
  * @returns the drawer, or null while closed.
  */
-export declare function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot }: ManagerDrawerProps): ReactElement | null;
+export declare function ManagerDrawer({ face, manager, t, SessionProvider, renderSlot, }: ManagerDrawerProps): ReactElement | null;
 /** Props of the drawer toggle, shared by the conversation header and sidebar foot. */
 export interface ManagerToggleProps {
     manager: ManagerController;

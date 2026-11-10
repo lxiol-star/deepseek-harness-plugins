@@ -43,6 +43,32 @@ export interface BoardListProps {
 /** Per-project coordinator button state, keyed by normalized project key. */
 type CoordinatorState = Readonly<Record<string, 'pending' | 'failed'>>
 
+/** Final directory of a path; the value itself when it holds no segments. */
+function pathTail(value: string): string {
+  const parts = value.replaceAll('\\', '/').replace(/\/+$/u, '').split('/').filter(Boolean)
+  return parts.at(-1) ?? value
+}
+
+/**
+ * Visible name of a tree node.
+ *
+ * A workspace without a title falls back to its path in the model — either the
+ * absolute path or a compacted directory chain. Showing that again would bury
+ * the tree in paths, so the heading shows the final directory and the full
+ * path stays in the row's `title` tip.
+ *
+ * @param title - node title as built by the workspace tree.
+ * @param path - absolute path of the node, when known.
+ * @returns the heading text.
+ */
+function visibleName(title: string, path: string): string {
+  if (title.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(title)) return pathTail(title)
+  const normalized = path.replaceAll('\\', '/').replace(/\/+$/u, '')
+  const chain = title.replaceAll('\\', '/')
+  if (chain !== '' && normalized !== '' && (normalized === chain || normalized.endsWith(`/${chain}`))) return pathTail(chain)
+  return title
+}
+
 /** One group heading. */
 function GroupHeader({
   group,
@@ -96,7 +122,19 @@ export function BoardList({
     && Object.values(workspaceMeta ?? {}).some(info => info.projectKey !== undefined)
   const [coordinator, setCoordinator] = useState<CoordinatorState>({})
   const coordinatorBusy = useRef<Set<string>>(new Set())
-  if (total === 0 && !hasProjectNodes) return <div className="sb-empty">{t(emptyKey)}</div>
+  if (total === 0 && !hasProjectNodes) {
+    return <div className="sb-empty">
+      <span className="sb-empty-glyph" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="4.5" width="8" height="6.5" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <rect x="13" y="4.5" width="8" height="6.5" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <rect x="3" y="13" width="8" height="6.5" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <rect x="13" y="13" width="8" height="6.5" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        </svg>
+      </span>
+      <span className="sb-empty-text">{t(emptyKey)}</span>
+    </div>
+  }
 
   // The host creates the session on first use, so a slow round trip must keep
   // the button from firing a second create. State is per project: acting on B
@@ -143,16 +181,21 @@ export function BoardList({
     const renderNode = (node: WorkspaceNode): ReactElement => {
       const open = collapsed?.[node.key] !== true
       const title = node.title || t('workspace.unassigned')
+      // Path nodes carry a compacted directory chain as their title. Keep the
+      // chain out of the heading and show only the final directory; the full
+      // path remains on the row's `title` tip.
+      const shown = node.kind === 'path' ? pathTail(title) : visibleName(title, node.path)
       // A leaf with no cards and no children has nothing to disclose; render a
       // static heading instead of a fake expand/collapse control.
       const expandable = node.kind === 'project' || node.entries.length > 0 || node.children.length > 0
       const label = node.subtitle === undefined
         ? t('a11y.groupCount', { group: title, count: node.count })
         : t('a11y.groupBranchCount', { group: title, branch: node.subtitle, count: node.count })
-      const content = <><span className="sb-workspace-name">{title}</span>{node.subtitle ? <span className="sb-workspace-subtitle">{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span></>
+      const content = <><span className="sb-workspace-name">{shown}</span>{node.subtitle ? <span className="sb-workspace-subtitle" title={node.subtitle}>{node.subtitle}</span> : null}<span className="sb-group-count">{node.count}</span></>
+      const tip = node.path === '' ? title : node.path
       const header = expandable
-        ? <button type="button" className="sb-group-head" aria-expanded={open} title={node.path} onClick={() => onToggleGroup?.(node.key)} aria-label={label}><span aria-hidden="true">{open ? '▾' : '▸'}</span>{content}</button>
-        : <div className="sb-group-head sb-group-head--static" title={node.path}><span className="sb-workspace-spacer" aria-hidden="true" />{content}</div>
+        ? <button type="button" className="sb-group-head" aria-expanded={open} title={tip} onClick={() => onToggleGroup?.(node.key)} aria-label={label}><span className="sb-group-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>{content}</button>
+        : <div className="sb-group-head sb-group-head--static" title={tip}><span className="sb-workspace-spacer" aria-hidden="true" />{content}</div>
       const projectKey = node.projectKey
       const state = projectKey === undefined ? undefined : coordinator[projectKey]
       const pending = state === 'pending'

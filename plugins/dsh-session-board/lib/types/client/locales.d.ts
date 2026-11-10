@@ -58,6 +58,7 @@ export declare const en: {
     readonly 'filter.running': "Running";
     readonly 'filter.workspace': "Workspace";
     readonly 'filter.allWorkspaces': "All workspaces";
+    readonly 'filter.unknownWorkspace': "Workspace no longer listed";
     readonly 'filter.clear': "Reset";
     readonly 'filter.count': "{shown} of {total} sessions";
     readonly 'empty.noMatches': "No matching sessions. Try another search or reset the filters.";
@@ -267,6 +268,26 @@ export declare const en: {
     readonly 'settings.errorStoreUnavailable': "The preference could not be stored. Check the host logs and try again.";
     readonly 'settings.errorInvalidSelection': "That selection is invalid. Pick a model from the list.";
     readonly 'settings.errorRequestFailed': "Could not reach the Harness host.";
+    readonly 'manager.chatTitle': "Manager agent";
+    readonly 'manager.status.idle': "Idle";
+    readonly 'manager.status.running': "Running";
+    readonly 'manager.status.waiting': "Needs you";
+    readonly 'manager.navCollapse': "Hide navigator";
+    readonly 'manager.navExpand': "Show navigator";
+    readonly 'manager.maximize': "Maximize panel";
+    readonly 'manager.restore': "Restore panel";
+    readonly 'manager.focusChat': "Expand chat";
+    readonly 'manager.focusChatExit': "Restore view";
+    readonly 'manager.resizeHorizontal': "Resize panel width";
+    readonly 'manager.resizeNavigator': "Resize navigator width";
+    readonly 'manager.resizeTip': "Drag to resize; double-click to reset";
+    readonly 'manager.showPaths': "Show project paths";
+    readonly 'manager.hidePaths': "Hide project paths";
+    readonly 'manager.filterWorkspaces': "Filter workspaces";
+    readonly 'manager.filterEmpty': "No workspaces match the filter.";
+    readonly 'manager.clearFilter': "Clear";
+    readonly 'manager.selectionHintShort': "Queues one message for the manager.";
+    readonly 'manager.openSession': "Open session {title}";
 };
 /** Chinese copy. */
 export declare const zh: Record<keyof typeof en, string>;

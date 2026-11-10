@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterGroups, DEFAULT_FILTERS, workspaceOptions } from '../src/client/filters.ts'
+import { filterGroups, DEFAULT_FILTERS, workspaceChoices, workspaceOptions } from '../src/client/filters.ts'
 import { buildEntry } from '../src/shared/board.ts'
 import { groupEntries } from '../src/shared/order.ts'
 import { EMPTY_FEED, type BoardSessionInput } from '../src/shared/types.ts'
@@ -31,5 +31,36 @@ describe('shared board filters', () => {
     expect(ids(filterGroups(groups, { ...DEFAULT_FILTERS, status: 'running', workspace: 'Gateway' }))).toEqual([])
     expect(ids(groups)).toHaveLength(3)
     expect(workspaceOptions(groups)).toEqual(['Gateway', 'Web'])
+  })
+})
+
+describe('workspace filter labels', () => {
+  /** Build one single-workspace group for the choice tests. */
+  const groupOf = (entries: ReturnType<typeof build>[]) => groupEntries(entries)
+
+  it('shows the workspace title without the absolute path', () => {
+    const entries = [
+      build({ id: 'a', workspaceTitle: 'Gateway', workspacePath: '/Users/someone/projects/gateway' }),
+      build({ id: 'b', workspaceTitle: 'Gateway', workspacePath: '/Users/someone/projects/gateway' }),
+    ]
+    const choices = workspaceChoices(groupOf(entries))
+    expect(choices.map(choice => choice.label)).toEqual(['Gateway'])
+    expect(choices[0]?.value).toContain('gateway')
+    expect(choices[0]?.label).not.toContain('/')
+  })
+
+  it('disambiguates same-titled workspaces with the shortest distinct path tail', () => {
+    const entries = [
+      build({ id: 'a', workspaceTitle: 'gateway', workspacePath: '/srv/alpha/gateway' }),
+      build({ id: 'b', workspaceTitle: 'gateway', workspacePath: '/srv/beta/gateway' }),
+    ]
+    const labels = workspaceChoices(groupOf(entries)).map(choice => choice.label).sort()
+    expect(labels).toEqual(['gateway · alpha/gateway', 'gateway · beta/gateway'])
+    for (const label of labels) expect(label.startsWith('/')).toBe(false)
+  })
+
+  it('falls back to the final directory when the host title is a path', () => {
+    const entries = [build({ id: 'a', workspaceTitle: '/srv/plain-dir', workspacePath: '/srv/plain-dir' })]
+    expect(workspaceChoices(groupOf(entries))[0]?.label).toBe('plain-dir')
   })
 })

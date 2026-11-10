@@ -172,6 +172,7 @@ function SessionCardBody({
       ) : null}
       <span className="sb-card__halo" aria-hidden="true" />
       <div className="sb-card-head" style={FIXED_STYLE}>
+        <span className="sb-state-dot" aria-hidden="true" />
         <button
           type="button"
           className="sb-card-title"
@@ -188,7 +189,6 @@ function SessionCardBody({
       </div>
       {pills.length > 0 ? (
         <div className="sb-pill-row" style={FIXED_STYLE}>
-          <span className="sb-state-dot" aria-hidden="true" />
           {pills}
         </div>
       ) : null}

@@ -55,6 +55,25 @@ export declare class ManagerService {
         managerWorkspaceId?: string;
     }>;
     /**
+     * Whether a persisted manager id still names a Session.
+     *
+     * A successful listing that omits the id is proof it is gone; a failed read
+     * is `unknown` on purpose, so transport trouble never recreates a manager
+     * and strands the durable selection behind a second session.
+     * @param sessionId - persisted manager session id.
+     * @returns `live`, `missing`, or `unknown` when existence cannot be checked.
+     */
+    private managerSessionState;
+    /**
+     * Drop a manager pointer whose Session no longer exists.
+     *
+     * The in-memory pointer is cleared even when the durable write fails; the
+     * next start then re-checks the stale row and clears it again, so the panel
+     * always recovers without a manual reset.
+     * @returns completion after the best-effort durable write.
+     */
+    private forgetManagerSession;
+    /**
      * Install tools/prompt context on the manager Agent, whether it was just
      * created or resumed from disk. Non-manager agents are ignored.
      * @param agent - every published Agent.
