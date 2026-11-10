@@ -6,9 +6,14 @@
 
 ## 安装
 
+本仓库收录了上游 0.2.1 的未修改发布包（[plugins/dsh-progress-rules/](../plugins/dsh-progress-rules/)，来源见其 [UPSTREAM.md](../plugins/dsh-progress-rules/UPSTREAM.md)），并发布了带 tarball 的 tag：
+
 ```bash
-dsh plugin --profile desktop add dsh-progress-rules@0.2.1
+dsh plugin --profile desktop add \
+  https://github.com/lxiol-star/deepseek-harness-plugins/releases/download/dsh-progress-rules-v0.2.1/dsh-progress-rules-0.2.1.tgz
 ```
+
+也可以直接用 npm 上的同名包：`dsh plugin --profile desktop add dsh-progress-rules@0.2.1`。
 
 安装器会写入依赖，并把 `dsh-progress-rules` 追加到 profile 的 `dsh.profile.bundles`。
 装完重启该 profile 生效。
