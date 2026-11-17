@@ -1,0 +1,14 @@
+# Changelog
+
+## 0.1.0
+
+- Add slug-idempotent Notion session archives with secret gating.
+- Add active, archived and hidden visibility states and restoration.
+- Add automatic/manual pull, bounded previews and real new-session continuation.
+- Add the `notion_session` agent tool and three user-invocable skills.
+- Add a self-contained Python CLI and skill installer for other agent hosts.
+- Support legacy `raw/sessions/...` slugs, including CJK and inner spaces, for preview, state changes and continuation.
+- Use the current Notion markdown replacement field (`new_str`), verified against the live API.
+- Order records by edit time so a just-saved active page is never pushed behind the list limit.
+- Keep continuation user-only in the GUI; the agent tool can archive/list/show/set state but cannot spawn a model from archived text.
+- Surface partial success (session created, Notion write failed) with a retry-open action instead of silently failing.

@@ -1,0 +1,4 @@
+# Add Notion-backed session archives and continuation without changing core bundles.
+- insert:
+    - id: dsh-notion-session
+      name: dsh-notion-session

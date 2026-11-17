@@ -15,6 +15,7 @@
 | [dsh-hide-empty-workspaces](plugins/dsh-hide-empty-workspaces/) | 侧栏视图切换（进行中 / 已归档 / 工作空间）：已归档档按工作区分组（默认折叠），展开可查看并取消归档/打开会话，工作空间档可挑历史工作区开新会话；没有可见会话的工作区在进行中视图隐藏 | 0.3.9，视图选择持久化；空白会话宽限期、设置页可改默认视图与诊断；插件更新后可在设置页「重新加载客户端插件」，强制卸载/重挂载第三方客户端插件（旧标签页也会重建），不刷新页面/不重启/不丢会话 |
 | [dsh-progress-rules](plugins/dsh-progress-rules/) | 过程纪律 + 沉默兜底：L1 往系统提示注入常驻段落，L2 连续 N 个「只有工具调用」的步骤后由 harness 注入提醒；`text` / `everySteps` / `reminder` / `enforce` 可配 | 上游 0.2.1（MIT，`Adamaik/dsh-progress-rules`）原样 vendored；已在 macOS Harness Dev3（DSH 0.2.2-alpha.3）实测；安装走 Release `dsh-progress-rules-v0.2.1` |
 | [dsh-superagent](plugins/dsh-superagent/) | 主动式 Agent（Super-agent）：主会话里直接下任务开单，worker 在**该会话当前工作区**下的 `.dsh-superagent/work/` 子工作树执行；另有本地工作区树 Source、MSP 信号、GitHub、飞书四类事件来源；带经验库（ReActive fork）与策略评估 | 0.2.0，fork 自 `hxh230802/dsh-superagent-prototype`（MIT）并新增主会话任务直通与工作区树 Source；已在 Harness Dev 0.2.2-alpha.3 与 DSH 0.2.2-rc.1 验证「主会话下任务 → 工单 → 子工作树执行」全链路；实验性 |
+| [dsh-notion-session](plugins/dsh-notion-session/) | Notion 会话归档与续接：主动保存当前会话，自动/手动拉取，active/archived/hidden 筛选与恢复，有界预览，在真正的新 DSH 会话中继续；附其他 agent 可安装的 skill + 自包含 CLI | 0.1.0，46 项离线测试通过；真实 Notion 归档/更新、跨实例续接与隐藏/恢复已完成端到端验证 |
 | [dsh-workspace-autoregister](plugins/dsh-workspace-autoregister/) | 会话中新建的工作区目录自动加入工作区列表，并创建首个空会话，无需在侧栏手动添加 | 0.1.0，Host-only，Node 测试 + desktop profile Host 侧端到端收录验证通过；窗口渲染未做 DOM 核对 |
 
 每个插件放在 `plugins/<包名>/`，独立声明版本、入口、依赖与使用说明。后续可以继续在本仓库添加插件。

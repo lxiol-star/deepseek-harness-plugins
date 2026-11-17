@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Notion session handoff",
+    "description": "Archive DSH and other agent sessions to Notion, filter active, archived and hidden records, and continue one in a real new DSH session with bounded untrusted historical context.",
+    "detail": "README.md"
+  }
+}

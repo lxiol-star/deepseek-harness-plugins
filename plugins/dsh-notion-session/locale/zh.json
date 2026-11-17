@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Notion 会话续接",
+    "description": "把 DSH 或其他 agent 的会话归档到 Notion，按可续接、已归档、已隐藏筛选，并在真正的新 DSH 会话中注入有界、不可信的历史上下文继续任务。",
+    "detail": "README.md"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "dsh-notion-session",
+  "version": "0.1.0",
+  "description": "Archive agent sessions to Notion, manage active/archived/hidden records, and continue an archive in a real new DSH session.",
+  "type": "module",
+  "main": "lib/index.js",
+  "icon": "icon.svg",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "scripts/notion_session.py",
+    "scripts/install_skills.py",
+    "skills",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "DESIGN.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/render.js && node --check lib/client.js && python3 -c \"import ast,pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in [pathlib.Path('scripts/notion_session.py'), pathlib.Path('scripts/install_skills.py')]]\"", 
+    "test": "node --test test/*.test.mjs && python3 -m unittest discover -s test -p 'test_*.py'",
+    "test:skills": "node --test test/skills.test.mjs",
+    "prepublishOnly": "npm run check && npm test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lxiol-star/deepseek-harness-plugins.git",
+    "directory": "plugins/dsh-notion-session"
+  },
+  "homepage": "https://github.com/lxiol-star/deepseek-harness-plugins/tree/main/plugins/dsh-notion-session",
+  "bugs": {
+    "url": "https://github.com/lxiol-star/deepseek-harness-plugins/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "notion",
+    "session-archive",
+    "session-handoff"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": ["slots", "sessions", "uiWorkspace"]
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.2-rc.3": "compatible"
+      }
+    },
+    "manifestVersion": 1
+  }
+}
