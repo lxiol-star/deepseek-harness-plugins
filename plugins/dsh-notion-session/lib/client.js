@@ -149,7 +149,10 @@ window.__ModuleLoader__.load({
         open: () => {
           returnFocus = document.activeElement
           set({ open: true, error: null, notice: null, noticeAction: null })
-          void load(true)
+          // Serve the host cache immediately when present, then refresh in the
+          // background. A cold first pull still takes 20–30 seconds.
+          void load(false)
+          setTimeout(() => { if (state.open) void load(true, true) }, 800)
         },
         setStatus: status => { set({ status, records: [], error: null, notice: null, noticeAction: null }); void load(false) },
         setQuery: query => set({ query }),
@@ -289,7 +292,7 @@ window.__ModuleLoader__.load({
             h('button', { className: 'ns-button', disabled: !!state.busy, onClick: () => store.archiveCurrent('active') }, '保存当前'),
             h('button', { className: 'ns-button', disabled: !!state.busy, onClick: () => store.archiveCurrent('archived') }, '保存并归档')),
           h('div', { className: 'ns-status' },
-            h('span', null, `${state.autoSync ? `后台每 ${Math.round(state.syncIntervalSeconds / 60)} 分钟自动拉取` : '后台自动拉取已停用'} · 上次同步 ${formatTime(state.lastSync)}${state.stale ? ' · 当前显示缓存' : ''}`),
+            h('span', null, `${state.autoSync ? `后台每 ${Math.round(state.syncIntervalSeconds / 60)} 分钟自动拉取` : '后台自动拉取已停用'} · 上次同步 ${formatTime(state.lastSync)}${state.stale ? ' · 当前显示缓存' : ''}${state.loading || state.refreshing ? ' · 正在刷新…' : ''}`),
             h('span', null, `${state.records.length} 条记录`)),
           state.error ? h('div', { className: 'ns-error', role: 'alert' }, state.error, ' ',
             h('button', { className: 'ns-button', onClick: () => state.createdSessionId ? store.openCreated(navigation) : store.load(true) }, state.createdSessionId ? '重试打开' : '重试拉取')) : null,
@@ -300,7 +303,7 @@ window.__ModuleLoader__.load({
           state.syncError && !state.error ? h('div', { className: 'ns-error', role: 'alert' }, `后台同步失败：${state.syncError.message}`) : null,
           state.syncWarnings.length ? h('div', { className: 'ns-error', role: 'alert' }, `${state.syncWarnings.length} 条记录因 secret 门控未显示；可在 Notion 脱敏后重新拉取。`) : null,
           h('div', { className: 'ns-list' },
-            state.loading && state.records.length === 0 ? h('div', { className: 'ns-empty' }, '正在从 Notion 拉取…') : null,
+            state.loading && state.records.length === 0 ? h('div', { className: 'ns-empty' }, null, '正在从 Notion 拉取…', h('br'), '首次拉取需要逐页读取记录状态，约 20–30 秒；之后会先用缓存打开。') : null,
             !state.loading && !state.error && state.records.length === 0 ? h('div', { className: 'ns-empty' }, null, '这个筛选下暂无记录。', h('br'), '可切换到“全部”，或先保存当前会话。') : null,
             state.records.map(record => h(RecordRow, { key: record.pageId || record.slug, record, store, navigation }))))
       )
