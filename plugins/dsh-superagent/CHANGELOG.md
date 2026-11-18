@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5 — 2026-11-18
+
+- **主会话可以直接管理自己创建的子级工作区了**：新工具 `orchestrator_workspaces`（`op=list|archive|delete`），此前这类清理只能靠桌面 UI 自动化（osascript 盲点 DevTools 控制台粘 IIFE，实测把脚本粘进了别的会话和侧栏终端）。
+  - `op=list`：只列本插件为工单执行器创建的工作区（路径里带 `.dsh-superagent/work/` 的那些），带对应 ticket、每个 Session 的归档状态和仍在运行的工作（`turn`/`job`/`subagent`/`schedule` 按族列出）。
+  - `op=archive`：按 DSH 客户端的归档语义写同一份 durable archive set——会话离开分组视图、日志保留；仍在跑的 Session 默认报成 `blocked`，`stop_active=true` 才先停再归档。
+  - `op=delete`：**默认不删**，只返回「按 confirm 会发生什么」；`confirm=true` 时也只删这条**工作区注册**（目录与全部 Session 日志都在），且只要有 Session 在跑、或有 Session 尚未归档就拒绝。
+  - 越界保护：不是子级工作区的路径（操作者自己的工作区）一律 `notChildWorkspace` 拒绝，`confirm` 也不放行。
+- 主会话提示词加一条硬规则：子级工作区只用这些工具管，**不要走桌面 UI**。
+- 模型可见面预算（`tests/model-surface.spec.ts`）59_000 → 60_500，只因为多了这一个工具；worker 面不变。
+- 单测：`tests/workspaces.spec.ts` 覆盖路径标记、分页列表、归档集、无活跃会话/未归档/未确认三类拒绝；`tests/tools.spec.ts` 覆盖工具层接线与「默认不删」。
+
 ## 0.2.4 — 2026-11-09
 
 - **修复主会话仍能等待子 agent**：装了 Agent Teams 的 profile 把 `wait_agent`/`spawn_teammate`/`team_task_*` 注册在**会话自己的 scope**，而 `tools.restrict` 只过滤继承来的全局工具，白名单管不到它们——于是主会话拿到 `wait_agent` 后会阻塞（实测一次会话 17:11–17:22 连续 `wait_agent` 180s/240s）。

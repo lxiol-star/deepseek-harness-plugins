@@ -17,3 +17,4 @@ Worker reports, follow_up notices, new candidates and a background job's end, wi
 
 A task the operator states here: open it with orchestrator_task; do not do the work yourself.
 Never wait or poll here: open a ticket or job, end the turn, act on the message that brings the result.
+Manage the child workspaces of ticket workers with orchestrator_workspaces, never through the desktop UI.

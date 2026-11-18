@@ -238,8 +238,24 @@ export async function startRuntime(seed?: (store: Store) => void) {
   const webServer = { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }
   const jobs = jobRegistry(id => agents.get(id))
   const subagents = subagentRuntime(agents)
+  // The Workspace registry a host provides: the records a test adds, the archive set a Session's archive writes, and the
+  // registrations a removal drops. `create` answers as DSH does, by the directory it was given.
+  const workspaces: { id: string; path: string; title: string; createdAt: string; sessionIds: string[] }[] = []
+  const archivedSessions = new Set<string>()
+  const workspaceRegistry = {
+    create: async (cwd: string) => ({ id: cwd }),
+    list: () => workspaces.map(workspace => ({ ...workspace })),
+    get: (id: string) => workspaces.find(workspace => workspace.id === id),
+    delete: vi.fn(async (id: string) => {
+      const at = workspaces.findIndex(workspace => workspace.id === id)
+      return at >= 0 && workspaces.splice(at, 1).length === 1
+    }),
+    archiveSession: vi.fn(async (id: string) => { archivedSessions.add(id) }),
+    unarchiveSession: vi.fn(async (id: string) => { archivedSessions.delete(id) }),
+    get archivedSessionIds() { return [...archivedSessions] },
+  }
   const services = { agents, llm: { resolveCallConfig: vi.fn(async (value: unknown) => value) }, sessionController: controller,
-    sessionPersistence: persistence, workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) }, permissionPresets: { set: () => {} }, subprocess, webServer,
+    sessionPersistence: persistence, workspaceRegistry, permissionPresets: { set: () => {} }, subprocess, webServer,
     jobs: jobs.service, subagents: subagents.service }
   const ctx = new Context()
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
@@ -294,6 +310,6 @@ export async function startRuntime(seed?: (store: Store) => void) {
   /** A step of the worker claims what waits for it, and is cut off before the Session took it. */
   const claim = (sessionId: string) => { claims.get(sessionId)!() }
   return { runtime, ctx, directory, agents, tools, deliveries, relays, candidates, runTool, route, acceptedTicket, api, controller, subprocess, hooks, resolveDefault, stop,
-    jobs, subagents, step, claim }
+    jobs, subagents, step, claim, workspaces, workspaceRegistry, archivedSessions }
 }
 export type Host = Awaited<ReturnType<typeof startRuntime>>

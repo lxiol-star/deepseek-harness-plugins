@@ -1,4 +1,5 @@
 /** Session tool registration, role-scoped resource reads, and routing/settings tool contracts. */
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { TICKET_STATES } from '../src/app/cards.ts'
 import { builtInBase, builtInParts, defaultPrompts } from '../src/app/prompts.ts'
@@ -488,4 +489,26 @@ it('gives a worker the other messages of the request its ticket was accepted fro
   const page = await h.runTool(`worker-${ticket.id}`, 'orchestrator_read', { resource: `ticket/${ticket.id}` })
   expect(page).toMatchObject({ batch: [{ trigger_id: other, read: `trigger/${other}` }] })
   expect(await h.runTool(`worker-${ticket.id}`, 'orchestrator_read', { resource: `trigger/${other}` })).toMatchObject({ trigger_id: other })
+})
+
+it('manages the child workspaces of ticket workers: lists them, archives an idle one, and removes only that registration on confirm', async () => {
+  const worktree = join(h.directory, '.dsh-superagent', 'work', 'fix-abc123')
+  h.workspaces.push({ id: 'w1', path: worktree, title: 'fix-abc123', createdAt: '2026-11-18T10:00:00.000Z', sessionIds: ['s1'] },
+    { id: 'own', path: h.directory, title: 'operator', createdAt: '2026-11-18T11:00:00.000Z', sessionIds: [] })
+  const manage = (op: string, args: Record<string, unknown> = {}) => h.runTool(h.runtime.masterId, 'orchestrator_workspaces', { op, ...args })
+  // The operator's own workspace stays out of the listing, and the child one names the Session the archive has not taken yet.
+  expect(await manage('list')).toMatchObject({ total: 1, omitted: 0, workspaces: [{ workspace_id: 'w1', path: worktree, removable: false,
+    sessions: [{ session_id: 's1', archived: false, activity: [] }] }] })
+  expect(await manage('delete', { path: worktree })).toMatchObject({ removed: false, needs_confirmation: true, removable: false,
+    blockers: ['s1 is not archived'], directory_kept: true })
+  expect(h.workspaceRegistry.delete).not.toHaveBeenCalled()
+  await expect(manage('delete', { path: worktree, confirm: true })).rejects.toThrow('not archived')
+  expect(await manage('archive', { path: worktree })).toMatchObject({ archived: ['s1'], already_archived: [], blocked: [] })
+  expect(await manage('list')).toMatchObject({ workspaces: [{ removable: true, sessions: [{ session_id: 's1', archived: true }] }] })
+  expect(await manage('delete', { path: worktree, confirm: true })).toMatchObject({ removed: true, removable: true, blockers: [], directory_kept: true })
+  expect(h.workspaceRegistry.delete).toHaveBeenCalledWith('w1')
+  expect(h.workspaces.map(workspace => workspace.id)).toEqual(['own'])
+  // A workspace the operator owns is refused outright, and an operation that needs a path says so.
+  await expect(manage('delete', { path: h.directory, confirm: true })).rejects.toThrow('child workspace')
+  await expect(manage('archive')).rejects.toThrow('needs the child workspace path')
 })

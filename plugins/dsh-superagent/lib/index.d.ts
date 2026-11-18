@@ -264,6 +264,10 @@ declare const USER_ERRORS: {
   readonly unknownProblem: readonly ["missing", "Unavailable Eval not found"];
   readonly unknownTrigger: readonly ["missing", "Unknown trigger"];
   readonly unknownAssignment: readonly ["missing", "Unknown assignment"];
+  readonly unknownWorkspace: readonly ["missing", "Unknown workspace"];
+  readonly notChildWorkspace: readonly ["refused", "Only a child workspace dsh-superagent created for a ticket worker can be archived or removed here"];
+  readonly workspaceBusy: readonly ["refused", "Work still runs in {sessions}; stop it before archiving or removing the workspace"];
+  readonly workspaceNotArchived: readonly ["refused", "Sessions {sessions} are not archived yet; archive them first, as the DSH client archives a Session"];
   readonly unknownBlock: readonly ["missing", "Unknown settings block: {block}"];
   readonly unknownPromptRevision: readonly ["missing", "Unknown prompt revision {revision}"];
   readonly unknownPromptPart: readonly ["refused", "Unknown built-in prompt part {part}"];

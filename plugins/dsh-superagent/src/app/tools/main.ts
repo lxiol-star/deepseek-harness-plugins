@@ -13,6 +13,7 @@ import { sessionTrigger } from '../../sources/session.ts'
 import type { Sessions } from '../sessions.ts'
 import type { Settings } from '../settings.ts'
 import type { Store } from '../store.ts'
+import type { ChildWorkspaces } from '../workspaces.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 
 const RoutingNoteSchema = z.string().trim()
@@ -27,6 +28,8 @@ export interface MainToolsHost {
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
   readonly resources: ResourceHost
+  /** The child workspaces of ticket workers, which this main Session may list, archive and remove. */
+  readonly workspaces: Pick<ChildWorkspaces, 'list' | 'archive' | 'remove'>
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
   sendReplies(): Promise<void>
@@ -215,6 +218,22 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       execute: async args => {
         host.engine.note(args.ticket_id, args.text)
         return routed(host, { reason: 'Noted for the worker', ticketId: args.ticket_id })
+      },
+    }),
+    tool({
+      name: 'orchestrator_workspaces',
+      description: 'The child workspaces of ticket workers, managed here and never through the desktop UI: op=list reads them with their Sessions, ticket and archive state; op=archive archives each Session as the DSH client does, reporting one that still runs unless stop_active ends it first; op=delete removes one registration on confirm, only while no Session runs and every Session is archived, and keeps the directory and logs.',
+      schema: z.object({
+        op: z.enum(['list', 'archive', 'delete']),
+        path: z.string().trim().min(1).optional().describe('archive and delete: the path op=list gives.'),
+        stop_active: z.boolean().default(false).describe('archive: end the work still running first; the default reports it instead.'),
+        confirm: z.boolean().default(false).describe('delete: true removes the registration; the default reports what it needs.'),
+      }).strict(),
+      execute: async args => {
+        if (args.op === 'list') return host.workspaces.list()
+        if (!args.path) throw new Error(`op=${args.op} needs the child workspace path that op=list gives`)
+        return args.op === 'archive' ? host.workspaces.archive(args.path, { stopActive: args.stop_active === true })
+          : host.workspaces.remove(args.path, { confirm: args.confirm === true })
       },
     }),
     tool({

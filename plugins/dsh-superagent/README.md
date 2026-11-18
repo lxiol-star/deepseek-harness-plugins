@@ -21,7 +21,7 @@
 DSH 插件管理器里安装指定版本（需要 DSH `^0.2.1-alpha.2`）：
 
 ```
-github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.0&path:/plugins/dsh-superagent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.5&path:/plugins/dsh-superagent
 ```
 
 也可以从本地目录安装（`设置 → 插件 → 添加插件` 填本地路径）。
@@ -34,6 +34,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.0&path:/plugins/d
 2. 在输入框左下角选择工作区——工单就开在这个工作区下的 `.dsh-superagent/work/` 里。
 3. 直接说任务，例如「在当前工作区把 README 的安装步骤补全，做完告诉我」。
 4. 主 Session 调 `orchestrator_task` 开单，worker 在子工作树里执行，完成后把结果回报到主 Session。
+5. 收拾子工作区也交给主 Session：`orchestrator_workspaces` 的 `op=list` 列出来，`op=archive` 按 DSH 客户端语义归档其中的会话，`op=delete`+`confirm=true` 才删工作区注册（默认不删，目录与会话日志保留；有会话在跑或未归档一律拒绝）。不要再让它去点 DevTools。
 
 来源事件（MSP / 工作区树 / GitHub）到达后出现在面板「触发」，被接受后进入「执行」，每个工单一个 worker Session。
 
