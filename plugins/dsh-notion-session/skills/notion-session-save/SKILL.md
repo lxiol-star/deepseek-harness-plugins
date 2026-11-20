@@ -1,11 +1,13 @@
 ---
-name: notion-current-session
-description: 把当前 AI 主会话幂等归档到 Notion；可选同时设为 archived/hidden，供 DSH 或其他 agent 后续拉取和续接。
+name: notion-session-save
+description: 把当前 AI 主会话幂等保存为可续接的 Notion 归档；默认 active，可选保存并归档/隐藏。
 ---
 
-# 当前会话归档到 Notion
+# 保存当前会话为可续接归档
 
-把当前会话保存为一个可续接快照。默认状态为 `active`；用户明确说「保存并归档」「归档并隐藏」时分别用 `archived` 或 `hidden`。不要删除、移动或原生归档源会话。
+把当前会话保存为一个可续接快照。**默认就是可续接**，不需要额外参数；默认状态为 `active`。用户明确说「保存并归档」「保存并隐藏」时分别用 `archived` 或 `hidden`。不要删除、移动或原生归档源会话。
+
+> 本 skill 使用独立名字，避免与本机旧的 `notion-current-session` 同名冲突；旧命令仍可能走旧流程并产生 `raw/sessions/...` 页面。
 
 ## DSH 插件路径（优先）
 

@@ -26,7 +26,7 @@ test('apply owns the API, runtime skills and per-agent tool registrations', asyn
   assert.equal(routes.length, 1)
   assert.equal(routes[0].path, '/api/notion-session')
   assert.deepEqual(routes[0].methods, ['GET', 'POST'])
-  assert.deepEqual(skills.map(skill => skill.name).sort(), ['notion-current-session', 'notion-session-archive', 'notion-session-resume'])
+  assert.deepEqual(skills.map(skill => skill.name).sort(), ['notion-session-archive', 'notion-session-resume', 'notion-session-save'])
   assert.ok(skills.every(skill => skill.invocation.userInvocable && skill.invocation.modelInvocable))
   assert.ok(skills.every(skill => !skill.content.includes('{{PLUGIN_DIR}}')))
   const agent = { id: 'session-1', ctx: { tools: { register(tool) { tools.push(tool); return () => {} } } } }

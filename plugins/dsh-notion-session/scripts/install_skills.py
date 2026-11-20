@@ -7,7 +7,7 @@ import shutil
 import sys
 import tempfile
 
-SKILLS = ("notion-current-session", "notion-session-archive", "notion-session-resume")
+SKILLS = ("notion-session-save", "notion-session-archive", "notion-session-resume")
 
 
 def main():

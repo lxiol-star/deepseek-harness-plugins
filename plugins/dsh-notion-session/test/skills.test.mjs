@@ -14,16 +14,16 @@ test('skill installer supplies CLI copies, expands paths and backs up existing s
   const temporary = await mkdtemp(join(tmpdir(), 'dsh-notion-skills-test-'))
   try {
     const target = join(temporary, 'skills')
-    await mkdir(join(target, 'notion-current-session'), { recursive: true })
-    await writeFile(join(target, 'notion-current-session', 'old.txt'), 'keep me')
+    await mkdir(join(target, 'notion-session-save'), { recursive: true })
+    await writeFile(join(target, 'notion-session-save', 'old.txt'), 'keep me')
     const first = await exec('python3', [join(root, 'scripts', 'install_skills.py'), '--target', target])
     const output = JSON.parse(first.stdout)
     assert.equal(output.installed.length, 3)
     const names = await readdir(target)
-    const backup = names.find(name => name.startsWith('notion-current-session.backup-'))
+    const backup = names.find(name => name.startsWith('notion-session-save.backup-'))
     assert.ok(backup)
     assert.equal(await readFile(join(target, backup, 'old.txt'), 'utf8'), 'keep me')
-    for (const name of ['notion-current-session', 'notion-session-archive', 'notion-session-resume']) {
+    for (const name of ['notion-session-save', 'notion-session-archive', 'notion-session-resume']) {
       const content = await readFile(join(target, name, 'SKILL.md'), 'utf8')
       assert.ok(!content.includes('{{PLUGIN_DIR}}'))
       assert.ok(!content.includes('__SKILL_DIR__'))

@@ -369,7 +369,7 @@ function parseSkill(source, fallbackName) {
 }
 
 function installSkills(ctx, config) {
-  const names = ['notion-current-session', 'notion-session-archive', 'notion-session-resume']
+  const names = ['notion-session-save', 'notion-session-archive', 'notion-session-resume']
   for (const skillName of names) {
     const path = join(PACKAGE_DIR, 'skills', skillName, 'SKILL.md')
     const source = readFileSync(path, 'utf8')

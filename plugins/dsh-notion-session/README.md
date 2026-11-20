@@ -4,8 +4,8 @@
 
 ## 能做什么
 
-- **主动保存**：`/notion-current-session` 或输入区 **Notion → 保存当前**。
-- **保存并收起**：`/notion-current-session 保存并归档`，或 **保存并归档**。
+- **主动保存**：`/notion-session-save` 或输入区 **Notion → 保存当前**。
+- **保存并收起**：`/notion-session-save 保存并归档`，或 **保存并归档**。
 - **状态管理**：active / archived / hidden / 全部四种筛选；可恢复、归档、隐藏，不删除 Notion 页面。
 - **自动 + 手动拉取**：Host 默认每 5 分钟刷新最近 20 条；面板可立即拉取。
 - **有界预览**：列表只有摘要；展开时最多读取 20,000 字符，续接正文默认最多 24,000 bytes，保留开头与末尾。
@@ -30,7 +30,7 @@ curl -fsSL https://ntn.dev | bash
 从 GitHub 安装（DSH 插件管理器支持子目录）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.1&path:/plugins/dsh-notion-session
+github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.2&path:/plugins/dsh-notion-session
 ```
 
 或在本仓库中把 `plugins/dsh-notion-session` 目录作为本地包安装（**Plugins → Add plugin**）。安装后刷新 Web GUI；纯客户端文件变更不会由 HMR 自动更新。
@@ -39,9 +39,11 @@ github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.1&path:/plugi
 
 | Skill | 用途 |
 |---|---|
-| `/notion-current-session` | 保存当前会话到 Notion |
+| `/notion-session-save` | 保存当前会话为可续接归档（默认 active） |
 | `/notion-session-archive` | 归档 / 隐藏 / 恢复记录状态 |
 | `/notion-session-resume` | 查询、预览并说明如何续接 |
+
+> 旧的 `/notion-current-session` 若你本机已有同名旧 skill，仍会走旧流程并写 `raw/sessions/...`；新流程请用 `/notion-session-save`。
 
 其他 agent 的安装命令：`python3 scripts/install_skills.py --target ~/.agents/skills`（只想新增管理能力可加 `--only notion-session-archive --only notion-session-resume`，避免覆盖已有归档流程）。
 
@@ -73,9 +75,9 @@ github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.1&path:/plugi
 ### 从任意 agent 提交
 
 ```text
-/notion-current-session
-/notion-current-session 保存并归档
-/notion-current-session 保存并隐藏
+/notion-session-save
+/notion-session-save 保存并归档
+/notion-session-save 保存并隐藏
 ```
 
 同一来源会话固定使用 `dsh/<session-id>`，重复保存是原地更新，不新增重复页面。子会话只有能从未会话元数据或明确工具结果确认归属时才纳入；不能按时间或关键词猜。
@@ -107,7 +109,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.1&path:/plugi
 python3 scripts/install_skills.py --target ~/.agents/skills
 ```
 
-安装 `notion-current-session`、`notion-session-archive`、`notion-session-resume`，并为每个 skill 放置独立 CLI 副本。已有同名目录先原子改名为带时间戳的备份；失败时尽可能回滚。已有自己的归档 skill、只想新增管理能力时，使用 `--only notion-session-archive --only notion-session-resume`，不会覆盖 `notion-current-session`。其他 agent 只支持读取/保存/生成 handoff 时，不会谎称已打开 DSH 窗口。
+安装 `notion-session-save`、`notion-session-archive`、`notion-session-resume`，并为每个 skill 放置独立 CLI 副本。已有同名目录先原子改名为带时间戳的备份；失败时尽可能回滚。已有自己的归档 skill、只想新增管理能力时，使用 `--only notion-session-archive --only notion-session-resume`，不会覆盖你本机已有的 `notion-current-session`。其他 agent 只支持读取/保存/生成 handoff 时，不会谎称已打开 DSH 窗口。
 
 也可直接调用 CLI：
 

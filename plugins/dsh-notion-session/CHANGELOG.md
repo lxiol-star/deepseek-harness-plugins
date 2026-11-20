@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Rename the save skill to `notion-session-save` so it cannot be shadowed by an existing local `notion-current-session` skill.
+- Saving is resumable by default (`active`); only visibility needs an explicit 保存并归档/隐藏.
+- Keep the legacy `notion-current-session` untouched; it may still write `raw/sessions/...` pages.
+
 ## 0.1.1
 
 - Clarify that `notion-session-archive` can manage any listed record slug, including legacy `raw/sessions/...` pages, not only the current session.
