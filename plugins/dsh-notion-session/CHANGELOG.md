@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Clarify that `notion-session-archive` can manage any listed record slug, including legacy `raw/sessions/...` pages, not only the current session.
+- Document that legacy pages without plugin metadata default to active and have no generated summary.
+
 ## 0.1.0
 
 - Add slug-idempotent Notion session archives with secret gating.

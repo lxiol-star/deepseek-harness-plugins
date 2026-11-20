@@ -30,7 +30,7 @@ curl -fsSL https://ntn.dev | bash
 从 GitHub 安装（DSH 插件管理器支持子目录）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.0&path:/plugins/dsh-notion-session
+github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.1&path:/plugins/dsh-notion-session
 ```
 
 或在本仓库中把 `plugins/dsh-notion-session` 目录作为本地包安装（**Plugins → Add plugin**）。安装后刷新 Web GUI；纯客户端文件变更不会由 HMR 自动更新。
