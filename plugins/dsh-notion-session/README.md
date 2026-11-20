@@ -27,7 +27,23 @@ curl -fsSL https://ntn.dev | bash
 
 ## 安装
 
-在 DSH **Plugins → Add plugin** 中选择本目录，或使用 `plugin_manager.install_bundle` 安装此目录。安装后刷新 Web GUI；纯客户端文件变更不会由 HMR 自动更新。
+从 GitHub 安装（DSH 插件管理器支持子目录）：
+
+```text
+github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.0&path:/plugins/dsh-notion-session
+```
+
+或在本仓库中把 `plugins/dsh-notion-session` 目录作为本地包安装（**Plugins → Add plugin**）。安装后刷新 Web GUI；纯客户端文件变更不会由 HMR 自动更新。
+
+对应 skill（插件随包注册，也可单独装给其他 agent）：
+
+| Skill | 用途 |
+|---|---|
+| `/notion-current-session` | 保存当前会话到 Notion |
+| `/notion-session-archive` | 归档 / 隐藏 / 恢复记录状态 |
+| `/notion-session-resume` | 查询、预览并说明如何续接 |
+
+其他 agent 的安装命令：`python3 scripts/install_skills.py --target ~/.agents/skills`（只想新增管理能力可加 `--only notion-session-archive --only notion-session-resume`，避免覆盖已有归档流程）。
 
 默认使用现有 `wiki-sessions`：
 
