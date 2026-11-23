@@ -1,0 +1,22 @@
+# Third-party notices
+
+## Kimi Code tower mode
+
+The tower protocol (`src/protocol/*`), tool descriptions (`prompts/tools/*.md`),
+mode reminders, worker overlay, and the mission/review/merge semantics are
+ported from **Kimi Code** (`MoonshotAI/kimi-code`), package
+`packages/agent-core-v2/src/features/tower`.
+
+- Copyright (c) 2026 Moonshot AI
+- License: MIT (see `LICENSE`)
+
+The DSH integration (plugin entry, `/tower` command, tool registrations,
+subagent spawning, delivery, and guards) is original to this package.
+
+## picomatch
+
+`picomatch` is bundled into `lib/index.js` for scope-glob matching.
+
+- Copyright (c) 2017-present, Jon Schlinkert
+- License: MIT
+- https://github.com/micromatch/picomatch

@@ -1,0 +1,7 @@
+# dsh-kimi-tower — bundle patch.
+#
+# Mounts the tower-mode plugin (one Host row). All protocol state lives inside
+# the target repository under `.tower/`, so the row itself needs no config.
+- insert:
+    - id: kimi-tower
+      name: dsh-kimi-tower

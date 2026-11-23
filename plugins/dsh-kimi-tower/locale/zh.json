@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Kimi 塔台模式",
+    "description": "面向大型任务的控制塔：把目标拆成任务单，每个 worker 在自己的 git worktree 中执行，合并前必须通过独立评审，整支队伍通过文件收件箱通信。移植自 Kimi Code 的 tower 模式。",
+    "detail": "docs/DETAIL.md"
+  }
+}

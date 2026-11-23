@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Kimi tower mode",
+    "description": "A control-tower agent for large jobs: split the objective into missions, run each worker in its own git worktree, gate merges on independent review, and route the fleet through a file-backed inbox. Ported from Kimi Code's tower mode.",
+    "detail": "docs/DETAIL.md"
+  }
+}
