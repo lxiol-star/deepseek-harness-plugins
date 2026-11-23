@@ -2,7 +2,7 @@
 
 - 来源本地仓库：`~/project/code/github/dsh-kimi-tower`（本机独立仓库，无 remote；已原地保留为冻结快照，不再改写）
 - 来源 commit：`4f3f07ade34c7898dfaa198550d58d8cf52e78ce`（`4f3f07a`，2026-11-20）
-- 迁入时间：2026-11-20
+- 迁入时间：2026-11-23
 - 迁入版本：`0.1.1`（来源仓库 `package.json` 为 `0.1.0`）
 - 许可证：MIT；协议层移植自 Kimi Code（MIT），版权与来源详见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)
 
