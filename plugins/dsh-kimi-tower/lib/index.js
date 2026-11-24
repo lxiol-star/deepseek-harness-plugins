@@ -1025,16 +1025,16 @@ var require_parse = __commonJS({
         const analysis = analyzeRepeatedExtglob(body, opts);
         if ((token.type === "plus" || token.type === "star") && analysis.risky) {
           const safeOutput = analysis.safeOutput ? (token.output ? "" : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput) : void 0;
-          const open3 = tokens[token.tokensIndex];
-          open3.type = "text";
-          open3.value = literal;
-          open3.output = safeOutput || utils.escapeRegex(literal);
+          const open4 = tokens[token.tokensIndex];
+          open4.type = "text";
+          open4.value = literal;
+          open4.output = safeOutput || utils.escapeRegex(literal);
           for (let i = token.tokensIndex + 1; i < tokens.length; i++) {
             tokens[i].value = "";
             tokens[i].output = "";
             delete tokens[i].suffix;
           }
-          state.output = token.output + open3.output;
+          state.output = token.output + open4.output;
           state.backtrack = true;
           push({ type: "paren", extglob: true, value, output: "" });
           decrement("parens");
@@ -1254,15 +1254,15 @@ var require_parse = __commonJS({
         }
         if (value === "{" && opts.nobrace !== true) {
           increment("braces");
-          const open3 = {
+          const open4 = {
             type: "brace",
             value,
             output: "(",
             outputIndex: state.output.length,
             tokensIndex: state.tokens.length
           };
-          braces.push(open3);
-          push(open3);
+          braces.push(open4);
+          push(open4);
           continue;
         }
         if (value === "}") {
@@ -2495,6 +2495,14 @@ async function assertLocalBaseBranch(repoRoot, base) {
     );
   }
 }
+function inboxItemUnread(state, callerName, item) {
+  const entry = callerName === TOWER_NAME ? void 0 : state.roster.agents.find((agent) => agent.name === callerName);
+  const ackIds = callerName === TOWER_NAME ? state.inboxAckIds : entry?.inboxAckIds;
+  if (ackIds?.includes(item.messageId) === true) return false;
+  if (callerName === TOWER_NAME) return true;
+  const since = entry?.lastInboxReadAt ?? entry?.spawnedAt;
+  return since === void 0 || item.sentAt > since;
+}
 var TowerStore = class {
   constructor(repoRoot, options = {}) {
     this.repoRoot = repoRoot;
@@ -2828,9 +2836,9 @@ var TowerStore = class {
   async reanchorLocked(state, base) {
     await assertLocalBaseBranch(this.repoRoot, base);
     const baseTip = await branchTip(this.repoRoot, base);
-    const open3 = state.missions.filter(isOpenMission);
+    const open4 = state.missions.filter(isOpenMission);
     const missions = [];
-    for (const mission of open3) {
+    for (const mission of open4) {
       if (!await branchExists(this.repoRoot, mission.branch)) {
         missions.push({ id: mission.id, branch: mission.branch, relation: "no-branch" });
         continue;
@@ -2854,7 +2862,7 @@ var TowerStore = class {
     await this.appendLog(TOWER_NAME, "rebase", {
       from: digest.from,
       to: base,
-      open_missions: open3.length > 0 ? open3.length : void 0,
+      open_missions: open4.length > 0 ? open4.length : void 0,
       relations: missions.length > 0 ? missions.map((mission) => `${mission.id}:${mission.relation}`).join(",") : void 0
     });
     return { digest, state: next };
@@ -3504,10 +3512,10 @@ var TowerStore = class {
     return mission;
   }
   async assertCompletable(state, mission) {
-    const open3 = mission.tasks.filter((t) => !t.done && t.dropped !== true);
-    if (open3.length > 0) {
+    const open4 = mission.tasks.filter((t) => !t.done && t.dropped !== true);
+    if (open4.length > 0) {
       throw new TowerProtocolError(
-        `mission ${mission.id} cannot transition to completed \u2014 ${String(open3.length)} open task(s): ${open3.map((t) => `"${t.text}"`).join(", ")}; tick finished tasks with task_done, or drop legitimately descoped ones with task_drop (a reason is mandatory and lands in the mission notes and the activity log)`
+        `mission ${mission.id} cannot transition to completed \u2014 ${String(open4.length)} open task(s): ${open4.map((t) => `"${t.text}"`).join(", ")}; tick finished tasks with task_done, or drop legitimately descoped ones with task_drop (a reason is mandatory and lands in the mission notes and the activity log)`
       );
     }
     if (mission.blockers.length > 0) {
@@ -3542,7 +3550,7 @@ var TowerStore = class {
   async assertInboxRead(state, callerName, mission, inboxItems) {
     const items = inboxItems ?? await this.listInboxItems();
     const unread = items.filter(
-      (item) => this.inboxItemVisibleTo(callerName, item) && this.isInboxItemUnread(state, callerName, item)
+      (item) => this.inboxItemVisibleTo(callerName, item) && inboxItemUnread(state, callerName, item)
     );
     if (unread.length === 0) return;
     throw new TowerProtocolError(
@@ -3884,16 +3892,8 @@ ${report}` : report;
   }
   async listUnreadInboxItems(state, callerName) {
     return (await this.listInboxItems()).filter(
-      (item) => this.inboxItemVisibleTo(callerName, item) && this.isInboxItemUnread(state, callerName, item)
+      (item) => this.inboxItemVisibleTo(callerName, item) && inboxItemUnread(state, callerName, item)
     );
-  }
-  isInboxItemUnread(state, callerName, item) {
-    const entry = callerName === TOWER_NAME ? void 0 : this.findAgent(state, callerName);
-    const ackIds = callerName === TOWER_NAME ? state.inboxAckIds : entry?.inboxAckIds;
-    if (ackIds?.includes(item.messageId) === true) return false;
-    if (callerName === TOWER_NAME) return true;
-    const since = entry?.lastInboxReadAt ?? entry?.spawnedAt;
-    return since === void 0 || item.sentAt > since;
   }
   async listInboxItems() {
     return (await this.listInboxSnapshot()).items;
@@ -6970,9 +6970,13 @@ function renderOmission(omitted, noun) {
   return ["", `${String(omitted)} earlier ${noun} omitted; call tower_status with a larger limit to inspect them.`];
 }
 
+// src/canvas-snapshot.ts
+import { open as open3, readdir as readdir2 } from "node:fs/promises";
+import { join as join8 } from "node:path";
+
 // src/status.ts
 import { join as join7 } from "node:path";
-var INACTIVE = { active: false, running: 0, missions: [] };
+var INACTIVE_SNAPSHOT = { active: false, running: 0, missions: [] };
 function cardState(mission, live) {
   switch (mission.status) {
     case "planned":
@@ -6989,54 +6993,440 @@ function cardState(mission, live) {
       return "done";
   }
 }
-async function towerSnapshot(ctx, sessionId) {
+function isAgentLive(ctx, entry) {
+  if (entry.diedAt !== void 0) return false;
+  return ctx.agents.get(entry.agentId)?.status === "running";
+}
+function towerCard(mission, roster, ctx, repoRoot, now) {
+  const owner = mission.owner === void 0 ? void 0 : roster.get(mission.owner);
+  const live = owner !== void 0 && isAgentLive(ctx, owner);
+  const selection = owner === void 0 ? void 0 : ctx.agents.get(owner.agentId)?.model?.current();
+  const startedAt = owner?.spawnedAt;
+  const started = startedAt === void 0 ? void 0 : Date.parse(startedAt);
+  const elapsedMs = started === void 0 || Number.isNaN(started) ? 0 : Math.max(0, now - started);
+  return {
+    id: mission.id,
+    title: mission.title,
+    kind: mission.kind,
+    status: mission.status,
+    state: cardState(mission, live),
+    owner: mission.owner,
+    agentId: owner?.agentId,
+    model: selection?.model,
+    effort: selection?.reasoningEffort,
+    branch: mission.branch,
+    worktreePath: join7(repoRoot, ".tower", "worktrees", mission.worktree),
+    tasksDone: mission.tasks.filter((task) => task.done || task.dropped === true).length,
+    tasksTotal: mission.tasks.length,
+    startedAt,
+    elapsedMs,
+    live
+  };
+}
+async function snapshotSource(ctx, sessionId) {
   const agent = ctx.agents.get(sessionId);
-  if (agent === void 0 || !isMainAgent(agent)) return INACTIVE;
+  if (agent === void 0 || !isMainAgent(agent)) return void 0;
+  let store;
   let state;
-  let repoRoot;
   try {
-    const store = await storeFor(agent);
-    repoRoot = store.repoRoot;
+    store = await storeFor(agent);
     state = await store.load();
   } catch {
-    return INACTIVE;
+    return void 0;
   }
-  if (state.sessionId !== sessionId) return INACTIVE;
-  const roster = new Map(state.roster.agents.map((entry) => [entry.name, entry]));
+  if (state.sessionId !== sessionId) return void 0;
+  return { store, repoRoot: store.repoRoot, state };
+}
+function rosterIndex(state) {
+  return new Map(state.roster.agents.map((entry) => [entry.name, entry]));
+}
+async function towerSnapshot(ctx, sessionId) {
+  const source = await snapshotSource(ctx, sessionId);
+  if (source === void 0) return INACTIVE_SNAPSHOT;
+  const roster = rosterIndex(source.state);
   const now = Date.now();
-  const missions = state.missions.filter((mission) => mission.status !== "merged" && mission.status !== "abandoned").map((mission) => {
-    const owner = mission.owner === void 0 ? void 0 : roster.get(mission.owner);
-    const worker = owner === void 0 ? void 0 : ctx.agents.get(owner.agentId);
-    const live = owner !== void 0 && owner.diedAt === void 0 && worker !== void 0 && worker.status === "running";
-    const selection = worker?.model?.current?.();
-    const startedAt = owner?.spawnedAt;
-    const started = startedAt === void 0 ? void 0 : Date.parse(startedAt);
-    const elapsedMs = started === void 0 || Number.isNaN(started) ? 0 : Math.max(0, now - started);
-    return {
-      id: mission.id,
-      title: mission.title,
-      kind: mission.kind,
-      status: mission.status,
-      state: cardState(mission, live),
-      owner: mission.owner,
-      agentId: owner?.agentId,
-      model: selection?.model,
-      effort: selection?.reasoningEffort,
-      branch: mission.branch,
-      worktreePath: join7(repoRoot, ".tower", "worktrees", mission.worktree),
-      tasksDone: mission.tasks.filter((task) => task.done || task.dropped === true).length,
-      tasksTotal: mission.tasks.length,
-      startedAt,
-      elapsedMs,
-      live
-    };
+  const missions = source.state.missions.filter((mission) => mission.status !== "merged" && mission.status !== "abandoned").map((mission) => towerCard(mission, roster, ctx, source.repoRoot, now));
+  return {
+    active: true,
+    sessionId,
+    base: source.state.base,
+    running: missions.filter((mission) => mission.state === "running").length,
+    missions
+  };
+}
+
+// src/canvas-snapshot.ts
+var CANVAS_LIMITS = {
+  /** An inbox subject. */
+  subject: 160,
+  /** Titles, names, ids, verdicts, and other short labels. */
+  label: 160,
+  /** A mission's context. */
+  context: 2e3,
+  /** One task, note, blocker, scope, artifact, or death-reason line. */
+  line: 500,
+  /** The first paragraph of a finding summary. */
+  summary: 300,
+  /** One activity log line. */
+  activityLine: 1e3,
+  /** Activity log lines, counted from the end of the file, searched for recorded instants. */
+  logTail: 1e3,
+  tasks: 100,
+  scope: 40,
+  notes: 20,
+  blockers: 20,
+  messages: 200,
+  activity: 50
+};
+var CANVAS_INACTIVE = {
+  active: false,
+  running: 0,
+  missions: [],
+  agents: [],
+  messages: [],
+  findings: [],
+  activity: []
+};
+var FENCE2 = "---";
+var FINDING_HEADING = "# Finding: ";
+var FINDING_DATE = /^\d{8}$/;
+var MISSION_ID = /^M\d+/;
+var INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+var HEAD_BYTES = 16 * 1024;
+var LOG_TAIL_CHUNK_BYTES = 64 * 1024;
+function oneLine(text, max) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 55296 && last <= 56319 ? cut.slice(0, -1) : cut;
+}
+function optionalLine(value, max) {
+  const flat = value === void 0 ? "" : oneLine(value, max);
+  return flat.length === 0 ? void 0 : flat;
+}
+function field(key, value) {
+  return value === void 0 ? {} : { [key]: value };
+}
+function textList(values, limit, max, keepLast = false) {
+  if (!Array.isArray(values)) return [];
+  const flat = values.filter((value) => typeof value === "string").map((value) => oneLine(value, limit));
+  if (max === void 0) return flat;
+  return keepLast ? flat.slice(-max) : flat.slice(0, max);
+}
+function messageReadState(state, message) {
+  let recipients;
+  if (message.to === TOWER_NAME) {
+    recipients = [TOWER_NAME];
+  } else if (message.to === BROADCAST_NAME) {
+    recipients = [
+      TOWER_NAME,
+      ...state.roster.agents.filter((entry) => entry.spawnedAt <= message.sentAt && entry.diedAt === void 0).map((entry) => entry.name)
+    ];
+  } else if (state.roster.agents.some((entry) => entry.name === message.to)) {
+    recipients = [message.to];
+  } else {
+    recipients = [];
+  }
+  const unreadBy = recipients.filter(
+    (name2) => name2 !== message.from && inboxItemUnread(state, name2, { messageId: message.id, sentAt: message.sentAt })
+  );
+  return {
+    read: unreadBy.length === 0,
+    ...field("unreadBy", unreadBy.length === 0 ? void 0 : unreadBy)
+  };
+}
+async function readInboxHeads(store) {
+  let files;
+  try {
+    files = await readdir2(store.abs(INBOX_DIR));
+  } catch {
+    return [];
+  }
+  const heads = await mapWithConcurrency(
+    files.filter((file) => file.endsWith(".md")),
+    TOWER_FILE_IO_CONCURRENCY,
+    async (file) => {
+      const rel = join8(INBOX_DIR, file);
+      let text;
+      try {
+        text = await readFrontmatterPrefix(store.abs(rel));
+      } catch {
+        return void 0;
+      }
+      const { fields } = parseFrontmatter(text);
+      if (fields["type"] !== "inbox") return void 0;
+      const action = fields["action"];
+      const scope = fields["scope"];
+      return {
+        file: rel,
+        id: fields["message_id"] ?? rel,
+        from: fields["from"] ?? "unknown",
+        to: fields["to"] ?? "",
+        subject: fields["subject"] ?? "",
+        sentAt: fields["sent_at"] ?? "",
+        ...field("action", action === void 0 || action.length === 0 ? void 0 : action),
+        ...field("scope", scope === void 0 || scope.length === 0 ? void 0 : scope)
+      };
+    }
+  );
+  const present = heads.filter((head) => head !== void 0);
+  present.sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.file.localeCompare(b.file));
+  return present;
+}
+function sectionLines(lines, heading) {
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start === -1) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("#") || line.trim() === FENCE2);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+function firstParagraph(section) {
+  const paragraph = [];
+  for (const line of section) {
+    if (line.trim().length === 0) {
+      if (paragraph.length > 0) break;
+      continue;
+    }
+    paragraph.push(line);
+  }
+  return paragraph.join("\n");
+}
+function parseFinding(text, file) {
+  const lines = text.split(/\r?\n/);
+  const heading = lines[0] ?? "";
+  if (!heading.startsWith(FINDING_HEADING)) return void 0;
+  const fence = lines.findIndex((line, index) => index > 0 && line.trim() === FENCE2);
+  const header = lines.slice(1, fence === -1 ? lines.length : fence);
+  const attribute = (label) => {
+    const prefix = `**${label}**: `;
+    const line = header.find((candidate) => candidate.startsWith(prefix));
+    return line === void 0 ? void 0 : line.slice(prefix.length);
+  };
+  const type = attribute("Type");
+  const severity = attribute("Severity");
+  if (type === void 0 || severity === void 0) return void 0;
+  const mission = attribute("Mission");
+  const missionId = mission === void 0 || mission.trim() === "(none)" ? void 0 : MISSION_ID.exec(mission)?.[0];
+  const stamp = attribute("Date") ?? "";
+  const location = oneLine(sectionLines(lines, "## Location").join("\n"), CANVAS_LIMITS.line);
+  return {
+    file,
+    title: heading.slice(FINDING_HEADING.length),
+    type,
+    severity,
+    ...field("agent", optionalLine(attribute("Agent"), CANVAS_LIMITS.label)),
+    ...field("missionId", missionId),
+    ...field("location", location === "" || location === "(not specified)" ? void 0 : location),
+    ...field("summary", optionalLine(firstParagraph(sectionLines(lines, "## Summary")), CANVAS_LIMITS.summary)),
+    ...FINDING_DATE.test(stamp) ? { date: `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}` } : {}
+  };
+}
+async function readHead(path) {
+  let handle;
+  try {
+    handle = await open3(path, "r");
+  } catch {
+    return "";
+  }
+  try {
+    const buffer = Buffer.allocUnsafe(HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+    return new TextDecoder().decode(buffer.subarray(0, bytesRead));
+  } catch {
+    return "";
+  } finally {
+    await handle.close();
+  }
+}
+async function readFindings(store) {
+  let files;
+  try {
+    files = await readdir2(store.abs(FINDINGS_DIR));
+  } catch {
+    return [];
+  }
+  const heads = await mapWithConcurrency(
+    files.filter((file) => file.endsWith(".md")),
+    TOWER_FILE_IO_CONCURRENCY,
+    async (file) => {
+      const rel = join8(FINDINGS_DIR, file);
+      return parseFinding(await readHead(store.abs(rel)), rel);
+    }
+  );
+  return heads.filter((head) => head !== void 0);
+}
+async function readLogTail(path) {
+  let handle;
+  try {
+    handle = await open3(path, "r");
+  } catch {
+    return [];
+  }
+  try {
+    const { size } = await handle.stat();
+    const parts = [];
+    let lines = [];
+    let end = size;
+    while (end > 0) {
+      const start = Math.max(0, end - LOG_TAIL_CHUNK_BYTES);
+      const buffer = Buffer.allocUnsafe(end - start);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+      if (bytesRead === 0) break;
+      parts.unshift(buffer.subarray(0, bytesRead));
+      end = start;
+      lines = Buffer.concat(parts).toString("utf8").split("\n").filter((line) => line.trim().length > 0);
+      if (lines.length > CANVAS_LIMITS.logTail) break;
+    }
+    return lines.slice(-CANVAS_LIMITS.logTail);
+  } catch {
+    return [];
+  } finally {
+    await handle.close();
+  }
+}
+function logValue(line, key) {
+  const prefix = `${key}=`;
+  const token = line.find((part) => part.startsWith(prefix));
+  return token === void 0 ? void 0 : token.slice(prefix.length);
+}
+function parseLogTail(lines) {
+  const filedAt = /* @__PURE__ */ new Map();
+  const reviews = [];
+  for (const line of lines) {
+    const tokens = line.split(" ");
+    const at = tokens[0];
+    const actor = tokens[1];
+    const action = tokens[2];
+    if (at === void 0 || actor === void 0 || action === void 0) continue;
+    if (!INSTANT.test(at) || Number.isNaN(Date.parse(at))) continue;
+    if (action === "finding.file") {
+      const ref = logValue(tokens, "ref");
+      if (ref !== void 0 && !filedAt.has(ref)) filedAt.set(ref, at);
+    } else if (action === "review.write") {
+      const reviewed = logValue(tokens, "reviewed");
+      const round = logValue(tokens, "round");
+      if (reviewed !== void 0 && round !== void 0) reviews.push({ at, actor, reviewed, round });
+    }
+  }
+  return { lines, filedAt, reviews };
+}
+function reviewRecordedAt(review, log) {
+  const reviewed = review.reviewedCommit.slice(0, 7);
+  const round = String(review.round);
+  const matches = (entry) => entry.reviewed === reviewed && entry.round === round;
+  const recorded = log.reviews.find((entry) => matches(entry) && entry.actor === review.reviewer) ?? log.reviews.find(matches);
+  if (recorded !== void 0) return recorded.at;
+  const date = review.date.trim();
+  return date.length === 0 ? void 0 : date;
+}
+function canvasReview(review, log) {
+  return {
+    round: review.round,
+    reviewer: review.reviewer,
+    status: review.status,
+    merge: review.merge,
+    ...field("at", reviewRecordedAt(review, log))
+  };
+}
+function canvasMission(mission, card, review) {
+  const tasks = Array.isArray(mission.tasks) ? mission.tasks.slice(0, CANVAS_LIMITS.tasks).map((task) => ({
+    text: oneLine(task?.text ?? "", CANVAS_LIMITS.line),
+    done: task?.done === true,
+    ...field("dropped", task?.dropped === void 0 ? void 0 : task.dropped === true)
+  })) : [];
+  return {
+    ...card,
+    deps: textList(mission.deps, CANVAS_LIMITS.label),
+    scope: textList(mission.scope, CANVAS_LIMITS.line, CANVAS_LIMITS.scope),
+    tasks,
+    blockers: textList(mission.blockers, CANVAS_LIMITS.line, CANVAS_LIMITS.blockers, true),
+    notes: textList(mission.notes, CANVAS_LIMITS.line, CANVAS_LIMITS.notes, true),
+    ...field("context", optionalLine(mission.context, CANVAS_LIMITS.context)),
+    keyArtifacts: textList(mission.keyArtifacts, CANVAS_LIMITS.line),
+    ...field("review", review)
+  };
+}
+function canvasAgent(ctx, entry) {
+  const selection = ctx.agents.get(entry.agentId)?.model?.current();
+  return {
+    name: oneLine(entry.name, CANVAS_LIMITS.label),
+    kind: entry.kind,
+    agentId: oneLine(entry.agentId, CANVAS_LIMITS.label),
+    ...field("missionId", optionalLine(entry.missionId, CANVAS_LIMITS.label)),
+    ...field("reviewMissionId", optionalLine(entry.reviewMissionId, CANVAS_LIMITS.label)),
+    ...field("reviewTarget", optionalLine(entry.reviewTarget, CANVAS_LIMITS.label)),
+    spawnedAt: entry.spawnedAt,
+    live: isAgentLive(ctx, entry),
+    ...field("diedAt", entry.diedAt),
+    ...field("deathStatus", optionalLine(entry.deathStatus, CANVAS_LIMITS.label)),
+    ...field("deathReason", optionalLine(entry.deathReason, CANVAS_LIMITS.line)),
+    ...field("model", selection?.model),
+    ...field("effort", selection?.reasoningEffort)
+  };
+}
+async function canvasSnapshot(ctx, sessionId) {
+  const source = await snapshotSource(ctx, sessionId);
+  if (source === void 0) return CANVAS_INACTIVE;
+  const { store, state, repoRoot } = source;
+  const roster = rosterIndex(state);
+  const now = Date.now();
+  const [log, inbox, findings, reviews] = await Promise.all([
+    readLogTail(store.abs(ACTIVITY_LOG)).then(parseLogTail),
+    readInboxHeads(store),
+    readFindings(store),
+    mapWithConcurrency(
+      state.missions,
+      TOWER_FILE_IO_CONCURRENCY,
+      (mission) => store.reviewsFor(mission.branch)
+    )
+  ]);
+  const missions = state.missions.map((mission, index) => {
+    const latest = reviews[index]?.at(-1);
+    return canvasMission(
+      mission,
+      towerCard(mission, roster, ctx, repoRoot, now),
+      latest === void 0 ? void 0 : canvasReview(latest, log)
+    );
   });
+  const messages = inbox.slice(-CANVAS_LIMITS.messages).map(
+    (head) => ({
+      id: head.id,
+      from: oneLine(head.from, CANVAS_LIMITS.label),
+      to: oneLine(head.to, CANVAS_LIMITS.label),
+      subject: oneLine(head.subject, CANVAS_LIMITS.subject),
+      sentAt: head.sentAt,
+      ...field("action", optionalLine(head.action, CANVAS_LIMITS.label)),
+      ...field("scope", optionalLine(head.scope, CANVAS_LIMITS.label)),
+      ...messageReadState(state, head)
+    })
+  );
+  const canvasFindings = findings.map(
+    (head) => ({
+      title: oneLine(head.title, CANVAS_LIMITS.label),
+      type: oneLine(head.type, CANVAS_LIMITS.label),
+      severity: oneLine(head.severity, CANVAS_LIMITS.label),
+      ...field("location", head.location),
+      ...field("summary", head.summary),
+      file: head.file,
+      ...field("agent", head.agent),
+      ...field("missionId", head.missionId),
+      ...field("createdAt", log.filedAt.get(head.file) ?? head.date)
+    })
+  );
+  canvasFindings.sort(
+    (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.file.localeCompare(b.file)
+  );
   return {
     active: true,
     sessionId,
     base: state.base,
     running: missions.filter((mission) => mission.state === "running").length,
-    missions
+    missions,
+    agents: state.roster.agents.map((entry) => canvasAgent(ctx, entry)),
+    messages,
+    findings: canvasFindings,
+    activity: log.lines.slice(-CANVAS_LIMITS.activity).map((line) => oneLine(line, CANVAS_LIMITS.activityLine))
   };
 }
 
@@ -7202,33 +7592,38 @@ async function findOwnerSession(ctx, repoRoot) {
   }
   return void 0;
 }
+function statusRouteDefinition(ctx) {
+  return {
+    kind: "exact",
+    path: "/tower/state",
+    auth: "required",
+    handler: async (request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const sessionId = url.searchParams.get("sessionId") ?? "";
+      const detail = url.searchParams.get("detail") === "1";
+      try {
+        const snapshot = detail ? await canvasSnapshot(ctx, sessionId) : await towerSnapshot(ctx, sessionId);
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store"
+        });
+        response.end(JSON.stringify(snapshot));
+      } catch (error) {
+        ctx.logger.warn("dsh-kimi-tower: status route failed", error);
+        response.writeHead(500, {
+          "content-type": "application/json; charset=utf-8"
+        });
+        response.end(JSON.stringify(detail ? CANVAS_INACTIVE : INACTIVE_SNAPSHOT));
+      }
+    }
+  };
+}
 function registerStatusRoute(ctx) {
   ctx.inject(["webServer"], (scoped) => {
     const server = scoped.webServer;
     if (server === void 0) return;
     scoped.effect(
-      () => server.register({
-        kind: "exact",
-        path: "/tower/state",
-        auth: "required",
-        handler: async (request, response) => {
-          const url = new URL(request.url ?? "/", "http://127.0.0.1");
-          try {
-            const snapshot = await towerSnapshot(ctx, url.searchParams.get("sessionId") ?? "");
-            response.writeHead(200, {
-              "content-type": "application/json; charset=utf-8",
-              "cache-control": "no-store"
-            });
-            response.end(JSON.stringify(snapshot));
-          } catch (error) {
-            ctx.logger.warn("dsh-kimi-tower: status route failed", error);
-            response.writeHead(500, {
-              "content-type": "application/json; charset=utf-8"
-            });
-            response.end(JSON.stringify({ active: false, running: 0, missions: [] }));
-          }
-        }
-      }),
+      () => server.register(statusRouteDefinition(ctx)),
       "dsh-kimi-tower:status-route"
     );
   });
@@ -7236,6 +7631,7 @@ function registerStatusRoute(ctx) {
 export {
   ACTIVITY_LOG,
   BROADCAST_NAME,
+  CANVAS_LIMITS,
   COMMS_DIR,
   FINDINGS_DIR,
   GitError,
@@ -7258,6 +7654,7 @@ export {
   assertLocalBaseBranch,
   branchExists,
   branchTip,
+  canvasSnapshot,
   checkoutNewLocalBranch,
   commitAllowEmpty,
   commitPaths,
@@ -7271,6 +7668,7 @@ export {
   hasAnyCommit,
   hasNonAsciiCharacters,
   inboxFileName,
+  inboxItemUnread,
   initRepository,
   inject,
   isAncestor,
@@ -7293,6 +7691,7 @@ export {
   selectMissionReview,
   slugify,
   snapshotBaseWip,
+  statusRouteDefinition,
   targetSlug,
   towerSnapshot,
   tryGit,

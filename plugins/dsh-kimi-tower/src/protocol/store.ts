@@ -360,6 +360,26 @@ export async function assertLocalBaseBranch(repoRoot: string, base: string): Pro
   }
 }
 
+/**
+ * Whether `callerName` still counts an inbox item as unread. Pure: it reads
+ * only `state` and never records the read — `ackInbox` owns that — so the
+ * inbox tools and the read-only canvas snapshot share this one rule. An
+ * acknowledged item is read; a worker also treats everything sent at or before
+ * its last inbox read as read.
+ */
+export function inboxItemUnread(
+  state: TowerState,
+  callerName: string,
+  item: { readonly messageId: string; readonly sentAt: string },
+): boolean {
+  const entry = callerName === TOWER_NAME ? undefined : state.roster.agents.find((agent) => agent.name === callerName);
+  const ackIds = callerName === TOWER_NAME ? state.inboxAckIds : entry?.inboxAckIds;
+  if (ackIds?.includes(item.messageId) === true) return false;
+  if (callerName === TOWER_NAME) return true;
+  const since = entry?.lastInboxReadAt ?? entry?.spawnedAt;
+  return since === undefined || item.sentAt > since;
+}
+
 export class TowerStore {
   private readonly stateLockTimeoutMs: number;
   private readonly stateLockPollMs: number;
@@ -1587,7 +1607,7 @@ export class TowerStore {
     const items = inboxItems ?? (await this.listInboxItems());
     const unread = items.filter(
       (item) =>
-        this.inboxItemVisibleTo(callerName, item) && this.isInboxItemUnread(state, callerName, item),
+        this.inboxItemVisibleTo(callerName, item) && inboxItemUnread(state, callerName, item),
     );
     if (unread.length === 0) return;
     throw new TowerProtocolError(
@@ -2007,21 +2027,8 @@ export class TowerStore {
   ): Promise<TowerInboxItem[]> {
     return (await this.listInboxItems()).filter(
       (item) =>
-        this.inboxItemVisibleTo(callerName, item) && this.isInboxItemUnread(state, callerName, item),
+        this.inboxItemVisibleTo(callerName, item) && inboxItemUnread(state, callerName, item),
     );
-  }
-
-  private isInboxItemUnread(
-    state: TowerState,
-    callerName: string,
-    item: TowerInboxItem,
-  ): boolean {
-    const entry = callerName === TOWER_NAME ? undefined : this.findAgent(state, callerName);
-    const ackIds = callerName === TOWER_NAME ? state.inboxAckIds : entry?.inboxAckIds;
-    if (ackIds?.includes(item.messageId) === true) return false;
-    if (callerName === TOWER_NAME) return true;
-    const since = entry?.lastInboxReadAt ?? entry?.spawnedAt;
-    return since === undefined || item.sentAt > since;
   }
 
   private async listInboxItems(): Promise<TowerInboxItem[]> {

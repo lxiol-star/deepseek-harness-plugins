@@ -16,7 +16,8 @@ import { TowerRuntime } from './runtime'
 import { registerTowerTools } from './tools'
 import { TOWER_MODE_FULL_REMINDER } from './prompts'
 import { isMainAgent, storeFor } from './helpers'
-import { towerSnapshot } from './status'
+import { canvasSnapshot, CANVAS_INACTIVE } from './canvas-snapshot'
+import { INACTIVE_SNAPSHOT, towerSnapshot } from './status'
 import type { TowerState } from './protocol/index'
 
 export const name = 'kimi-tower'
@@ -228,48 +229,73 @@ async function findOwnerSession(ctx: Context, repoRoot: string): Promise<string 
 export { TowerRuntime, TowerProtocolError } from './runtime'
 export * from './protocol/index'
 
+/** The response object the Host hands a route handler. */
+export interface StatusRouteResponse {
+  writeHead(status: number, headers: Record<string, string>): void
+  end(body?: string): void
+}
+
+/** The `/tower/state` route as it is handed to the Host's web server. */
+export type StatusRouteDefinition = {
+  readonly kind: 'exact'
+  readonly path: '/tower/state'
+  readonly auth: 'required'
+  handler(request: { url?: string }, response: StatusRouteResponse): Promise<void>
+}
+
 /**
- * Serve the dock snapshot on the loopback Host so the browser half can poll it.
+ * Serve the tower snapshots on the loopback Host so the browser half can poll
+ * them.
  *
- * The route is anonymous and read-only. It lives on the same Host HTTP server
+ * The route requires the Host's session auth and is strictly read-only.
+ * Without `detail=1` it answers the dock snapshot, which the Client polls once
+ * a second; with `detail=1` it answers the canvas snapshot, a superset that
+ * also carries every mission's detail, the agent roster, message metadata,
+ * findings, and the activity log tail. It lives on the same Host HTTP server
  * that already serves the page; `webServer` is optional so headless profiles
  * without that service still activate the plugin.
  */
+export function statusRouteDefinition(ctx: Context): StatusRouteDefinition {
+  return {
+    kind: 'exact',
+    path: '/tower/state',
+    auth: 'required',
+    handler: async (request: { url?: string }, response: StatusRouteResponse) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      const sessionId = url.searchParams.get('sessionId') ?? ''
+      // Only the literal `detail=1` asks for the canvas; anything else keeps the dock shape.
+      const detail = url.searchParams.get('detail') === '1'
+      try {
+        const snapshot = detail
+          ? await canvasSnapshot(ctx, sessionId)
+          : await towerSnapshot(ctx, sessionId)
+        response.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        })
+        response.end(JSON.stringify(snapshot))
+      } catch (error) {
+        ctx.logger.warn('dsh-kimi-tower: status route failed', error)
+        response.writeHead(500, {
+          'content-type': 'application/json; charset=utf-8',
+        })
+        response.end(JSON.stringify(detail ? CANVAS_INACTIVE : INACTIVE_SNAPSHOT))
+      }
+    },
+  }
+}
+
 function registerStatusRoute(ctx: Context): void {
   ctx.inject(['webServer'], (scoped: Context) => {
     const server = scoped.webServer
     if (server === undefined) return
     scoped.effect(
-      () =>
-        server.register({
-          kind: 'exact',
-          path: '/tower/state',
-          auth: 'required',
-          handler: async (request: { url?: string }, response: {
-            writeHead(status: number, headers: Record<string, string>): void
-            end(body?: string): void
-          }) => {
-            const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-            try {
-              const snapshot = await towerSnapshot(ctx, url.searchParams.get('sessionId') ?? '')
-              response.writeHead(200, {
-                'content-type': 'application/json; charset=utf-8',
-                'cache-control': 'no-store',
-              })
-              response.end(JSON.stringify(snapshot))
-            } catch (error) {
-              ctx.logger.warn('dsh-kimi-tower: status route failed', error)
-              response.writeHead(500, {
-                'content-type': 'application/json; charset=utf-8',
-              })
-              response.end(JSON.stringify({ active: false, running: 0, missions: [] }))
-            }
-          },
-        }),
+      () => server.register(statusRouteDefinition(ctx)),
       'dsh-kimi-tower:status-route',
     )
   })
 }
 
-// Host-side snapshot builder, exported for tests and diagnostics.
+// Host-side snapshot builders and their limits, exported for tests and diagnostics.
 export { towerSnapshot } from './status'
+export { CANVAS_LIMITS, canvasSnapshot } from './canvas-snapshot'

@@ -4,13 +4,16 @@
  * The Host serves this over a small loopback route; the Client polls it once a
  * second while the session is open. Nothing here mutates the store, and the
  * snapshot contains only names, states, progress counts, and local paths.
+ *
+ * The canvas view (`canvas-snapshot.ts`) builds on the same session lookup and
+ * card projection, so its mission entries are a strict superset of these.
  */
 
 import { join } from 'node:path'
 
 import type { Agent } from './dsh'
 import { isMainAgent, storeFor } from './helpers'
-import type { TowerMission, TowerRosterEntry, TowerState } from './protocol/index'
+import type { TowerMission, TowerRosterEntry, TowerState, TowerStore } from './protocol/index'
 
 export type TowerCardState = 'running' | 'waiting' | 'stale' | 'blocked' | 'paused' | 'done'
 
@@ -41,7 +44,23 @@ export interface TowerSnapshot {
   readonly missions: readonly TowerCard[]
 }
 
-const INACTIVE: TowerSnapshot = { active: false, running: 0, missions: [] }
+/** The dock snapshot of a session that owns no tower. */
+export const INACTIVE_SNAPSHOT: TowerSnapshot = { active: false, running: 0, missions: [] }
+
+/** The Host surface a snapshot reads: live agents by session id. */
+export interface SnapshotContext {
+  readonly agents: { get(id: string): Agent | undefined }
+}
+
+/** A tower state bound to one session, ready to be projected without writing. */
+export interface SnapshotSource {
+  readonly store: TowerStore
+  readonly repoRoot: string
+  readonly state: TowerState
+}
+
+/** Roster entries indexed by agent name. */
+export type RosterIndex = ReadonlyMap<string, TowerRosterEntry>
 
 /** Map a mission plus its worker's liveness onto the card language. */
 export function cardState(mission: TowerMission, live: boolean): TowerCardState {
@@ -55,58 +74,90 @@ export function cardState(mission: TowerMission, live: boolean): TowerCardState 
   }
 }
 
-/** Build the dock snapshot from one live main agent and its repository state. */
-export async function towerSnapshot(ctx: { agents: { get(id: string): Agent | undefined } }, sessionId: string): Promise<TowerSnapshot> {
-  const agent = ctx.agents.get(sessionId)
-  if (agent === undefined || !isMainAgent(agent)) return INACTIVE
+/** Whether a roster entry still has a running agent behind it. */
+export function isAgentLive(ctx: SnapshotContext, entry: TowerRosterEntry): boolean {
+  if (entry.diedAt !== undefined) return false
+  return ctx.agents.get(entry.agentId)?.status === 'running'
+}
 
+/** Project one mission onto the card shared by the dock and the canvas. */
+export function towerCard(
+  mission: TowerMission,
+  roster: RosterIndex,
+  ctx: SnapshotContext,
+  repoRoot: string,
+  now: number,
+): TowerCard {
+  const owner = mission.owner === undefined ? undefined : roster.get(mission.owner)
+  const live = owner !== undefined && isAgentLive(ctx, owner)
+  const selection = owner === undefined ? undefined : ctx.agents.get(owner.agentId)?.model?.current()
+  const startedAt = owner?.spawnedAt
+  const started = startedAt === undefined ? undefined : Date.parse(startedAt)
+  const elapsedMs = started === undefined || Number.isNaN(started) ? 0 : Math.max(0, now - started)
+  return {
+    id: mission.id,
+    title: mission.title,
+    kind: mission.kind,
+    status: mission.status,
+    state: cardState(mission, live),
+    owner: mission.owner,
+    agentId: owner?.agentId,
+    model: selection?.model,
+    effort: selection?.reasoningEffort,
+    branch: mission.branch,
+    worktreePath: join(repoRoot, '.tower', 'worktrees', mission.worktree),
+    tasksDone: mission.tasks.filter((task) => task.done || task.dropped === true).length,
+    tasksTotal: mission.tasks.length,
+    startedAt,
+    elapsedMs,
+    live,
+  }
+}
+
+/**
+ * Load the tower state bound to `sessionId`, or undefined when the session has
+ * no live main agent, no readable tower, or the tower belongs to another
+ * session. Only reads: no lock is taken and no file is written.
+ */
+export async function snapshotSource(
+  ctx: SnapshotContext,
+  sessionId: string,
+): Promise<SnapshotSource | undefined> {
+  const agent = ctx.agents.get(sessionId)
+  if (agent === undefined || !isMainAgent(agent)) return undefined
+
+  let store: TowerStore
   let state: TowerState
-  let repoRoot: string
   try {
-    const store = await storeFor(agent)
-    repoRoot = store.repoRoot
+    store = await storeFor(agent)
     state = await store.load()
   } catch {
-    return INACTIVE
+    return undefined
   }
-  if (state.sessionId !== sessionId) return INACTIVE
+  if (state.sessionId !== sessionId) return undefined
 
-  const roster = new Map<string, TowerRosterEntry>(state.roster.agents.map((entry) => [entry.name, entry]))
+  return { store, repoRoot: store.repoRoot, state }
+}
+
+/** Index a roster by agent name. */
+export function rosterIndex(state: TowerState): RosterIndex {
+  return new Map(state.roster.agents.map((entry) => [entry.name, entry]))
+}
+
+/** Build the dock snapshot from one live main agent and its repository state. */
+export async function towerSnapshot(ctx: SnapshotContext, sessionId: string): Promise<TowerSnapshot> {
+  const source = await snapshotSource(ctx, sessionId)
+  if (source === undefined) return INACTIVE_SNAPSHOT
+
+  const roster = rosterIndex(source.state)
   const now = Date.now()
-  const missions = state.missions
+  const missions = source.state.missions
     .filter((mission) => mission.status !== 'merged' && mission.status !== 'abandoned')
-    .map((mission): TowerCard => {
-      const owner = mission.owner === undefined ? undefined : roster.get(mission.owner)
-      const worker = owner === undefined ? undefined : ctx.agents.get(owner.agentId)
-      const live = owner !== undefined && owner.diedAt === undefined
-        && worker !== undefined && worker.status === 'running'
-      const selection = worker?.model?.current?.()
-      const startedAt = owner?.spawnedAt
-      const started = startedAt === undefined ? undefined : Date.parse(startedAt)
-      const elapsedMs = started === undefined || Number.isNaN(started) ? 0 : Math.max(0, now - started)
-      return {
-        id: mission.id,
-        title: mission.title,
-        kind: mission.kind,
-        status: mission.status,
-        state: cardState(mission, live),
-        owner: mission.owner,
-        agentId: owner?.agentId,
-        model: selection?.model,
-        effort: selection?.reasoningEffort,
-        branch: mission.branch,
-        worktreePath: join(repoRoot, '.tower', 'worktrees', mission.worktree),
-        tasksDone: mission.tasks.filter((task) => task.done || task.dropped === true).length,
-        tasksTotal: mission.tasks.length,
-        startedAt,
-        elapsedMs,
-        live,
-      }
-    })
+    .map((mission) => towerCard(mission, roster, ctx, source.repoRoot, now))
   return {
     active: true,
     sessionId,
-    base: state.base,
+    base: source.state.base,
     running: missions.filter((mission) => mission.state === 'running').length,
     missions,
   }
