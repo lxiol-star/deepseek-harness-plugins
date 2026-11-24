@@ -30,7 +30,7 @@ curl -fsSL https://ntn.dev | bash
 从 GitHub 安装（DSH 插件管理器支持子目录）：
 
 ```text
-github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.2&path:/plugins/dsh-notion-session
+github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.3&path:/plugins/dsh-notion-session
 ```
 
 或在本仓库中把 `plugins/dsh-notion-session` 目录作为本地包安装（**Plugins → Add plugin**）。安装后刷新 Web GUI；纯客户端文件变更不会由 HMR 自动更新。
@@ -134,6 +134,20 @@ python3 scripts/notion_session.py state --slug dsh/<session-id> --state archived
   - 测试记录最终保持 **hidden**，不进入 active 列表。
 - 真实 GUI：输入区 Notion 入口、状态筛选、预览（`role=region` 有界正文）、部分成功提示与重试按钮均在浏览器中操作验证。
 - 未验证：桌面 App 内嵌窗口的视觉检查（认证隔离，无法复用浏览器 cookie）；客户端 bundle 与桌面版同源，但桌面窗口本身未做截图级验收。
+
+## 重复记录
+
+Notion 没有唯一约束，两个设备（或两次点击）可能同时 query-then-create，产生同 slug 的多条页面。插件现在的处理：
+
+- **正文完全一致**：自动收敛到一条 canonical，列表只显示一条；`show/state/push` 继续可用，并在结果里带 `duplicatePageIds`。
+- **正文不一致**：仍然报冲突，要求人工打开 Notion 确认，避免静默丢内容。
+- **修复**：面板出现“修复 …”按钮，或执行
+
+```bash
+python3 scripts/notion_session.py dedupe --slug "dsh/<session-id>" --apply
+```
+
+它会保留一条 canonical，把其余页面改名为 `dsh/<session-id>-duplicate-<id>` 并置为 `hidden`，不删除正文。插件内也提供 `notion_session` 的 `dedupe` 动作。
 
 ## 已知性能与限制
 

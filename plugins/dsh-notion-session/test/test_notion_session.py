@@ -395,6 +395,53 @@ class StateTests(unittest.TestCase):
         with self.assertRaisesRegex(ns.CliError, "conflict"):
             ns.find_by_slug(fake, "dsh/" + UUID)
 
+    def test_identical_duplicates_converge_on_one_canonical_page(self):
+        fake = FakeNotion()
+        body = ns.with_metadata("same body", metadata())
+        first = fake.add_page("dsh/" + UUID, body)
+        second = fake.add_page("dsh/" + UUID, body)
+        resolved = ns.resolve_slug(fake, "dsh/" + UUID)
+        self.assertEqual(resolved["canonical"]["id"], first["id"])
+        self.assertEqual([page["id"] for page in resolved["duplicates"]], [second["id"]])
+        command = args(["show", "--slug", "dsh/" + UUID])
+        result = ns.cmd_show(command, fake)
+        self.assertEqual(result["record"]["slug"], "dsh/" + UUID)
+        self.assertEqual(result["duplicatePageIds"], [second["id"]])
+
+    def test_list_collapses_identical_duplicate_rows_and_reports_group(self):
+        fake = FakeNotion()
+        body = ns.with_metadata("same body", metadata())
+        fake.add_page("dsh/" + UUID, body)
+        fake.add_page("dsh/" + UUID, body)
+        result = ns.cmd_list(args(["list", "--status", "all", "--limit", "100"]), fake)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(len(result["duplicates"]), 1)
+        self.assertEqual(result["duplicates"][0]["slug"], "dsh/" + UUID)
+        self.assertEqual(len(result["duplicates"][0]["pageIds"]), 2)
+
+    def test_dedupe_renames_and_hides_extra_pages_without_touching_canonical(self):
+        fake = FakeNotion()
+        body = ns.with_metadata("same body", metadata())
+        first = fake.add_page("dsh/" + UUID, body, title="Original")
+        second = fake.add_page("dsh/" + UUID, body, title="Original")
+        preview = ns.cmd_dedupe(args(["dedupe", "--slug", "dsh/" + UUID]), fake)
+        self.assertFalse(preview["applied"])
+        self.assertEqual(preview["duplicatePageIds"], [second["id"]])
+        applied_args = args(["dedupe", "--slug", "dsh/" + UUID, "--apply"])
+        result = ns.cmd_dedupe(applied_args, fake)
+        self.assertTrue(result["applied"])
+        self.assertEqual(len(result["renamed"]), 1)
+        renamed = result["renamed"][0]
+        self.assertTrue(renamed["slug"].startswith("dsh/" + UUID + "-duplicate-"))
+        self.assertEqual(renamed["state"], "hidden")
+        self.assertEqual(fake._page(first["id"])["_markdown"], body)
+        duplicate = fake._page(second["id"])
+        self.assertEqual(duplicate["properties"]["slug"]["rich_text"][0]["text"]["content"], renamed["slug"])
+        self.assertTrue(duplicate["properties"]["标题"]["title"][0]["text"]["content"].startswith("[duplicate] "))
+        self.assertEqual(ns.parse_metadata(duplicate["_markdown"])["state"], "hidden")
+        resolved = ns.resolve_slug(fake, "dsh/" + UUID)
+        self.assertEqual(resolved["duplicates"], [])
+
 
 class TruncationTests(unittest.TestCase):
     def test_utf8_truncation_preserves_head_tail_and_final_limit(self):

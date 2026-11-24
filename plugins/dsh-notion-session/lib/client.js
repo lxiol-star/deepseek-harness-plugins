@@ -66,7 +66,7 @@ window.__ModuleLoader__.load({
     function createStore(sessions) {
       let state = {
         open: false, status: 'active', query: '', records: [], loading: false, refreshing: false,
-        error: null, notice: null, busy: '', lastSync: null, syncError: null, syncWarnings: [],
+        error: null, notice: null, busy: '', lastSync: null, syncError: null, syncWarnings: [], duplicates: [],
         autoSync: true, syncIntervalSeconds: 300, stale: false,
         createdSessionId: null, createdWarning: null, noticeAction: null,
       }
@@ -91,7 +91,7 @@ window.__ModuleLoader__.load({
           }
           if (seq !== loadSeq) return
           set({ records: payload.records ?? [], loading: false, refreshing: false, error: null, lastSync: payload.lastSync,
-            syncError: payload.syncError, syncWarnings: payload.syncWarnings ?? [], autoSync: payload.autoSync, syncIntervalSeconds: payload.syncIntervalSeconds, stale: payload.stale })
+            syncError: payload.syncError, syncWarnings: payload.syncWarnings ?? [], duplicates: payload.duplicates ?? [], autoSync: payload.autoSync, syncIntervalSeconds: payload.syncIntervalSeconds, stale: payload.stale })
         } catch (error) {
           if (seq !== loadSeq) return
           set({ loading: false, refreshing: false, error: `${error.code ? `${error.code}: ` : ''}${error.message}` })
@@ -170,6 +170,17 @@ window.__ModuleLoader__.load({
               stateName === 'active' ? '记录已恢复为 active' : stateName === 'archived' ? '记录已归档；可从“已归档”查看' : '记录已隐藏；可从“已隐藏”查看或恢复')
             if (result) set({ noticeAction: stateName })
           } catch { /* no-op */ }
+        },
+        dedupe: async slug => {
+          if (state.busy) return
+          set({ busy: `dedupe:${slug}`, error: null, notice: null })
+          try {
+            const result = await request('dedupe', { slug })
+            set({ busy: '', notice: `已重命名 ${result.renamed?.length ?? 0} 条重复页并置为 hidden` })
+            void load(false, true)
+          } catch (error) {
+            set({ busy: '', error: `${error.code ? `${error.code}: ` : ''}${error.message}` })
+          }
         },
         show: slug => request('show', { slug }),
         resume: async (slug, navigation) => {
@@ -302,6 +313,14 @@ window.__ModuleLoader__.load({
             h('button', { className: 'ns-button', onClick: () => store.setStatus(state.noticeAction) }, '查看该状态') : null) : null,
           state.syncError && !state.error ? h('div', { className: 'ns-error', role: 'alert' }, `后台同步失败：${state.syncError.message}`) : null,
           state.syncWarnings.length ? h('div', { className: 'ns-error', role: 'alert' }, `${state.syncWarnings.length} 条记录因 secret 门控未显示；可在 Notion 脱敏后重新拉取。`) : null,
+          state.duplicates.length ? h('div', { className: 'ns-error', role: 'alert' },
+            `${state.duplicates.length} 组重复记录（同 slug 多条页面）。仅当正文完全一致时可安全合并。 `,
+            state.duplicates.map(group => h('button', {
+              key: group.slug,
+              className: 'ns-button',
+              disabled: !!state.busy,
+              onClick: () => store.dedupe(group.slug),
+            }, `修复 ${group.slug.length > 36 ? `${group.slug.slice(0, 36)}…` : group.slug}`))) : null,
           h('div', { className: 'ns-list' },
             state.loading && state.records.length === 0 ? h('div', { className: 'ns-empty' }, null, '正在从 Notion 拉取…', h('br'), '首次拉取需要逐页读取记录状态，约 20–30 秒；之后会先用缓存打开。') : null,
             !state.loading && !state.error && state.records.length === 0 ? h('div', { className: 'ns-empty' }, null, '这个筛选下暂无记录。', h('br'), '可切换到“全部”，或先保存当前会话。') : null,

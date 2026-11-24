@@ -1,6 +1,6 @@
 {
   "name": "dsh-notion-session",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Archive agent sessions to Notion, manage active/archived/hidden records, and continue an archive in a real new DSH session.",
   "type": "module",
   "main": "lib/index.js",

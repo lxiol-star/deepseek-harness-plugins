@@ -253,6 +253,19 @@ test('refresh cannot repopulate stale data after a concurrent state mutation', a
   assert.equal(service.cache[0].state, 'hidden')
 })
 
+test('dedupe delegates to the CLI and invalidates the cached list', async () => {
+  const { service } = serviceFixture()
+  service.cache = [{ slug: 'dsh/1' }]
+  service.cli = async args => {
+    assert.deepEqual(args, ['dedupe', '--slug', 'dsh/1', '--apply'])
+    return { applied: true, renamed: [{ slug: 'dsh/1-duplicate-abcd' }] }
+  }
+  const result = await service.dedupe('dsh/1')
+  assert.equal(result.applied, true)
+  assert.equal(service.cache, null)
+  await assert.rejects(service.dedupe('../bad'), error => error.code === 'INVALID_INPUT')
+})
+
 test('list serves a marked stale cache after a refresh failure', async () => {
   const { service } = serviceFixture()
   service.cli = async () => ({ records: [

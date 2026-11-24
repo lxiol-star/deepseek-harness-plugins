@@ -3,6 +3,7 @@
 
 import argparse
 import datetime as _datetime
+import hashlib
 import http.client
 import json
 import os
@@ -388,15 +389,57 @@ def _data_source_query(client, payload):
     return client.call("POST", path, payload)
 
 
+def find_pages_by_slug(client, slug):
+    """Return every page currently carrying this exact slug."""
+    results = []
+    cursor = None
+    while True:
+        payload = {
+            "filter": {"property": "slug", "rich_text": {"equals": slug}},
+            "page_size": 20,
+        }
+        if cursor:
+            payload["start_cursor"] = cursor
+        response = _data_source_query(client, payload)
+        results.extend(response.get("results") or [])
+        if not response.get("has_more"):
+            break
+        cursor = response.get("next_cursor")
+        if not cursor:
+            break
+    return results
+
+
+def resolve_slug(client, slug):
+    """Pick one canonical page; only tolerate duplicates with identical bodies.
+
+    Notion has no unique constraint, so two devices can both query-then-create.
+    Identical copies are safe to collapse; divergent copies stay an explicit
+    conflict so no content is silently lost.
+    """
+    validate_slug(slug)
+    entries = [(page, get_markdown(client, page["id"])) for page in find_pages_by_slug(client, slug)]
+    if not entries:
+        return {"canonical": None, "markdown": "", "duplicates": [], "identical": True}
+    if len(entries) == 1:
+        return {"canonical": entries[0][0], "markdown": entries[0][1], "duplicates": [], "identical": True}
+    bodies = {hashlib.sha256(strip_metadata(markdown).encode("utf-8")).hexdigest() for _, markdown in entries}
+    if len(bodies) > 1:
+        ids = ", ".join(page.get("id", "?") for page, _ in entries)
+        raise CliError(
+            "conflict: multiple wiki-session pages have slug %s with different content (%s); "
+            "open them in Notion and keep one" % (slug, ids)
+        )
+    # Prefer a page that already carries continuation lineage; otherwise the
+    # oldest page is stable across repeated resolutions.
+    with_resumed = [entry for entry in entries if parse_metadata(entry[1]).get("resumedSessionId")]
+    canonical = sorted(with_resumed or entries, key=lambda entry: (entry[0].get("created_time") or "", entry[0].get("id") or ""))[0]
+    duplicates = [page for page, _ in entries if page.get("id") != canonical[0].get("id")]
+    return {"canonical": canonical[0], "markdown": canonical[1], "duplicates": duplicates, "identical": True}
+
+
 def find_by_slug(client, slug):
-    response = _data_source_query(client, {
-        "filter": {"property": "slug", "rich_text": {"equals": slug}},
-        "page_size": 2,
-    })
-    results = response.get("results") or []
-    if len(results) > 1:
-        raise CliError("conflict: multiple wiki-session pages have slug: %s" % slug)
-    return results[0] if results else None
+    return resolve_slug(client, slug)["canonical"]
 
 
 def get_markdown(client, page_id):
@@ -491,8 +534,10 @@ def _legacy_metadata(page, markdown):
 def cmd_push(args, client, markdown):
     validate_slug(args.slug)
     _scan_push_inputs(args, markdown)
-    page = find_by_slug(client, args.slug)
-    old_markdown = get_markdown(client, page["id"]) if page else ""
+    resolved = resolve_slug(client, args.slug)
+    page = resolved["canonical"]
+    duplicate_ids = [item.get("id") for item in resolved["duplicates"]]
+    old_markdown = resolved["markdown"] if page else ""
     old_metadata = parse_metadata(old_markdown) if page else {}
     old_record = summarize_page(page, old_markdown) if page else {}
 
@@ -589,16 +634,22 @@ def cmd_push(args, client, markdown):
             "markdown": content,
         })
         created = True
-    return {
+    result = {
         "record": summarize_page(updated_page, content),
         "action": "created" if created else "updated",
         "truncated": truncated,
     }
+    if duplicate_ids:
+        result["duplicatePageIds"] = duplicate_ids
+        result["warning"] = "multiple identical pages share this slug; kept %s" % page.get("id")
+    return result
 
 
 def cmd_list(args, client):
     records = []
     errors = []
+    seen_slugs = {}
+    duplicate_groups = {}
     cursor = None
     while len(records) < args.limit:
         payload = {
@@ -624,6 +675,15 @@ def cmd_list(args, client):
                     })
                 continue
             record = summarize_page(page, markdown)
+            record_slug = record.get("slug") or ""
+            if record_slug in seen_slugs:
+                group = duplicate_groups.setdefault(record_slug, {
+                    "slug": record_slug,
+                    "pageIds": [seen_slugs[record_slug]],
+                })
+                group["pageIds"].append(page.get("id"))
+                continue
+            seen_slugs[record_slug] = page.get("id")
             if args.status != "all" and record["state"] != args.status:
                 continue
             if args.query:
@@ -641,25 +701,32 @@ def cmd_list(args, client):
         cursor = response.get("next_cursor")
         if not cursor:
             break
-    return {"records": records, "count": len(records), "errors": errors}
+    return {
+        "records": records,
+        "count": len(records),
+        "errors": errors,
+        "duplicates": list(duplicate_groups.values()),
+    }
 
 
 def _find_page_and_markdown(client, slug):
-    validate_slug(slug)
-    page = find_by_slug(client, slug)
-    if not page:
+    resolved = resolve_slug(client, slug)
+    if not resolved["canonical"]:
         raise NotFound("no wiki-session found for slug: %s" % slug)
-    return page, get_markdown(client, page["id"])
+    return resolved["canonical"], resolved["markdown"], resolved["duplicates"]
 
 
 def cmd_show(args, client):
-    page, markdown = _find_page_and_markdown(client, args.slug)
+    page, markdown, duplicates = _find_page_and_markdown(client, args.slug)
     _secret_gate(markdown, "show output")
-    return {"record": summarize_page(page, markdown), "markdown": strip_metadata(markdown)}
+    result = {"record": summarize_page(page, markdown), "markdown": strip_metadata(markdown)}
+    if duplicates:
+        result["duplicatePageIds"] = [item.get("id") for item in duplicates]
+    return result
 
 
 def cmd_state(args, client):
-    page, markdown = _find_page_and_markdown(client, args.slug)
+    page, markdown, duplicates = _find_page_and_markdown(client, args.slug)
     metadata = parse_metadata(markdown) or _legacy_metadata(page, markdown)
     metadata["schema"] = METADATA_SCHEMA
     metadata["slug"] = args.slug
@@ -670,11 +737,14 @@ def cmd_state(args, client):
     updated = replace_metadata(markdown, metadata)
     _secret_gate(updated, "state output")
     patch_markdown(client, page["id"], updated)
-    return {"record": summarize_page(page, updated)}
+    result = {"record": summarize_page(page, updated)}
+    if duplicates:
+        result["duplicatePageIds"] = [item.get("id") for item in duplicates]
+    return result
 
 
 def cmd_mark_resumed(args, client):
-    page, markdown = _find_page_and_markdown(client, args.slug)
+    page, markdown, duplicates = _find_page_and_markdown(client, args.slug)
     metadata = parse_metadata(markdown) or _legacy_metadata(page, markdown)
     metadata["schema"] = METADATA_SCHEMA
     metadata["slug"] = args.slug
@@ -683,7 +753,58 @@ def cmd_mark_resumed(args, client):
     updated = replace_metadata(markdown, metadata)
     _secret_gate(updated, "mark-resumed output")
     patch_markdown(client, page["id"], updated)
-    return {"record": summarize_page(page, updated)}
+    result = {"record": summarize_page(page, updated)}
+    if duplicates:
+        result["duplicatePageIds"] = [item.get("id") for item in duplicates]
+    return result
+
+
+def cmd_dedupe(args, client):
+    resolved = resolve_slug(client, args.slug)
+    page = resolved["canonical"]
+    if not page:
+        raise NotFound("no wiki-session found for slug: %s" % args.slug)
+    duplicates = resolved["duplicates"]
+    result = {
+        "slug": args.slug,
+        "canonicalPageId": page.get("id"),
+        "duplicatePageIds": [item.get("id") for item in duplicates],
+        "applied": False,
+        "renamed": [],
+    }
+    if not duplicates or not args.apply:
+        return result
+    now = utc_now()
+    for duplicate in duplicates:
+        markdown = get_markdown(client, duplicate["id"])
+        metadata = parse_metadata(markdown) or _legacy_metadata(duplicate, markdown)
+        suffix = duplicate["id"].replace("-", "")[:8]
+        new_slug = "%s-duplicate-%s" % (args.slug[:420], suffix)
+        validate_slug(new_slug)
+        metadata["schema"] = METADATA_SCHEMA
+        metadata["slug"] = new_slug
+        metadata["state"] = "hidden"
+        metadata["updatedAt"] = now
+        metadata["archivedAt"] = now
+        updated = replace_metadata(markdown, metadata)
+        _secret_gate(updated, "dedupe output")
+        title = _property_text(duplicate.get("properties") or {}, TITLE_PROP, "title") or "duplicate"
+        new_title = ("[duplicate] " + title)[:1900]
+        client.call("PATCH", "/v1/pages/%s" % _quoted(duplicate["id"]), {
+            "properties": {
+                TITLE_PROP: _title(new_title),
+                "slug": _rich_text(new_slug),
+            },
+        })
+        patch_markdown(client, duplicate["id"], updated)
+        result["renamed"].append({
+            "pageId": duplicate["id"],
+            "url": duplicate.get("url"),
+            "slug": new_slug,
+            "state": "hidden",
+        })
+    result["applied"] = True
+    return result
 
 
 def cmd_check(args, client):
@@ -711,6 +832,8 @@ def execute(args, client, markdown=None):
         return cmd_state(args, client)
     if args.command == "mark-resumed":
         return cmd_mark_resumed(args, client)
+    if args.command == "dedupe":
+        return cmd_dedupe(args, client)
     if args.command == "check":
         return cmd_check(args, client)
     raise CliError("unknown command")
@@ -758,6 +881,10 @@ def build_parser():
     resumed = commands.add_parser("mark-resumed")
     resumed.add_argument("--slug", required=True)
     resumed.add_argument("--session-id", required=True)
+
+    dedupe = commands.add_parser("dedupe")
+    dedupe.add_argument("--slug", required=True)
+    dedupe.add_argument("--apply", action="store_true")
 
     commands.add_parser("check")
     return parser

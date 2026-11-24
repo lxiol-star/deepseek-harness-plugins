@@ -122,6 +122,8 @@ export class NotionSessionService {
     this.syncWarnings = []
     this.syncPromise = null
     this.resumeLocks = new Map()
+    this.archiveLocks = new Map()
+    this.duplicates = []
     this.mutationEpoch = 0
     this.disposed = false
   }
@@ -149,6 +151,13 @@ export class NotionSessionService {
     }
   }
 
+  async dedupe(slug) {
+    requireSlug(slug)
+    const result = await this.cli(['dedupe', '--slug', slug, '--apply'])
+    this.invalidate()
+    return result
+  }
+
   async check() { return this.cli(['check'], 60_000) }
 
   invalidate() {
@@ -170,6 +179,7 @@ export class NotionSessionService {
         this.lastSync = new Date().toISOString()
         this.syncError = null
         this.syncWarnings = Array.isArray(result.errors) ? result.errors.slice(0, 10) : []
+        this.duplicates = Array.isArray(result.duplicates) ? result.duplicates.slice(0, 20) : []
         return this.cache
       }
       throw new NotionSessionError('REFRESH_RACED', 'Records changed during pull; retry the refresh')
@@ -206,6 +216,7 @@ export class NotionSessionService {
       lastSync: this.lastSync,
       syncError: this.syncError,
       syncWarnings: this.syncWarnings,
+      duplicates: this.duplicates,
       autoSync: this.config.autoSync,
       syncIntervalSeconds: this.config.syncIntervalSeconds,
       stale: this.cache !== null && this.syncError !== null,
@@ -215,6 +226,14 @@ export class NotionSessionService {
   async archive(sessionId, state = 'active') {
     requireId(sessionId)
     if (!STATES.has(state)) throw new NotionSessionError('INVALID_INPUT', 'state must be active, archived or hidden')
+    // Two clicks (or two UI paths) must not both query-then-create the same slug.
+    if (this.archiveLocks.has(sessionId)) return this.archiveLocks.get(sessionId)
+    const operation = this.archiveUnsafe(sessionId, state)
+    this.archiveLocks.set(sessionId, operation)
+    try { return await operation } finally { this.archiveLocks.delete(sessionId) }
+  }
+
+  async archiveUnsafe(sessionId, state = 'active') {
     // readSession is the installed 0.2.2-rc.3 API; renderSession selects only
     // direct dialogue and tool facts from the replay-validated raw log.
     const observation = await this.ctx.sessionQuery.readSession(sessionId)
@@ -328,7 +347,7 @@ function toolDefinition(service, agent) {
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['archive', 'list', 'show', 'set_state'], description: 'Operation to perform. Continuation creation is available only in the user GUI.' },
+        action: { type: 'string', enum: ['archive', 'list', 'show', 'set_state', 'dedupe'], description: 'Operation to perform. Continuation creation is available only in the user GUI.' },
         state: { type: 'string', enum: ['active', 'archived', 'hidden'], description: 'For archive, desired initial state (default active); for set_state, required new state.' },
         status: { type: 'string', enum: ['active', 'archived', 'hidden', 'all'], description: 'For list, visibility filter (default active).' },
         query: { type: 'string', description: 'For list, optional case-insensitive title/slug/summary/tool/workspace filter.' },
@@ -351,6 +370,7 @@ function toolDefinition(service, agent) {
         const shown = await service.show(input.slug)
         result = { record: shown.record, markdown: clipText(shown.markdown, 12_000), truncated: Array.from(shown.markdown ?? '').length > 12_000 }
       } else if (input.action === 'set_state') result = await service.setState(input.slug, input.state)
+      else if (input.action === 'dedupe') result = await service.dedupe(input.slug)
       else throw new NotionSessionError('INVALID_INPUT', 'unknown action')
       return result
     },
@@ -439,6 +459,7 @@ function wireHttp(ctx, service) {
           result = { record: shown.record, markdown: clipText(shown.markdown, 20_000), truncated: Array.from(shown.markdown ?? '').length > 20_000 }
         }
         else if (body.action === 'state') result = await service.setState(body.slug, body.state)
+        else if (body.action === 'dedupe') result = await service.dedupe(body.slug)
         else if (body.action === 'resume') result = await service.resume(body.slug, body.requesterSessionId)
         else if (body.action === 'check') result = await service.check()
         else throw new NotionSessionError('INVALID_INPUT', 'Unknown action')

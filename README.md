@@ -52,7 +52,7 @@ github:lxiol-star/deepseek-harness-plugins#dsh-hide-empty-workspaces-v0.4.1&path
 # 工作区自动收录
 github:lxiol-star/deepseek-harness-plugins#dsh-workspace-autoregister-v0.1.2&path:/plugins/dsh-workspace-autoregister
 # Notion 会话归档与续接
-github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.2&path:/plugins/dsh-notion-session
+github:lxiol-star/deepseek-harness-plugins#dsh-notion-session-v0.1.3&path:/plugins/dsh-notion-session
 ```
 
 请先阅读各插件的兼容性和外部依赖说明。会话看板的 Wiki 集成依赖用户自行提供的本地 Wiki 脚本与模型配置；基础看板功能不需要模型密钥。

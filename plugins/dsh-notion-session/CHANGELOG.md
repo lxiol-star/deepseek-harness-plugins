@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Tolerate identical duplicate pages for one slug: list collapses them, show/state/push resolve a canonical page, divergent copies still conflict.
+- Add `dedupe` (CLI, agent tool and panel repair action): rename extra identical pages to `*-duplicate-<id>` and set them hidden, without deleting content.
+- Serialize archival per session to prevent in-process query-then-create races.
+
 ## 0.1.2
 
 - Rename the save skill to `notion-session-save` so it cannot be shadowed by an existing local `notion-current-session` skill.
