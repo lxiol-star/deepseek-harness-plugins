@@ -21,12 +21,14 @@
 DSH 插件管理器里安装指定版本（需要 DSH `^0.2.1-alpha.2`）：
 
 ```
-github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.5&path:/plugins/dsh-superagent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.6&path:/plugins/dsh-superagent
 ```
 
 也可以从本地目录安装（`设置 → 插件 → 添加插件` 填本地路径）。
 
 安装后启用并**完全退出重启 DSH**，侧栏出现 **Superagent**。
+
+0.2.6 起，输入框上方的**任务条**挂在对应对话框的 `conversation.input.dock` 槽位上，该槽位自 DSH `0.2.2-rc.5` 起提供（已在 rc.5 上验证）。更早的 DSH 没有这个槽位，任务条不会出现；那种环境下本版本未经测试。
 
 ## 使用
 
@@ -34,7 +36,8 @@ github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.5&path:/plugins/d
 2. 在输入框左下角选择工作区——工单就开在这个工作区下的 `.dsh-superagent/work/` 里。
 3. 直接说任务，例如「在当前工作区把 README 的安装步骤补全，做完告诉我」。
 4. 主 Session 调 `orchestrator_task` 开单，worker 在子工作树里执行，完成后把结果回报到主 Session。
-5. 收拾子工作区也交给主 Session：`orchestrator_workspaces` 的 `op=list` 列出来，`op=archive` 按 DSH 客户端语义归档其中的会话，`op=delete`+`confirm=true` 才删工作区注册（默认不删，目录与会话日志保留；有会话在跑或未归档一律拒绝）。不要再让它去点 DevTools。
+5. 看进度：主会话输入框上方的**任务条**列出每张工单的阶段和进度，可收起成一颗带计数的药丸；侧栏的 **Superagent 画布** 把主会话、任务、执行器画成三列卡片，可平移、缩放、拖动。勾选一张工单，就能就它向主会话提问，回答出现在主会话的对话里。
+6. 收拾子工作区也交给主 Session：`orchestrator_workspaces` 的 `op=list` 列出来，`op=archive` 按 DSH 客户端语义归档其中的会话，`op=delete`+`confirm=true` 才删工作区注册（默认不删，目录与会话日志保留；有会话在跑或未归档一律拒绝）。不要再让它去点 DevTools。
 
 来源事件（MSP / 工作区树 / GitHub）到达后出现在面板「触发」，被接受后进入「执行」，每个工单一个 worker Session。
 

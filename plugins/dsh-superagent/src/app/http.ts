@@ -27,6 +27,7 @@ import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { ASK_MAX, operatorQuestion, tasksView } from './views/tasks.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -34,10 +35,10 @@ export interface HttpHost {
   readonly sourceLinks: Pick<TextCache, 'entries'>
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
-  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery'>
+  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'todoList' | 'ask' | 'conversation' | 'active'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
-  readonly executor: Pick<DshExecutor, 'activeCount'>
+  readonly executor: Pick<DshExecutor, 'activeCount' | 'running'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -154,6 +155,17 @@ function routes(runtime: HttpHost): Routes {
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
+    'GET tasks': () => tasksView({ masterId: runtime.masterId, active: runtime.sessions.active(runtime.masterId),
+      paused: runtime.store.settings().paused, maxWorkers: runtime.store.settings().executor.maxWorkers,
+      openTickets: () => runtime.store.tickets.open(), live: ticket => runtime.executor.running(ticket),
+      todos: sessionId => runtime.sessions.todoList(sessionId), conversation: () => runtime.sessions.conversation() }),
+    // The question reaches the main Session as a relay, which is ordered and retried until delivered.
+    'POST tasks/:id/ask': async ({ params, body }) => {
+      const id = ticket(params.id)
+      const { question } = z.object({ question: z.string().trim().min(1).max(ASK_MAX) }).parse(await body(64 * 1024))
+      runtime.sessions.ask(`ask:${id}:${Date.now()}`, operatorQuestion(id, store.tickets.get(id)!.title, question), question)
+      return { delivered: 'queued' }
+    },
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),

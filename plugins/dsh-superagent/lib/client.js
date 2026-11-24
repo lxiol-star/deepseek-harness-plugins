@@ -7,6 +7,439 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let react_dom = require("react-dom");
 		let react_jsx_runtime = require("react/jsx-runtime");
+		//#region src/core/errors.ts
+		/** User-facing error codes mapped to their category ('missing' or 'refused') and English message template. */
+		const USER_ERRORS = {
+			unknownTicket: ["missing", "Unknown ticket"],
+			unknownProblem: ["missing", "Unavailable Eval not found"],
+			unknownTrigger: ["missing", "Unknown trigger"],
+			unknownAssignment: ["missing", "Unknown assignment"],
+			unknownWorkspace: ["missing", "Unknown workspace"],
+			notChildWorkspace: ["refused", "Only a child workspace dsh-superagent created for a ticket worker can be archived or removed here"],
+			workspaceBusy: ["refused", "Work still runs in {sessions}; stop it before archiving or removing the workspace"],
+			workspaceNotArchived: ["refused", "Sessions {sessions} are not archived yet; archive them first, as the DSH client archives a Session"],
+			unknownBlock: ["missing", "Unknown settings block: {block}"],
+			unknownPromptRevision: ["missing", "Unknown prompt revision {revision}"],
+			unknownPromptPart: ["refused", "Unknown built-in prompt part {part}"],
+			ticketEnded: ["refused", "Ticket has ended"],
+			assignmentEnded: ["refused", "Assignment has ended; a newer assignment owns this ticket"],
+			evalFinished: ["refused", "Eval {eval} has finished or a later eval replaced it; decide the trigger's current eval"],
+			notAdmissible: ["refused", "Trigger is not admissible: {reason}"],
+			notExplicit: ["refused", "An accept through orchestrator_route is for explicit requests from allowed senders; assess proactive candidates with orchestrator_eval and orchestrator_eval_decide"],
+			ticketStopped: ["refused", "A person stopped this ticket; new work needs an accept through orchestrator_route"],
+			mandateRevoked: ["refused", "The current policy no longer holds this ticket's mandate; new work needs an accept through orchestrator_route"],
+			notRetryable: ["refused", "Only an open ticket can be retried, and only when its worker last reported failed or blocked and no person has sent a message since, or when delivering an Input to its worker failed"],
+			sourceThread: ["refused", "This is the thread the ticket started on; it stays subscribed"],
+			followedThread: ["refused", "This thread is the ticket's own, such as its pull request's; it stays subscribed"],
+			notFollowing: ["refused", "This ticket does not follow that thread"],
+			questionWithResult: ["refused", "A question for a person cannot also be a ready result or an answer; report it separately"],
+			askerWithoutQuestion: ["refused", "The message that raised a question needs the question it raised"],
+			notAsker: ["refused", "A question must name the person's message that raised it, which reached this ticket"],
+			notAnswerable: ["refused", "An answer must name the person's question it answers, which reached this ticket"],
+			ackEnded: ["refused", "Ticket ended; do not acknowledge historical requests"],
+			notReached: ["refused", "Trigger does not belong to this worker"],
+			handedBack: ["refused", "This ticket handed that trigger back already"],
+			handedBackHere: ["refused", "The worker of this ticket handed that trigger back as beyond it: accept it as new work, attach it to another ticket, or ignore it"],
+			workerDecides: ["refused", "This message reached ticket {tickets} on its thread: its worker decides whether it belongs there and hands back what does not, which then arrives as a candidate. Only a stop goes through orchestrator_route, with kind stop"],
+			ackNoChannel: ["refused", "Acknowledgement requires an assigned human source message"],
+			ackNotPerson: ["refused", "Use the original human trigger, not a bot, CI or worker report"],
+			notReady: ["refused", "Ticket is not ready for delivery. Keep progress internal and wait for a verified ready report; do not relabel progress as an answer or send it through another channel."],
+			notAttention: ["refused", "Attention requires the ticket's current attention question in human_action. Routine unfinished work stays internal."],
+			notQuestion: ["refused", "An answer must target the original human question, not a worker report or automated trigger"],
+			noAnswer: ["refused", "No worker answer is ready for this human trigger. Wait for the worker's report, or request one with orchestrator_ticket_request_status, which acts only on a worker that reported waiting; ordinary progress cannot be relabelled as an answer."],
+			noChannel: ["refused", "No reply channel for this ticket or trigger"],
+			panelOnlyEnvironment: ["refused", "The execution environment (ticket directory, prepare command, blocked commands) can only be changed in the management panel"],
+			panelOnlyAccounts: ["refused", "Source fields that setup reads, such as account CLIs, can only be changed in the management panel"],
+			setupComplete: ["refused", "Setup is complete"],
+			modelUnavailable: ["refused", "The {block} model is not available: {error}"],
+			promptTooLong: ["refused", "Prompt configuration exceeds {limit} characters"],
+			promptPlaceholders: ["refused", "The “{part}” template must keep {placeholders}, which the system fills in"],
+			promptPartEmpty: ["refused", "The “{part}” part cannot be empty; reset it to follow its built-in text"],
+			sourceNotInstalled: ["refused", "The {source} Source kind is not installed"],
+			noLabels: ["refused", "This Source has no names to refresh"],
+			nothingToSync: ["refused", "The {source} Source's part of the Policy has nothing to sync from, or the Source is off or waiting for setup"]
+		};
+		//#endregion
+		//#region src/client/api.ts
+		/** Same-origin client and polling hook for the orchestrator management API. */
+		/**
+		* Represents a failed management API request with a localized message and structured diagnostic details.
+		* Thrown by API callers and inspected by UI views and draft state to distinguish validation issues, missing records,
+		* and unreachable hosts (`details.unreachable` is set when `dsh-superagent` did not answer at all, such as during a restart,
+		* in which case a 404 does not mean a record is missing).
+		*/
+		var ApiError = class extends Error {
+			status;
+			details;
+			constructor(message, status, details = {}) {
+				super(message);
+				this.status = status;
+				this.details = details;
+			}
+			get issues() {
+				return this.details.issues ?? [];
+			}
+			/** True when the host confirmed the record does not exist, rather than being unreachable. */
+			get missing() {
+				return this.status === 404 && !this.details.unreachable;
+			}
+		};
+		const isUserError = (code) => typeof code === "string" && Object.hasOwn(USER_ERRORS, code);
+		/** Calls one management endpoint; the `x-orchestrator-request` header marks the request as originating from this page. */
+		async function api(messages, path, method, body) {
+			let response;
+			const json = body === void 0 ? {} : {
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body)
+			};
+			try {
+				response = await fetch(`/orchestrator/api/${path}`, {
+					method,
+					...json,
+					headers: {
+						"x-orchestrator-request": "1",
+						...json.headers
+					}
+				});
+			} catch {
+				throw new ApiError(messages.offline, 0, { unreachable: true });
+			}
+			const text = await response.text();
+			let value;
+			try {
+				value = text ? JSON.parse(text) : {};
+			} catch {
+				value = void 0;
+			}
+			if (!response.ok) {
+				const failure = value ?? {};
+				const issues = Array.isArray(failure.issues) ? failure.issues : [];
+				const user = isUserError(failure.code) ? {
+					code: failure.code,
+					values: failure.values ?? {}
+				} : void 0;
+				const { status } = response;
+				throw new ApiError(failure.setup ? messages.setup(failure.setup) : user ? messages.user(user) : typeof failure.error === "string" ? failure.error : !text && status === 404 ? messages.notRunning : status >= 500 ? messages.serverError(status) : messages.requestFailed(status), status, {
+					issues,
+					...failure.setup ? { setup: failure.setup } : {},
+					...user ? { user } : {},
+					...text ? {} : { unreachable: true }
+				});
+			}
+			return value;
+		}
+		const HIDDEN_FACTOR = 6;
+		const same$2 = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+		/**
+		* Poll an endpoint while mounted, backing off when the document is hidden.
+		* Preserves the last successful value across dependency changes and errors, skips state updates when the response is unchanged,
+		* and drops stale responses when `deps` or `intervalMs` changes start a new subscription.
+		*/
+		function usePoll(load, deps, intervalMs = 5e3) {
+			const [state, setState] = (0, react.useState)({});
+			const loader = (0, react.useRef)(load);
+			loader.current = load;
+			const refresh = (0, react.useRef)(async () => {});
+			(0, react.useEffect)(() => {
+				let active = true;
+				let timer;
+				let queue = Promise.resolve();
+				const once = async () => {
+					clearTimeout(timer);
+					try {
+						const value = await loader.current();
+						if (active) setState((previous) => same$2(previous.data, value) ? previous.error ? { data: previous.data } : previous : { data: value });
+					} catch (failure) {
+						if (active) setState((previous) => ({
+							...previous,
+							error: failure instanceof Error ? failure : new Error(String(failure))
+						}));
+					} finally {
+						if (active) timer = setTimeout(run, document.hidden ? intervalMs * HIDDEN_FACTOR : intervalMs);
+					}
+				};
+				const run = () => queue = queue.then(once);
+				const shown = () => {
+					if (!document.hidden) run();
+				};
+				refresh.current = run;
+				run();
+				document.addEventListener("visibilitychange", shown);
+				return () => {
+					active = false;
+					clearTimeout(timer);
+					document.removeEventListener("visibilitychange", shown);
+				};
+			}, [...deps, intervalMs]);
+			const reload = (0, react.useCallback)(() => refresh.current(), []);
+			return {
+				data: state.data,
+				error: state.error,
+				reload
+			};
+		}
+		const DECISION_FILTERS = [
+			"work",
+			"stop",
+			"ignore",
+			"unavailable",
+			"all"
+		];
+		const DECISION_KINDS = {
+			work: "accept,reopen",
+			stop: "stop",
+			ignore: "ignore",
+			unavailable: "unavailable",
+			all: ""
+		};
+		/** Build a typed route caller that resolves localized error messages on each request. */
+		function caller(messages) {
+			return (route, ...[request]) => {
+				const [method, pattern] = route.split(" ");
+				const values = request ?? {};
+				const path = pattern.replace(/:(\w+)/g, (_match, name) => encodeURIComponent(String(values[name])));
+				const query = Object.entries(values.query ?? {}).filter(([, value]) => value !== void 0 && value !== "").map(([name, value]) => `${name}=${encodeURIComponent(String(value))}`).join("&");
+				return api(messages(), query ? `${path}?${query}` : path, method, values.body);
+			};
+		}
+		//#endregion
+		//#region src/client/client.css?raw
+		var client_default = "/* Panel layout and local UI controls styled with DSH `--dsw-alias-*` design tokens; one rule per line. */\n.dt-page { box-sizing: border-box; height: 100%; overflow: auto; scrollbar-gutter: stable; scroll-padding: 48px 0 72px; container-type: inline-size; padding: 28px clamp(24px, 4vw, 48px) 0; color: var(--dsw-alias-label-primary); }\n/* Deployment page rendered inside DSH Plugin Manager, which owns scrolling and padding. */\n.dt-embedded { container-type: inline-size; color: var(--dsw-alias-label-primary); }\n/* Disable sticky positioning inside DSH Plugin Manager, where the host container owns scrolling and bottom padding. */\n.dt-embedded .dt-savebar { position: static; }\n.dt-page > .dt-column { max-width: 960px; margin: 0 auto; padding-bottom: 48px; display: flex; flex-direction: column; gap: 24px; }\n.dt-head { position: relative; z-index: 3; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }\n.dt-search { position: relative; width: 240px; max-width: 100%; }\n.dt-search-results { position: absolute; top: calc(100% + 6px); right: 0; width: min(560px, 90cqw); max-height: 60vh; overflow: auto; padding: 8px 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); z-index: 5; display: flex; flex-direction: column; gap: 8px; }\n.dt-mark { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 25%, transparent); color: inherit; border-radius: 2px; }\n[data-platform='darwin'] .dt-page .dt-head { padding-top: var(--dsh-frame-top-clearance, 0px); }\n.dt-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }\n.dt-page .dt-tabs { overflow-x: auto; display: flex; gap: 20px; max-width: none; padding: 0; border-radius: 0; background: none; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-segmented { width: 100%; max-width: 420px; box-sizing: border-box; display: inline-grid; gap: 2px; padding: 3px; border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover); }\n.dt-form.dt-block { padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; gap: 16px; }\n.dt-block-title { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }\n.dt-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }\n.dt-section-title { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-section-name { white-space: nowrap; }\n.dt-count { font-size: 14px; color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; font-weight: 400; }\n.dt-hint { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }\n.dt-error { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-state-error-primary); }\n.dt-banner { margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 20px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); overflow-wrap: anywhere; }\n.dt-banner.dt-danger { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }\n.dt-list { list-style: none; margin: 0 -8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }\n.dt-row { position: relative; min-width: 0; border-radius: 12px; padding: 10px 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: flex-start; }\n.dt-row.dt-link:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-row-main { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.dt-disclosure-body .dt-row-main { flex-basis: 0; }\n.dt-row-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 500; }\n.dt-open { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-open::after { content: ''; position: absolute; inset: 0; border-radius: 12px; }\n.dt-open:focus-visible { outline: none; }\n.dt-open-wrap { white-space: normal; }\n.dt-open:focus-visible::after { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }\n.dt-row-quote { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n/* Transparent block borders preserve vertical spacing when line clamping clips padding. */\n.dt-banner:is(.dt-clamp, .dt-clamp-8) { padding-block: 0; border-block: 8px solid transparent; }\n.dt-banner-label { font-weight: 500; }\n.dt-banner .dt-md { display: inline; }\n.dt-banner .dt-md > p:first-child { display: inline; }\n.dt-row-buttons { position: relative; z-index: 1; gap: 8px; margin-top: 4px; }\n.dt-row-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: 13px; line-height: 20px; }\n.dt-dot { flex: none; margin-top: 5px; }\n.dt-inline-link { position: relative; z-index: 1; color: var(--dsw-alias-link); text-decoration: none; }\n.dt-inline-link:hover { text-decoration: underline; }\n.dt-textlink { padding: 0; border: 0; background: none; font: inherit; color: var(--dsw-alias-link); cursor: pointer; text-align: left; }\n.dt-textlink:hover { text-decoration: underline; }\n.dt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 20px; }\n.dt-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; line-height: 20px; }\n.dt-kv dt { color: var(--dsw-alias-label-tertiary); }\n.dt-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }\n.dt-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }\n.dt-event { padding: 12px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); display: flex; flex-direction: column; gap: 6px; min-width: 0; }\n.dt-event:last-child { border-bottom: 0; }\n.dt-event.dt-highlight { background: var(--dsw-alias-interactive-bg-hover); border-radius: 8px; padding-inline: 8px; margin-inline: -8px; }\n.dt-event-text { margin: 0; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }\n.dt-event-actor { font-weight: 500; color: var(--dsw-alias-label-secondary); }\n.dt-event-quiet .dt-event-text { color: var(--dsw-alias-label-tertiary); }\n.dt-flow { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-clamp-8 { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-more { align-self: flex-start; font-size: 12px; }\n.dt-reveal { opacity: 0; }\n.dt-event:hover .dt-reveal, .dt-reveal:focus-visible { opacity: 1; }\n@media (hover: none) {\n  .dt-reveal { opacity: 1; }\n}\n.dt-event-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }\n.dt-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\n.dt-filters .dt-search { margin-left: auto; }\n.dt-form { display: flex; flex-direction: column; gap: 24px; }\n.dt-fieldset { display: flex; flex-direction: column; gap: inherit; min-width: 0; margin: 0; padding: 0; border: 0; }\n.dt-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; min-width: 0; }\n.dt-field small { color: var(--dsw-alias-label-caption); font-size: 12px; }\n.dt-textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1, transparent); resize: vertical; }\n.dt-select { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; padding: 0 28px 0 8px; text-overflow: ellipsis; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1, transparent); }\n.dt-textarea:focus-visible, .dt-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-mono { font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; overflow-wrap: anywhere; }\n.dt-detail { margin-top: 2px; color: var(--dsw-alias-label-secondary); }\n.dt-savebar .dt-error { white-space: pre-line; }\n.dt-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; font-size: 13px; }\n.dt-subhead-actions { display: inline-flex; align-items: center; gap: 4px; }\n.dt-btn-busy .dt-btn-icon svg { animation: dt-spin 1s linear infinite; }\n.dt-subhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-rules, .dt-changes { list-style: none; margin: 0; padding: 0; }\n.dt-field-head { display: inline-flex; align-items: center; gap: 4px; color: var(--dsw-alias-label-secondary); }\n.dt-info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-caption); cursor: help; }\n.dt-info:hover, .dt-info:focus-visible { color: var(--dsw-alias-label-secondary); }\n.dt-info:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 50%; }\n.dt-tooltip { position: fixed; z-index: 1100; width: max-content; max-width: min(320px, calc(100vw - 24px)); padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg); color: var(--dsw-static-neutral-bluish-00); font-size: 13px; line-height: 20px; overflow-wrap: break-word; pointer-events: none; animation: dt-tooltip-in 150ms ease-in-out; }\n@keyframes dt-tooltip-in { from { opacity: 0; } }\n.dt-rules { border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-rule { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-rule > :first-child { flex: 1; min-width: 0; }\n.dt-rule-preview { flex: 1; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-rule-switch { margin-top: 2px; flex: none; }\n.dt-rule-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-label-caption); }\n.dt-rule-dot[data-enabled] { background: var(--dsw-alias-brand-primary); }\n.dt-rule-body { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 8px 28px; }\n.dt-model { display: flex; flex-direction: column; gap: 6px; }\n.dt-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }\n.dt-changes { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 20px; }\n.dt-changes li::before { content: '· '; color: var(--dsw-alias-label-caption); }\n.dt-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }\n.dt-modal.dt-glossary-modal { width: min(680px, 100%); }\n.dt-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }\n.dt-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-nav-item[aria-current='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); font-weight: 500; }\n.dt-nav-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }\n.dt-changed-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); flex: none; }\n.dt-add-skill { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-prompt-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }\n.dt-editor { min-height: 360px; }\n.dt-inline-select { width: auto; }\n.dt-preview-part { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-border-l3); }\n.dt-preview-head { font-size: 13px; line-height: 20px; display: flex; align-items: baseline; gap: 8px; }\ndiv.dt-preview-head { color: var(--dsw-alias-label-secondary); }\n.dt-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; min-width: 0; }\n.dt-card-head { display: flex; align-items: center; gap: 12px; min-height: 28px; }\n.dt-card-head .dt-row-main { flex: 1 1 0; min-width: 64px; }\n.dt-card-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }\n.dt-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }\n.dt-rows-item { display: grid; grid-template-columns: repeat(var(--dt-columns), minmax(0, 1fr)) auto; gap: 8px; align-items: center; }\n.dt-filter-gap { flex: 1; }\n.dt-page-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }\n.dt-page-head > .dt-btn { margin-left: -10px; }\n.dt-page-title { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; width: 100%; }\n.dt-page-title h2 { margin: 0; flex: 1 1 auto; min-width: 0; font-size: 20px; line-height: 28px; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-status-line { margin-top: -16px; }\n.dt-plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 20px; }\n.dt-details { display: flex; flex-direction: column; gap: 2px; border-top: 0.5px solid var(--dsw-alias-border-l2); padding-top: 8px; }\n.dt-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-danger-zone .dt-btn { color: var(--dsw-alias-state-error-primary); }\n.dt-md { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }\n.dt-md p, .dt-md ul, .dt-md ol { margin: 0; }\n.dt-md ul, .dt-md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }\n.dt-md-heading { font-weight: 500; }\n.dt-code { font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; padding: 0 4px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); }\n.dt-dot-wrap { display: inline-flex; flex: none; }\n.dt-search-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }\n.dt-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }\n.dt-legend-title { margin: 16px 0 6px; font-size: 13px; color: var(--dsw-alias-label-tertiary); }\n.dt-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }\n.dt-legend li { display: flex; align-items: center; gap: 6px; }\n.dt-legend .dt-dot { margin-top: 0; }\n.dt-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 12px 0; background: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1)); border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-savebar .dt-hint { margin-right: auto; }\n.dt-card > .dt-savebar, .dt-block > .dt-savebar { margin: 0 -16px -16px; padding: 12px 16px; border-radius: 0 0 16px 16px; }\n.dt-glossary { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px; }\n.dt-glossary th, .dt-glossary td { text-align: left; padding: 6px 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); vertical-align: top; }\n.dt-glossary th { color: var(--dsw-alias-label-tertiary); font-weight: 400; }\n.dt-glossary th.dt-glossary-group { color: var(--dsw-alias-label-secondary); font-weight: 600; padding-top: 14px; }\n.dt-glossary th:nth-child(-n+2), .dt-glossary td:nth-child(-n+2) { white-space: nowrap; }\n.dt-values { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 16px 0 0; font-size: 13px; }\n.dt-values dt { color: var(--dsw-alias-label-tertiary); }\n.dt-values dd { margin: 0; }\n.dt-pre { margin: 0; padding: 12px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }\n.dt-pre ins { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, green) 18%, transparent); text-decoration: none; }\n.dt-pre del { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent); text-decoration: none; }\n.dt-prompt { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }\n.dt-prompt-nav { display: flex; flex-direction: column; gap: 2px; }\n.dt-prompt-nav button { justify-content: flex-start; }\n.dt-disclosure-body { padding: 8px 0 8px 28px; display: flex; flex-direction: column; gap: 8px; }\n@container (max-width: 640px) {\n  .dt-tab { padding: 0 8px; font-size: 13px; }\n  .dt-segment { padding: 0 10px; }\n  .dt-head { align-items: center; }\n  .dt-search-results { right: auto; left: 0; width: 100%; }\n  .dt-page-title h2 { font-size: 17px; line-height: 24px; }\n  .dt-status-line { margin-top: -12px; }\n  .dt-page .dt-tabs { display: flex; flex-wrap: nowrap; scrollbar-width: thin; }\n  .dt-page .dt-tab { flex: none; }\n  .dt-page .dt-tabs[data-more='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }\n  .dt-page .dt-tabs[data-more='start'] { mask-image: linear-gradient(to right, transparent, #000 40px); }\n  .dt-page .dt-tabs[data-more='both'] { mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }\n  .dt-kv { grid-template-columns: 1fr; gap: 2px; }\n  .dt-grid3, .dt-prompt { grid-template-columns: 1fr; }\n  .dt-search { width: 100%; }\n  .dt-filters .dt-search { margin-left: 0; }\n}\n/* Local UI primitive styles (see controls.tsx). */\n.dt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: none; border-radius: 18px; cursor: pointer; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); background: transparent; padding: 0 14px; white-space: nowrap; }\n.dt-btn:disabled { cursor: not-allowed; opacity: 0.4; }\n.dt-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-btn-md { height: 36px; }\n.dt-btn-sm { height: 28px; font-size: 12px; line-height: 18px; padding: 0 10px; border-radius: 14px; }\n.dt-btn-primary { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }\n.dt-btn-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }\n.dt-btn-ghost:hover:not(:disabled), .dt-btn-outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-btn-ghost:active:not(:disabled) { background: var(--dsw-alias-interactive-bg-active); }\n.dt-btn-outline { border: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-btn-icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; }\n.dt-tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 1px 8px; font-size: 11px; line-height: 17px; font-weight: 500; white-space: nowrap; }\n.dt-tag[data-tone='outline'] { border: 0.5px solid var(--dsw-alias-border-l4); color: var(--dsw-alias-label-tertiary); }\n.dt-tag[data-tone='neutral'] { background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); }\n.dt-tag[data-tone='quiet'] { color: var(--dsw-alias-label-tertiary); }\n.dt-tag[data-tone='success'] { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); color: var(--dsw-alias-state-success-primary); }\n.dt-tag[data-tone='info'] { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); color: var(--dsw-alias-state-business-primary); }\n.dt-tag[data-tone='warning'] { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent); color: var(--dsw-alias-state-warn-primary); }\n.dt-tag[data-tone='danger'] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); color: var(--dsw-alias-state-error-primary); }\n.dt-pill { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: none; border-radius: 12px; font: inherit; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); cursor: pointer; }\n.dt-pill:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-pill-active, .dt-pill-active:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border); }\n.dt-tabs { display: grid; padding: 4px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }\n.dt-tab { box-sizing: border-box; height: 34px; padding: 0 12px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 14px; line-height: 20px; white-space: nowrap; cursor: pointer; transition: color 180ms ease, background 180ms ease; }\n.dt-tab:hover { color: var(--dsw-alias-label-primary); }\n.dt-tab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 600; background: var(--dsw-alias-bg-layer-3); border-color: var(--dsw-alias-border-l3); }\n.dt-tab:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; }\n.dt-segment { height: 28px; padding: 0 16px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 120ms ease, background 160ms ease; }\n.dt-segment:hover:not(:disabled), .dt-segment[aria-selected='true'] { color: var(--dsw-alias-label-primary); }\n.dt-segment[aria-selected='true'] { background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); }\n.dt-segment:disabled { cursor: default; opacity: 0.4; }\n.dt-segment:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }\n.dt-input { box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 32px; min-width: 0; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }\n.dt-input:focus-within { border-color: var(--dsw-alias-brand-primary); }\n.dt-input-icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary); }\n.dt-input input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); }\n.dt-input input::placeholder { color: var(--dsw-alias-label-dimmed); }\n.dt-input input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }\n.dt-field .dt-input, .dt-search .dt-input, .dt-add-skill .dt-input { display: flex; width: 100%; }\n.dt-switch { box-sizing: border-box; flex: 0 0 auto; width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 10px; background: var(--dsw-alias-border-l3); cursor: pointer; }\n.dt-switch[aria-checked='true'] { background: var(--dsw-alias-brand-primary); }\n.dt-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-switch-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-primary-foreground); transition: transform 120ms ease; }\n.dt-switch[aria-checked='true'] .dt-switch-thumb { transform: translateX(16px); }\n.dt-state-dot { position: relative; display: inline-block; flex: none; width: 10px; height: 10px; color: var(--dsw-alias-state-idle-primary); }\n.dt-state-dot::after { content: ''; position: absolute; inset: 20%; border-radius: 50%; background: currentColor; }\n.dt-state-dot[data-state='done'] { color: var(--dsw-alias-state-success-primary); }\n.dt-state-dot[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-state-dot[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-spinner { flex: none; color: var(--dsw-alias-label-tertiary); }\n.dt-spinner g { transform-origin: center; animation: dt-spin 1.5s linear infinite; }\n.dt-spinner circle { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }\n.dt-spinner circle:first-child { opacity: 0.25; }\n.dt-spinner circle:last-child { stroke-dasharray: 18 150; }\n@keyframes dt-spin { to { transform: rotate(360deg); } }\n.dt-disclosure-row { display: flex; align-items: center; gap: 4px; min-height: 28px; min-width: 0; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-disclosure-row:hover { color: var(--dsw-alias-label-primary); }\n.dt-disclosure-row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-disclosure-lead { position: relative; display: inline-flex; flex: none; width: 24px; height: 24px; align-items: center; justify-content: center; }\n.dt-disclosure-icon { display: inline-flex; align-items: center; justify-content: center; }\n.dt-disclosure-chevron { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }\n.dt-disclosure-row:hover .dt-disclosure-icon, .dt-disclosure[data-open] .dt-disclosure-icon { visibility: hidden; }\n.dt-disclosure-row:hover .dt-disclosure-chevron, .dt-disclosure[data-open] .dt-disclosure-chevron { display: inline-flex; }\n.dt-disclosure-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-modal-root { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: max(24px, var(--dsh-frame-top-clearance, 24px)) 24px; }\n.dt-modal-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }\n.dt-modal { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; width: min(380px, 100%); max-height: 100%; padding: 0 0 24px; overflow: hidden; border-radius: 24px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); color: var(--dsw-alias-label-primary); outline: none; }\n.dt-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 22px 14px 0 24px; }\n.dt-modal-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }\n.dt-modal-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent; cursor: pointer; color: var(--dsw-alias-label-secondary); }\n.dt-modal-close:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-modal-description { margin: -8px 0 0; padding: 0 24px; font-size: 14px; line-height: 22px; }\n.dt-modal-body { min-width: 0; min-height: 0; overflow: auto; padding: 0 24px; }\n.dt-modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 24px; }\n.dt-toast { position: fixed; top: 40px; left: 50%; z-index: 1100; pointer-events: none; width: max-content; max-width: min(640px, calc(100vw - 48px)); padding: 12px 16px; border-radius: 14px; background: var(--dsw-alias-toast-bg); color: var(--dsw-static-neutral-bluish-00); font-size: 14px; line-height: 22px; box-shadow: var(--dsw-shadow-lv3); transform: translateX(-50%); animation: dt-toast-in 160ms ease-out, dt-toast-fade 1000ms ease var(--dt-toast-hold, 3000ms) forwards; }\n@keyframes dt-toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }\n@keyframes dt-toast-fade { to { opacity: 0; visibility: hidden; } }\n@media (prefers-reduced-motion: reduce) {\n  .dt-tab, .dt-segment, .dt-switch-thumb, .dt-spinner g, .dt-btn-busy .dt-btn-icon svg, .dt-tooltip { transition: none; animation: none; }\n  .dt-toast { animation: dt-toast-fade 1000ms ease var(--dt-toast-hold, 3000ms) forwards; }\n}\n.dt-page .dt-tab { height: 34px; padding: 0 2px; border: 0; border-radius: 0; color: var(--dsw-alias-label-tertiary); font-size: 14px; }\n.dt-page .dt-tab[aria-selected='true'] { background: none; color: var(--dsw-alias-label-primary); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--dsw-alias-label-primary); }\n.dt-status-head { display: flex; align-items: center; gap: 8px; }\n.dt-status-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 4px; font-size: 15px; line-height: 22px; font-weight: 600; }\n.dt-status-text { margin-left: auto; flex: none; font-size: 12px; font-weight: 400; color: var(--dsw-alias-label-secondary); }\n.dt-status-line .dt-status-text { margin-left: 0; }\n.dt-status-text[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-status-text[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }\n.dt-lv { white-space: nowrap; }\n.dt-lv-label { color: var(--dsw-alias-label-caption); }\n.dt-lv-value { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }\n.dt-chip { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; overflow: hidden; font-size: 11px; line-height: 18px; color: var(--dsw-alias-label-secondary); }\n.dt-chip-source { padding: 0 6px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-module-platform); }\n.dt-chip-fact { padding: 0 6px; border-left: 0.5px solid var(--dsw-alias-border-l3); white-space: nowrap; }\n.dt-chip-label { margin-right: 4px; color: var(--dsw-alias-label-caption); }\n.dt-chip-link { position: relative; z-index: 1; text-decoration: none; cursor: pointer; transition: border-color 120ms ease; }\n.dt-chip-link:hover { border-color: var(--dsw-alias-brand-primary); }\n.dt-chip-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-chip-open { display: inline-flex; align-items: center; padding: 0 5px; border-left: 0.5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-brand-primary); }\n.dt-chip-problem, .dt-chip-problem .dt-chip-label { color: var(--dsw-alias-state-error-primary); }\n.dt-cards { gap: 8px; }\n.dt-att .dt-inline-link { font-size: 13px; font-weight: 500; }\n.dt-list > .dt-att { margin: 2px 8px; }\n.dt-att { padding: 10px 12px 10px 16px; border: 0; border-radius: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-att::before { content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 2px; border-radius: 1px; background: var(--dsw-alias-state-warn-primary); opacity: 0.7; }\n.dt-att-error::before { background: var(--dsw-alias-state-error-primary); }\n.dt-att-what { font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-state-warn-primary); }\n.dt-att-error .dt-att-what, .dt-att-error .dt-att-what .dt-open { color: var(--dsw-alias-state-error-primary); }\n.dt-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; }\n.dt-stat { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-stat-value { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }\n.dt-more-link { font-size: 12px; font-weight: 400; }\n.dt-settings { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 24px; align-items: start; }\n.dt-settings-nav { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; }\n.dt-settings-link { padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }\n.dt-settings-link:hover { color: var(--dsw-alias-label-primary); }\n.dt-settings-link[aria-current='page'] { background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-weight: 500; }\n.dt-settings-link[data-stage] + .dt-settings-link:not([data-stage]) { margin-top: 10px; }\n.dt-settings-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }\n.dt-settings-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }\n.dt-subtabs { display: flex; gap: 16px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-subtab { padding: 0 0 6px; border: 0; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 13px; cursor: pointer; }\n.dt-subtab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--dsw-alias-label-primary); }\n.dt-part { display: flex; flex-direction: column; gap: 12px; }\n.dt-rows-summary { text-align: left; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }\n.dt-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 18px; }\n.dt-table th { text-align: left; font-weight: 400; color: var(--dsw-alias-label-caption); padding: 2px 8px 2px 0; }\n.dt-table td { padding: 4px 8px 4px 0; border-top: 0.5px solid var(--dsw-alias-border-l3); vertical-align: top; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }\n@container (max-width: 640px) {\n  .dt-settings { grid-template-columns: 1fr; gap: 12px; }\n  .dt-settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }\n  .dt-settings-link[data-stage] + .dt-settings-link:not([data-stage]) { margin-top: 0; }\n  .dt-page .dt-tabs { gap: 14px; }\n}\n.dt-list > .dt-ticket { display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 12px; align-items: start; margin: 0; padding: 12px 8px 12px 18px; border-radius: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-list > .dt-ticket[data-state]::before { content: ''; position: absolute; left: 6px; top: 12px; bottom: 12px; width: 2px; border-radius: 1px; background: var(--dsw-alias-state-warn-primary); opacity: 0.7; }\n.dt-list > .dt-ticket[data-state='error']::before { background: var(--dsw-alias-state-error-primary); }\n.dt-ticket-stage { align-self: stretch; padding-top: 1px; border-right: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-ticket-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }\n.dt-ticket-body .dt-row-title .dt-open { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-ticket-meta { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }\n.dt-ticket-meta .dt-chip { flex: none; }\n.dt-ticket-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dsw-alias-label-primary); }\n.dt-ticket-note-error { color: var(--dsw-alias-state-error-primary); }\n.dt-ticket-actions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; margin-top: 2px; }\n/* Pass pointer events through action containers to the row link, keeping only child controls interactive. */\n.dt-ticket-actions, .dt-row-buttons, .dt-row-actions { pointer-events: none; }\n.dt-ticket-actions > *, .dt-row-buttons > *, .dt-row-actions > * { pointer-events: auto; }\n.dt-line { min-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.dt-row-meta.dt-line { flex-wrap: nowrap; }\n.dt-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-error-text { color: var(--dsw-alias-state-error-primary); }\n.dt-stage { display: inline-flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }\n.dt-stage svg { flex: none; margin-top: 2px; }\n.dt-stage[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-stage[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-stage[data-state='ongoing'] { color: var(--dsw-alias-state-business-primary); }\n.dt-icon-link { display: inline-flex; align-items: center; gap: 4px; }\na.dt-btn, a.dt-btn:hover { text-decoration: none; }\n.dt-section-icon { display: inline-flex; align-self: center; color: var(--dsw-alias-label-tertiary); }\n.dt-trigger-link { display: flex; flex-direction: column; gap: 2px; width: 100%; margin: -4px 0 -4px -8px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }\n.dt-trigger-link:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-trigger-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-trigger-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-kv-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }\n.dt-banner-actions { margin-top: 6px; }\n@container (max-width: 640px) {\n  .dt-list > .dt-ticket { grid-template-columns: 1fr; row-gap: 4px; }\n  .dt-ticket-stage { border-right: 0; }\n}\n.dt-nav-group { margin: 10px 10px 2px; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-nav-group:first-child { margin-top: 0; }\n.dt-prompt-nav .dt-nav-item { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }\n.dt-nav-item > span { display: inline-flex; align-items: center; gap: 6px; }\n.dt-nav-item small { font-size: 12px; line-height: 18px; font-weight: 400; color: var(--dsw-alias-label-caption); }\n.dt-preview-part[data-editable] { border-left-color: var(--dsw-alias-brand-primary); }\n.dt-preview-head b { font-weight: 500; }\n.dt-preview-head > span { font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-changed-tag { margin-left: 6px; padding: 0 5px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; font-size: 11px; line-height: 16px; font-weight: 400; color: var(--dsw-alias-label-secondary); }\n.dt-updated-tag { border-color: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-state-warn-primary); }\n.dt-default-updated { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-state-warn-primary); }\n.dt-diff-fold { color: var(--dsw-alias-label-caption); font-style: italic; }\n.dt-compare { margin-left: auto; }\n.dt-admission th { white-space: nowrap; }\n.dt-admission thead tr:first-child th:not(:first-child) { color: var(--dsw-alias-label-secondary); font-weight: 500; }\n.dt-admission td { vertical-align: middle; }\n.dt-admission-scope { color: var(--dsw-alias-label-primary); font-size: 13px; }\n.dt-admission-scope small { display: block; font-size: 11px; color: var(--dsw-alias-label-caption); }\n.dt-admission-na { color: var(--dsw-alias-label-caption); }\n.dt-admission-cell { display: flex; align-items: center; gap: 4px; }\n.dt-admission-cell .dt-select { flex: 1; min-width: 0; }\n.dt-admission-slot { display: inline-flex; flex: none; width: 16px; }\n.dt-info-warn { color: var(--dsw-alias-state-warn-primary); }\n.dt-field-segmented { max-width: 240px; }\n/* Task dock above the main Session's composer */\n.dt-dock { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }\n.dt-dock-head { display: flex; align-items: center; gap: 8px; min-width: 0; }\n.dt-dock-toggle { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 4px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }\n.dt-dock-toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-dock-toggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-dock-title { font-weight: 500; white-space: nowrap; }\n.dt-dock-count { min-width: 18px; height: 18px; box-sizing: border-box; padding: 0 5px; border-radius: 9px; background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-primary); font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }\n.dt-dock-summary { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; color: var(--dsw-alias-label-caption); }\n.dt-dock-spacer { flex: 1; }\n.dt-dock-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; max-height: 264px; margin: 0; padding: 1px; list-style: none; overflow: auto; scrollbar-gutter: stable; }\n.dt-dock-card { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); }\n.dt-dock-card[data-tone='danger'] { box-shadow: inset 2px 0 0 var(--dsw-alias-state-error-primary); }\n.dt-dock-card[data-tone='warning'] { box-shadow: inset 2px 0 0 var(--dsw-alias-state-warn-primary); }\n.dt-dock-card[data-tone='info'] { box-shadow: inset 2px 0 0 var(--dsw-alias-state-business-primary); }\n.dt-dock-card[data-selected] { outline: 1.5px solid var(--dsw-alias-brand-primary); outline-offset: -1.5px; }\n.dt-dock-top { display: flex; align-items: center; gap: 8px; min-width: 0; }\n.dt-dock-check { flex: none; margin: 0; accent-color: var(--dsw-alias-brand-primary); cursor: pointer; }\n.dt-dock-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); font-weight: 500; }\n.dt-dock-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding-left: 22px; }\n.dt-dock-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-dock-ratio { flex: none; color: var(--dsw-alias-label-primary); font-weight: 600; font-variant-numeric: tabular-nums; }\n.dt-dock-meta { display: flex; align-items: center; gap: 8px; min-width: 0; padding-left: 22px; color: var(--dsw-alias-label-caption); }\n.dt-dock-live { display: inline-flex; align-items: center; gap: 4px; }\n.dt-dock-open { padding: 0; border: 0; background: transparent; color: var(--dsw-alias-link); font: inherit; cursor: pointer; }\n.dt-dock-open:hover { text-decoration: underline; }\n.dt-dock-ask { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; padding: 6px 8px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); }\n.dt-dock-target { flex: none; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }\n.dt-dock-question { flex: 1; min-width: 160px; }\n.dt-dock-notice { flex-basis: 100%; color: var(--dsw-alias-state-warn-primary); }\n/* Task canvas: a page of its own */\n.dt-canvas { position: relative; height: 100%; box-sizing: border-box; overflow: hidden; background-color: var(--dsw-alias-bg-base); background-image: radial-gradient(circle, var(--dsw-alias-border-l3) 1px, transparent 1px); background-repeat: repeat; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; user-select: none; cursor: grab; touch-action: none; }\n.dt-canvas:active { cursor: grabbing; }\n.dt-canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }\n.dt-canvas-lane { position: absolute; top: 0; box-sizing: border-box; min-height: 720px; padding: 16px 0 64px; border: 0.5px dashed var(--dsw-alias-border-l3); border-radius: 14px; background: var(--dsw-alias-bg-layer-1); }\n.dt-canvas-lane-title { margin: 0 0 8px; padding: 2px 14px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-stack { display: flex; flex-direction: column; gap: 12px; padding: 0 14px; }\n.dt-canvas-card { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-soft); cursor: default; user-select: text; }\n.dt-canvas-card[data-picked] { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary); }\n.dt-canvas-card[data-tone='danger'] { border-left: 3px solid var(--dsw-alias-state-error-primary); }\n.dt-canvas-card[data-tone='warning'] { border-left: 3px solid var(--dsw-alias-state-warn-primary); }\n.dt-canvas-card[data-tone='info'] { border-left: 3px solid var(--dsw-alias-state-business-primary); }\n.dt-canvas-card-quiet { align-items: flex-start; border-style: dashed; background: transparent; box-shadow: none; }\n.dt-canvas-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }\n.dt-canvas-card-title { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary); }\n.dt-canvas-handle { cursor: grab; }\n.dt-canvas-handle:active { cursor: grabbing; }\n.dt-canvas-handle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }\n.dt-canvas-check { flex: none; margin: 0; accent-color: var(--dsw-alias-brand-primary); cursor: pointer; }\n.dt-canvas-state { flex: none; color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-subhead { margin: 4px 0 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: var(--dsw-alias-label-caption); }\n.dt-canvas-live { display: inline-flex; align-items: center; gap: 4px; }\n.dt-canvas-thread { display: flex; flex-direction: column; gap: 8px; max-height: 240px; margin: 0; padding: 0; list-style: none; overflow: auto; }\n.dt-canvas-thread li { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 8px; background: var(--dsw-alias-bg-layer-3); }\n.dt-canvas-thread li[data-role='operator'] { background: var(--dsw-alias-bg-module-platform); }\n.dt-canvas-speaker { display: flex; justify-content: space-between; gap: 8px; color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }\n.dt-canvas-quiet { margin: 0; color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-card-foot { display: flex; justify-content: flex-end; gap: 8px; }\n.dt-canvas-composer-about { margin: 0; padding: 4px 8px; border-radius: 6px; background: var(--dsw-alias-bg-module-platform); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }\n.dt-canvas-composer-about[data-none] { color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-composer-input { box-sizing: border-box; width: 100%; min-height: 84px; resize: vertical; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }\n.dt-canvas-composer-input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }\n.dt-canvas-composer-input::placeholder { color: var(--dsw-alias-label-dimmed); }\n.dt-canvas-progress { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; }\n.dt-canvas-ratio { flex: none; color: var(--dsw-alias-label-primary); font-weight: 600; font-variant-numeric: tabular-nums; }\n.dt-canvas-edges { position: absolute; inset: 0; pointer-events: none; }\n.dt-canvas-edge { fill: none; stroke: var(--dsw-alias-label-tertiary); stroke-width: 1.5; }\n.dt-canvas-edge-ask, .dt-canvas-line[data-kind='ask'] .dt-canvas-edge { stroke: var(--dsw-alias-brand-primary); stroke-dasharray: 5 4; }\n#dt-canvas-arrow path { fill: var(--dsw-alias-label-tertiary); }\n#dt-canvas-arrow-ask path { fill: var(--dsw-alias-brand-primary); }\n.dt-canvas-edge-label { font-size: 11px; fill: var(--dsw-alias-label-tertiary); text-anchor: middle; }\n.dt-canvas-line[data-kind='ask'] .dt-canvas-edge-label { fill: var(--dsw-alias-brand-primary); }\n.dt-canvas-legend { position: absolute; left: 16px; top: 16px; z-index: 2; max-width: 320px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); cursor: default; }\n.dt-canvas-legend-title { margin: 0 0 6px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); }\n.dt-canvas-legend ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }\n.dt-canvas-legend li { display: flex; align-items: center; gap: 6px; }\n.dt-canvas-tools { position: absolute; right: 16px; top: 16px; z-index: 2; display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); cursor: default; }\n.dt-canvas-tool { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer; }\n.dt-canvas-tool:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-canvas-tool:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }\n.dt-canvas-load { position: absolute; right: 56px; top: 16px; z-index: 2; margin: 0; padding: 5px 10px; border-radius: 999px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); cursor: default; }\n.dt-canvas-load:empty { display: none; }\n.dt-canvas-minimap { position: absolute; right: 16px; bottom: 64px; z-index: 2; box-sizing: border-box; width: 200px; height: 136px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; cursor: pointer; }\n.dt-canvas-mini-node { position: absolute; box-sizing: border-box; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 2px; background: var(--dsw-alias-bg-layer-3); }\n.dt-canvas-mini-node[data-picked] { background: var(--dsw-alias-brand-primary); }\n.dt-canvas-mini-view { position: absolute; box-sizing: border-box; border: 1px solid var(--dsw-alias-brand-primary); border-radius: 2px; }\n.dt-canvas-bar { position: absolute; left: 50%; bottom: 16px; z-index: 2; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 260px); padding: 6px 8px 6px 14px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 22px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-prominent); white-space: nowrap; cursor: default; }\n.dt-canvas-bar-title { color: var(--dsw-alias-label-primary); font-weight: 600; }\n.dt-canvas-bar-lanes { color: var(--dsw-alias-label-tertiary); }\n.dt-canvas-bar-sum { display: inline-flex; align-items: center; gap: 6px; }\n";
+		//#endregion
+		//#region src/core/reasons.ts
+		/**
+		* Structured reason codes and templates for decisions, filtered triggers, and ended assignments.
+		* Policy gates and source scopes may also emit their own literal reason codes.
+		*/
+		const REASONS = {
+			said: "{text}",
+			timeout: "Assessment timed out",
+			policyChanged: "Policy changed during assessment",
+			noAdmissible: "No admissible trigger",
+			startedTicket: "Already started ticket {ticket}",
+			acceptedBefore: "Trigger {trigger} was accepted before",
+			routed: "Routed to ticket {ticket}",
+			explicitRouted: "Explicit request from an allowed sender routed by the orchestrator",
+			humanStop: "Human asked to stop",
+			legacyImport: "Imported from the pre-domain-model task record",
+			forwarded: "Forwarded to the worker of the Ticket already on this Thread",
+			senderNotMember: "The sender is not on the Source's list",
+			retried: "Retried by a person",
+			hostRestarted: "dsh-superagent restarted",
+			stopUnknown: "Stop target is unknown or already ended",
+			stopNotExplicit: "A stop needs an explicit request from a sender on the list",
+			directionUnsettled: "Implementation intent or target direction is not established, or a product/design decision is still required",
+			noRuleMatched: "No enabled admission rule matched",
+			ignoredFromCard: "Ignored from its card, without a rule assessment",
+			observed: "Observe mode: would accept ({text})"
+		};
+		/** Formats reasons in English (prefixed by `triggerId` when present) for agent consumption. */
+		function reasonText(reasons) {
+			return [reasons ?? []].flat().map((reason) => {
+				const text = (REASONS[reason.code] ?? reason.code).replace(/\{(\w+)\}/g, (match, name) => reason.values?.[name] ?? match);
+				return reason.triggerId ? `${reason.triggerId}: ${text}` : text;
+			}).join("; ");
+		}
+		//#endregion
+		//#region src/client/text.ts
+		const errorText = (failure) => failure instanceof Error ? failure.message : String(failure);
+		const localized = (t, text) => typeof text === "string" ? text : text ? text[t("lang") === "en" ? "en" : "zh"] : "";
+		const actorName = (t, actor) => actor?.name ? localized(t, actor.name) : t("automatedNotice");
+		function valueLabel(t, group, key) {
+			if (!key) return "";
+			const name = `${group}.${key}`;
+			const text = t(name);
+			return text === name ? key : text;
+		}
+		/** Format one or more structured or raw reasons in the active UI language, truncating multi-line host errors to their first line. */
+		function reasonLabel(t, reason) {
+			if (typeof reason === "string") return reason ? label(t, { code: reason }) : "";
+			return [reason ?? []].flat().map((item) => label(t, item)).filter(Boolean).join("；");
+		}
+		function label(t, reason) {
+			const key = `reason.${reason.code}`;
+			const text = reason.code === "said" ? reason.values?.text ?? "" : t(key, reason.values);
+			if (reason.code !== "said" && text !== key) return text;
+			const written = reason.code === "said" ? text : reasonText({
+				...reason,
+				triggerId: void 0
+			});
+			if (/^\w*Error\b/.test(written)) {
+				const first = written.split("\n")[0];
+				return first.length > 140 ? `${first.slice(0, 140)}…` : first;
+			}
+			return written;
+		}
+		const setupText = (t, problem) => t(`setup.${problem.code}`, problem.values);
+		const healthText = (t, health) => health.code ? t(`healthCode.${health.code}`, health.values) : health.detail;
+		/** Replaces Feishu and GitHub content placeholders (images, cards, media, forwards, unresolved mentions) with localized labels. */
+		function readableMarkers(t, text) {
+			return text.replace(/!\[[^\]]*\]\([^)]*\)|\[Image: [^\]]*\]|\[image\]/g, t("imageMarker")).replace(/\[Chat card: [^\]]*\]/g, t("cardMarker")).replace(/\[Media: [^\]]*\]/g, t("mediaMarker")).replace(/\[Merged forward\]/g, t("forwardMarker")).replace(/@_user_\d+/g, t("unknownMention"));
+		}
+		const timeLocale = (lang) => lang === "en" ? "en" : "zh-CN";
+		function when(value, lang) {
+			if (!value) return "";
+			const date = new Date(value);
+			if (Number.isNaN(date.getTime())) return value;
+			const seconds = Math.round((date.getTime() - Date.now()) / 1e3);
+			if (Math.abs(seconds) < 86400) {
+				const relative = new Intl.RelativeTimeFormat(timeLocale(lang), { numeric: "auto" });
+				if (Math.abs(seconds) < 60) return relative.format(0, "second");
+				if (Math.abs(seconds) < 3600) return relative.format(Math.round(seconds / 60), "minute");
+				return relative.format(Math.round(seconds / 3600), "hour");
+			}
+			const year = date.getFullYear() === (/* @__PURE__ */ new Date()).getFullYear() ? {} : { year: "numeric" };
+			return date.toLocaleString(timeLocale(lang), {
+				...year,
+				month: "short",
+				day: "numeric",
+				hour: "2-digit",
+				minute: "2-digit"
+			});
+		}
+		function fullTime(value, lang) {
+			const date = new Date(value ?? "");
+			return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(timeLocale(lang));
+		}
+		//#endregion
+		//#region src/client/provider.tsx
+		/** Shared panel React contexts, state polling, restart detection, and action runner hook. */
+		const Panel = (0, react.createContext)(void 0);
+		const PanelState = (0, react.createContext)(void 0);
+		function usePanel() {
+			const value = (0, react.useContext)(Panel);
+			if (!value) throw new Error("dsh-superagent page rendered outside its panel");
+			return value;
+		}
+		function usePanelData() {
+			const value = (0, react.useContext)(PanelState);
+			if (!value) throw new Error("dsh-superagent page rendered outside its panel");
+			return value;
+		}
+		/** Wrap an async action with re-entrancy protection, busy state, optional reload, and error toast reporting. */
+		function useAction(action, { reload } = {}) {
+			const { notify } = usePanel();
+			const [busy, setBusy] = (0, react.useState)(false);
+			const running = (0, react.useRef)(false);
+			const run = async (...args) => {
+				if (running.current) return false;
+				running.current = true;
+				setBusy(true);
+				try {
+					await action(...args);
+					await reload?.();
+					return true;
+				} catch (failure) {
+					notify(errorText(failure));
+					return false;
+				} finally {
+					running.current = false;
+					setBusy(false);
+				}
+			};
+			return {
+				run,
+				busy
+			};
+		}
+		/** Localized failure messages for the management API, which every caller of it resolves on each request. */
+		const messages = (t) => ({
+			offline: t("offline"),
+			notRunning: t("hostNotRunning"),
+			serverError: (status) => t("serverError", { status }),
+			requestFailed: (status) => t("requestFailed", { status }),
+			setup: (problem) => problem.values.output ? `${setupText(t, problem)}\n${problem.values.output}` : setupText(t, problem),
+			user: ({ code, values }) => t(`userError.${code}`, values.part ? {
+				...values,
+				part: valueLabel(t, "promptPart", values.part)
+			} : values)
+		});
+		function Toast({ text, onDone, holdMs = 3e3 }) {
+			const done = (0, react.useRef)(onDone);
+			done.current = onDone;
+			(0, react.useEffect)(() => {
+				const timer = setTimeout(() => done.current(), holdMs + 1e3);
+				return () => clearTimeout(timer);
+			}, [holdMs]);
+			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "dt-toast",
+				role: "status",
+				style: { ["--dt-toast-hold"]: `${holdMs}ms` },
+				children: text
+			}), document.body);
+		}
+		const stay = () => {};
+		const noSession = async () => {};
+		function PanelProvider({ t, interval = 5e3, openSession = noSession, navigate = stay, back = stay, backLabel = "", children }) {
+			const copy = (0, react.useRef)(t);
+			copy.current = t;
+			const call = (0, react.useMemo)(() => caller(() => messages(copy.current)), []);
+			const [toast, setToast] = (0, react.useState)();
+			const notify = (0, react.useCallback)((text) => setToast({
+				text,
+				id: Date.now()
+			}), []);
+			const [restarting, setRestarting] = (0, react.useState)();
+			const [restarts, setRestarts] = (0, react.useState)(0);
+			const restart = (0, react.useCallback)(() => setRestarting({ down: false }), []);
+			const { data: state, error, reload } = usePoll(() => call("GET state"), [call], restarting ? 1e3 : interval);
+			if (restarting && !!error !== restarting.down) {
+				setRestarting(error ? { down: true } : void 0);
+				if (!error) setRestarts(restarts + 1);
+			}
+			(0, react.useEffect)(() => {
+				if (!restarting) return;
+				const timer = setTimeout(() => setRestarting(void 0), 3e4);
+				return () => clearTimeout(timer);
+			}, [restarting]);
+			const context = (0, react.useMemo)(() => ({
+				t,
+				call,
+				navigate,
+				back,
+				backLabel,
+				openSession,
+				notify,
+				restart
+			}), [
+				t,
+				call,
+				navigate,
+				back,
+				backLabel,
+				openSession,
+				notify,
+				restart
+			]);
+			const data = (0, react.useMemo)(() => ({
+				state,
+				error,
+				reload,
+				setup: state?.setup,
+				running: state?.load.running ?? 0,
+				restarts
+			}), [
+				state,
+				error,
+				reload,
+				restarts
+			]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Panel.Provider, {
+				value: context,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(PanelState.Provider, {
+					value: data,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: client_default }),
+						children,
+						toast && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Toast, {
+							text: toast.text,
+							onDone: () => setToast(void 0)
+						}, toast.id)
+					]
+				})
+			});
+		}
+		//#endregion
 		//#region src/navigation.ts
 		/**
 		* Thrown by `openKnownSession` when the host Session catalog is not ready or does not list the target Session.
@@ -45,6 +478,8 @@ window.__ModuleLoader__.load({
 			search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
 			question: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01",
 			plus: "M12 5v14M5 12h14",
+			minus: "M5 12h14",
+			fullscreen: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
 			trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
 			refresh: "M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5",
 			clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
@@ -468,443 +903,11 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region src/core/errors.ts
-		/** User-facing error codes mapped to their category ('missing' or 'refused') and English message template. */
-		const USER_ERRORS = {
-			unknownTicket: ["missing", "Unknown ticket"],
-			unknownProblem: ["missing", "Unavailable Eval not found"],
-			unknownTrigger: ["missing", "Unknown trigger"],
-			unknownAssignment: ["missing", "Unknown assignment"],
-			unknownWorkspace: ["missing", "Unknown workspace"],
-			notChildWorkspace: ["refused", "Only a child workspace dsh-superagent created for a ticket worker can be archived or removed here"],
-			workspaceBusy: ["refused", "Work still runs in {sessions}; stop it before archiving or removing the workspace"],
-			workspaceNotArchived: ["refused", "Sessions {sessions} are not archived yet; archive them first, as the DSH client archives a Session"],
-			unknownBlock: ["missing", "Unknown settings block: {block}"],
-			unknownPromptRevision: ["missing", "Unknown prompt revision {revision}"],
-			unknownPromptPart: ["refused", "Unknown built-in prompt part {part}"],
-			ticketEnded: ["refused", "Ticket has ended"],
-			assignmentEnded: ["refused", "Assignment has ended; a newer assignment owns this ticket"],
-			evalFinished: ["refused", "Eval {eval} has finished or a later eval replaced it; decide the trigger's current eval"],
-			notAdmissible: ["refused", "Trigger is not admissible: {reason}"],
-			notExplicit: ["refused", "An accept through orchestrator_route is for explicit requests from allowed senders; assess proactive candidates with orchestrator_eval and orchestrator_eval_decide"],
-			ticketStopped: ["refused", "A person stopped this ticket; new work needs an accept through orchestrator_route"],
-			mandateRevoked: ["refused", "The current policy no longer holds this ticket's mandate; new work needs an accept through orchestrator_route"],
-			notRetryable: ["refused", "Only an open ticket can be retried, and only when its worker last reported failed or blocked and no person has sent a message since, or when delivering an Input to its worker failed"],
-			sourceThread: ["refused", "This is the thread the ticket started on; it stays subscribed"],
-			followedThread: ["refused", "This thread is the ticket's own, such as its pull request's; it stays subscribed"],
-			notFollowing: ["refused", "This ticket does not follow that thread"],
-			questionWithResult: ["refused", "A question for a person cannot also be a ready result or an answer; report it separately"],
-			askerWithoutQuestion: ["refused", "The message that raised a question needs the question it raised"],
-			notAsker: ["refused", "A question must name the person's message that raised it, which reached this ticket"],
-			notAnswerable: ["refused", "An answer must name the person's question it answers, which reached this ticket"],
-			ackEnded: ["refused", "Ticket ended; do not acknowledge historical requests"],
-			notReached: ["refused", "Trigger does not belong to this worker"],
-			handedBack: ["refused", "This ticket handed that trigger back already"],
-			handedBackHere: ["refused", "The worker of this ticket handed that trigger back as beyond it: accept it as new work, attach it to another ticket, or ignore it"],
-			workerDecides: ["refused", "This message reached ticket {tickets} on its thread: its worker decides whether it belongs there and hands back what does not, which then arrives as a candidate. Only a stop goes through orchestrator_route, with kind stop"],
-			ackNoChannel: ["refused", "Acknowledgement requires an assigned human source message"],
-			ackNotPerson: ["refused", "Use the original human trigger, not a bot, CI or worker report"],
-			notReady: ["refused", "Ticket is not ready for delivery. Keep progress internal and wait for a verified ready report; do not relabel progress as an answer or send it through another channel."],
-			notAttention: ["refused", "Attention requires the ticket's current attention question in human_action. Routine unfinished work stays internal."],
-			notQuestion: ["refused", "An answer must target the original human question, not a worker report or automated trigger"],
-			noAnswer: ["refused", "No worker answer is ready for this human trigger. Wait for the worker's report, or request one with orchestrator_ticket_request_status, which acts only on a worker that reported waiting; ordinary progress cannot be relabelled as an answer."],
-			noChannel: ["refused", "No reply channel for this ticket or trigger"],
-			panelOnlyEnvironment: ["refused", "The execution environment (ticket directory, prepare command, blocked commands) can only be changed in the management panel"],
-			panelOnlyAccounts: ["refused", "Source fields that setup reads, such as account CLIs, can only be changed in the management panel"],
-			setupComplete: ["refused", "Setup is complete"],
-			modelUnavailable: ["refused", "The {block} model is not available: {error}"],
-			promptTooLong: ["refused", "Prompt configuration exceeds {limit} characters"],
-			promptPlaceholders: ["refused", "The “{part}” template must keep {placeholders}, which the system fills in"],
-			promptPartEmpty: ["refused", "The “{part}” part cannot be empty; reset it to follow its built-in text"],
-			sourceNotInstalled: ["refused", "The {source} Source kind is not installed"],
-			noLabels: ["refused", "This Source has no names to refresh"],
-			nothingToSync: ["refused", "The {source} Source's part of the Policy has nothing to sync from, or the Source is off or waiting for setup"]
-		};
-		//#endregion
-		//#region src/client/api.ts
-		/** Same-origin client and polling hook for the orchestrator management API. */
-		/**
-		* Represents a failed management API request with a localized message and structured diagnostic details.
-		* Thrown by API callers and inspected by UI views and draft state to distinguish validation issues, missing records,
-		* and unreachable hosts (`details.unreachable` is set when `dsh-superagent` did not answer at all, such as during a restart,
-		* in which case a 404 does not mean a record is missing).
-		*/
-		var ApiError = class extends Error {
-			status;
-			details;
-			constructor(message, status, details = {}) {
-				super(message);
-				this.status = status;
-				this.details = details;
-			}
-			get issues() {
-				return this.details.issues ?? [];
-			}
-			/** True when the host confirmed the record does not exist, rather than being unreachable. */
-			get missing() {
-				return this.status === 404 && !this.details.unreachable;
-			}
-		};
-		const isUserError = (code) => typeof code === "string" && Object.hasOwn(USER_ERRORS, code);
-		/** Calls one management endpoint; the `x-orchestrator-request` header marks the request as originating from this page. */
-		async function api(messages, path, method, body) {
-			let response;
-			const json = body === void 0 ? {} : {
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(body)
-			};
-			try {
-				response = await fetch(`/orchestrator/api/${path}`, {
-					method,
-					...json,
-					headers: {
-						"x-orchestrator-request": "1",
-						...json.headers
-					}
-				});
-			} catch {
-				throw new ApiError(messages.offline, 0, { unreachable: true });
-			}
-			const text = await response.text();
-			let value;
-			try {
-				value = text ? JSON.parse(text) : {};
-			} catch {
-				value = void 0;
-			}
-			if (!response.ok) {
-				const failure = value ?? {};
-				const issues = Array.isArray(failure.issues) ? failure.issues : [];
-				const user = isUserError(failure.code) ? {
-					code: failure.code,
-					values: failure.values ?? {}
-				} : void 0;
-				const { status } = response;
-				throw new ApiError(failure.setup ? messages.setup(failure.setup) : user ? messages.user(user) : typeof failure.error === "string" ? failure.error : !text && status === 404 ? messages.notRunning : status >= 500 ? messages.serverError(status) : messages.requestFailed(status), status, {
-					issues,
-					...failure.setup ? { setup: failure.setup } : {},
-					...user ? { user } : {},
-					...text ? {} : { unreachable: true }
-				});
-			}
-			return value;
-		}
-		const HIDDEN_FACTOR = 6;
-		const same$1 = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
-		/**
-		* Poll an endpoint while mounted, backing off when the document is hidden.
-		* Preserves the last successful value across dependency changes and errors, skips state updates when the response is unchanged,
-		* and drops stale responses when `deps` or `intervalMs` changes start a new subscription.
-		*/
-		function usePoll(load, deps, intervalMs = 5e3) {
-			const [state, setState] = (0, react.useState)({});
-			const loader = (0, react.useRef)(load);
-			loader.current = load;
-			const refresh = (0, react.useRef)(async () => {});
-			(0, react.useEffect)(() => {
-				let active = true;
-				let timer;
-				let queue = Promise.resolve();
-				const once = async () => {
-					clearTimeout(timer);
-					try {
-						const value = await loader.current();
-						if (active) setState((previous) => same$1(previous.data, value) ? previous.error ? { data: previous.data } : previous : { data: value });
-					} catch (failure) {
-						if (active) setState((previous) => ({
-							...previous,
-							error: failure instanceof Error ? failure : new Error(String(failure))
-						}));
-					} finally {
-						if (active) timer = setTimeout(run, document.hidden ? intervalMs * HIDDEN_FACTOR : intervalMs);
-					}
-				};
-				const run = () => queue = queue.then(once);
-				const shown = () => {
-					if (!document.hidden) run();
-				};
-				refresh.current = run;
-				run();
-				document.addEventListener("visibilitychange", shown);
-				return () => {
-					active = false;
-					clearTimeout(timer);
-					document.removeEventListener("visibilitychange", shown);
-				};
-			}, [...deps, intervalMs]);
-			const reload = (0, react.useCallback)(() => refresh.current(), []);
-			return {
-				data: state.data,
-				error: state.error,
-				reload
-			};
-		}
-		const DECISION_FILTERS = [
-			"work",
-			"stop",
-			"ignore",
-			"unavailable",
-			"all"
-		];
-		const DECISION_KINDS = {
-			work: "accept,reopen",
-			stop: "stop",
-			ignore: "ignore",
-			unavailable: "unavailable",
-			all: ""
-		};
-		/** Build a typed route caller that resolves localized error messages on each request. */
-		function caller(messages) {
-			return (route, ...[request]) => {
-				const [method, pattern] = route.split(" ");
-				const values = request ?? {};
-				const path = pattern.replace(/:(\w+)/g, (_match, name) => encodeURIComponent(String(values[name])));
-				const query = Object.entries(values.query ?? {}).filter(([, value]) => value !== void 0 && value !== "").map(([name, value]) => `${name}=${encodeURIComponent(String(value))}`).join("&");
-				return api(messages(), query ? `${path}?${query}` : path, method, values.body);
-			};
-		}
-		//#endregion
-		//#region src/client/client.css?raw
-		var client_default = "/* Panel layout and local UI controls styled with DSH `--dsw-alias-*` design tokens; one rule per line. */\n.dt-page { box-sizing: border-box; height: 100%; overflow: auto; scrollbar-gutter: stable; scroll-padding: 48px 0 72px; container-type: inline-size; padding: 28px clamp(24px, 4vw, 48px) 0; color: var(--dsw-alias-label-primary); }\n/* Deployment page rendered inside DSH Plugin Manager, which owns scrolling and padding. */\n.dt-embedded { container-type: inline-size; color: var(--dsw-alias-label-primary); }\n/* Disable sticky positioning inside DSH Plugin Manager, where the host container owns scrolling and bottom padding. */\n.dt-embedded .dt-savebar { position: static; }\n.dt-page > .dt-column { max-width: 960px; margin: 0 auto; padding-bottom: 48px; display: flex; flex-direction: column; gap: 24px; }\n.dt-head { position: relative; z-index: 3; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }\n.dt-search { position: relative; width: 240px; max-width: 100%; }\n.dt-search-results { position: absolute; top: calc(100% + 6px); right: 0; width: min(560px, 90cqw); max-height: 60vh; overflow: auto; padding: 8px 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); z-index: 5; display: flex; flex-direction: column; gap: 8px; }\n.dt-mark { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 25%, transparent); color: inherit; border-radius: 2px; }\n[data-platform='darwin'] .dt-page .dt-head { padding-top: var(--dsh-frame-top-clearance, 0px); }\n.dt-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }\n.dt-page .dt-tabs { overflow-x: auto; display: flex; gap: 20px; max-width: none; padding: 0; border-radius: 0; background: none; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-segmented { width: 100%; max-width: 420px; box-sizing: border-box; display: inline-grid; gap: 2px; padding: 3px; border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover); }\n.dt-form.dt-block { padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; gap: 16px; }\n.dt-block-title { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }\n.dt-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }\n.dt-section-title { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-section-name { white-space: nowrap; }\n.dt-count { font-size: 14px; color: var(--dsw-alias-label-caption); font-variant-numeric: tabular-nums; font-weight: 400; }\n.dt-hint { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }\n.dt-error { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-state-error-primary); }\n.dt-banner { margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 20px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); overflow-wrap: anywhere; }\n.dt-banner.dt-danger { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }\n.dt-list { list-style: none; margin: 0 -8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }\n.dt-row { position: relative; min-width: 0; border-radius: 12px; padding: 10px 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: flex-start; }\n.dt-row.dt-link:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-row-main { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.dt-disclosure-body .dt-row-main { flex-basis: 0; }\n.dt-row-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 500; }\n.dt-open { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-open::after { content: ''; position: absolute; inset: 0; border-radius: 12px; }\n.dt-open:focus-visible { outline: none; }\n.dt-open-wrap { white-space: normal; }\n.dt-open:focus-visible::after { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }\n.dt-row-quote { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n/* Transparent block borders preserve vertical spacing when line clamping clips padding. */\n.dt-banner:is(.dt-clamp, .dt-clamp-8) { padding-block: 0; border-block: 8px solid transparent; }\n.dt-banner-label { font-weight: 500; }\n.dt-banner .dt-md { display: inline; }\n.dt-banner .dt-md > p:first-child { display: inline; }\n.dt-row-buttons { position: relative; z-index: 1; gap: 8px; margin-top: 4px; }\n.dt-row-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: 13px; line-height: 20px; }\n.dt-dot { flex: none; margin-top: 5px; }\n.dt-inline-link { position: relative; z-index: 1; color: var(--dsw-alias-link); text-decoration: none; }\n.dt-inline-link:hover { text-decoration: underline; }\n.dt-textlink { padding: 0; border: 0; background: none; font: inherit; color: var(--dsw-alias-link); cursor: pointer; text-align: left; }\n.dt-textlink:hover { text-decoration: underline; }\n.dt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 20px; }\n.dt-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; line-height: 20px; }\n.dt-kv dt { color: var(--dsw-alias-label-tertiary); }\n.dt-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }\n.dt-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }\n.dt-event { padding: 12px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); display: flex; flex-direction: column; gap: 6px; min-width: 0; }\n.dt-event:last-child { border-bottom: 0; }\n.dt-event.dt-highlight { background: var(--dsw-alias-interactive-bg-hover); border-radius: 8px; padding-inline: 8px; margin-inline: -8px; }\n.dt-event-text { margin: 0; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }\n.dt-event-actor { font-weight: 500; color: var(--dsw-alias-label-secondary); }\n.dt-event-quiet .dt-event-text { color: var(--dsw-alias-label-tertiary); }\n.dt-flow { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-clamp-8 { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-more { align-self: flex-start; font-size: 12px; }\n.dt-reveal { opacity: 0; }\n.dt-event:hover .dt-reveal, .dt-reveal:focus-visible { opacity: 1; }\n@media (hover: none) {\n  .dt-reveal { opacity: 1; }\n}\n.dt-event-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }\n.dt-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\n.dt-filters .dt-search { margin-left: auto; }\n.dt-form { display: flex; flex-direction: column; gap: 24px; }\n.dt-fieldset { display: flex; flex-direction: column; gap: inherit; min-width: 0; margin: 0; padding: 0; border: 0; }\n.dt-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; min-width: 0; }\n.dt-field small { color: var(--dsw-alias-label-caption); font-size: 12px; }\n.dt-textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1, transparent); resize: vertical; }\n.dt-select { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; padding: 0 28px 0 8px; text-overflow: ellipsis; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1, transparent); }\n.dt-textarea:focus-visible, .dt-select:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-mono { font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; overflow-wrap: anywhere; }\n.dt-detail { margin-top: 2px; color: var(--dsw-alias-label-secondary); }\n.dt-savebar .dt-error { white-space: pre-line; }\n.dt-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; font-size: 13px; }\n.dt-subhead-actions { display: inline-flex; align-items: center; gap: 4px; }\n.dt-btn-busy .dt-btn-icon svg { animation: dt-spin 1s linear infinite; }\n.dt-subhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-rules, .dt-changes { list-style: none; margin: 0; padding: 0; }\n.dt-field-head { display: inline-flex; align-items: center; gap: 4px; color: var(--dsw-alias-label-secondary); }\n.dt-info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-caption); cursor: help; }\n.dt-info:hover, .dt-info:focus-visible { color: var(--dsw-alias-label-secondary); }\n.dt-info:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 50%; }\n.dt-tooltip { position: fixed; z-index: 1100; width: max-content; max-width: min(320px, calc(100vw - 24px)); padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg); color: var(--dsw-static-neutral-bluish-00); font-size: 13px; line-height: 20px; overflow-wrap: break-word; pointer-events: none; animation: dt-tooltip-in 150ms ease-in-out; }\n@keyframes dt-tooltip-in { from { opacity: 0; } }\n.dt-rules { border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-rule { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-rule > :first-child { flex: 1; min-width: 0; }\n.dt-rule-preview { flex: 1; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-rule-switch { margin-top: 2px; flex: none; }\n.dt-rule-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-label-caption); }\n.dt-rule-dot[data-enabled] { background: var(--dsw-alias-brand-primary); }\n.dt-rule-body { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 8px 28px; }\n.dt-model { display: flex; flex-direction: column; gap: 6px; }\n.dt-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }\n.dt-changes { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 20px; }\n.dt-changes li::before { content: '· '; color: var(--dsw-alias-label-caption); }\n.dt-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }\n.dt-modal.dt-glossary-modal { width: min(680px, 100%); }\n.dt-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }\n.dt-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-nav-item[aria-current='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); font-weight: 500; }\n.dt-nav-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }\n.dt-changed-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); flex: none; }\n.dt-add-skill { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-prompt-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }\n.dt-editor { min-height: 360px; }\n.dt-inline-select { width: auto; }\n.dt-preview-part { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-border-l3); }\n.dt-preview-head { font-size: 13px; line-height: 20px; display: flex; align-items: baseline; gap: 8px; }\ndiv.dt-preview-head { color: var(--dsw-alias-label-secondary); }\n.dt-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; min-width: 0; }\n.dt-card-head { display: flex; align-items: center; gap: 12px; min-height: 28px; }\n.dt-card-head .dt-row-main { flex: 1 1 0; min-width: 64px; }\n.dt-card-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }\n.dt-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }\n.dt-rows-item { display: grid; grid-template-columns: repeat(var(--dt-columns), minmax(0, 1fr)) auto; gap: 8px; align-items: center; }\n.dt-filter-gap { flex: 1; }\n.dt-page-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }\n.dt-page-head > .dt-btn { margin-left: -10px; }\n.dt-page-title { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; width: 100%; }\n.dt-page-title h2 { margin: 0; flex: 1 1 auto; min-width: 0; font-size: 20px; line-height: 28px; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-status-line { margin-top: -16px; }\n.dt-plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 20px; }\n.dt-details { display: flex; flex-direction: column; gap: 2px; border-top: 0.5px solid var(--dsw-alias-border-l2); padding-top: 8px; }\n.dt-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-danger-zone .dt-btn { color: var(--dsw-alias-state-error-primary); }\n.dt-md { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }\n.dt-md p, .dt-md ul, .dt-md ol { margin: 0; }\n.dt-md ul, .dt-md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }\n.dt-md-heading { font-weight: 500; }\n.dt-code { font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; padding: 0 4px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); }\n.dt-dot-wrap { display: inline-flex; flex: none; }\n.dt-search-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }\n.dt-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }\n.dt-legend-title { margin: 16px 0 6px; font-size: 13px; color: var(--dsw-alias-label-tertiary); }\n.dt-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }\n.dt-legend li { display: flex; align-items: center; gap: 6px; }\n.dt-legend .dt-dot { margin-top: 0; }\n.dt-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 12px 0; background: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1)); border-top: 0.5px solid var(--dsw-alias-border-l2); }\n.dt-savebar .dt-hint { margin-right: auto; }\n.dt-card > .dt-savebar, .dt-block > .dt-savebar { margin: 0 -16px -16px; padding: 12px 16px; border-radius: 0 0 16px 16px; }\n.dt-glossary { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px; }\n.dt-glossary th, .dt-glossary td { text-align: left; padding: 6px 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); vertical-align: top; }\n.dt-glossary th { color: var(--dsw-alias-label-tertiary); font-weight: 400; }\n.dt-glossary th.dt-glossary-group { color: var(--dsw-alias-label-secondary); font-weight: 600; padding-top: 14px; }\n.dt-glossary th:nth-child(-n+2), .dt-glossary td:nth-child(-n+2) { white-space: nowrap; }\n.dt-values { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 16px 0 0; font-size: 13px; }\n.dt-values dt { color: var(--dsw-alias-label-tertiary); }\n.dt-values dd { margin: 0; }\n.dt-pre { margin: 0; padding: 12px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }\n.dt-pre ins { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, green) 18%, transparent); text-decoration: none; }\n.dt-pre del { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent); text-decoration: none; }\n.dt-prompt { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }\n.dt-prompt-nav { display: flex; flex-direction: column; gap: 2px; }\n.dt-prompt-nav button { justify-content: flex-start; }\n.dt-disclosure-body { padding: 8px 0 8px 28px; display: flex; flex-direction: column; gap: 8px; }\n@container (max-width: 640px) {\n  .dt-tab { padding: 0 8px; font-size: 13px; }\n  .dt-segment { padding: 0 10px; }\n  .dt-head { align-items: center; }\n  .dt-search-results { right: auto; left: 0; width: 100%; }\n  .dt-page-title h2 { font-size: 17px; line-height: 24px; }\n  .dt-status-line { margin-top: -12px; }\n  .dt-page .dt-tabs { display: flex; flex-wrap: nowrap; scrollbar-width: thin; }\n  .dt-page .dt-tab { flex: none; }\n  .dt-page .dt-tabs[data-more='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }\n  .dt-page .dt-tabs[data-more='start'] { mask-image: linear-gradient(to right, transparent, #000 40px); }\n  .dt-page .dt-tabs[data-more='both'] { mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }\n  .dt-kv { grid-template-columns: 1fr; gap: 2px; }\n  .dt-grid3, .dt-prompt { grid-template-columns: 1fr; }\n  .dt-search { width: 100%; }\n  .dt-filters .dt-search { margin-left: 0; }\n}\n/* Local UI primitive styles (see controls.tsx). */\n.dt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: none; border-radius: 18px; cursor: pointer; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); background: transparent; padding: 0 14px; white-space: nowrap; }\n.dt-btn:disabled { cursor: not-allowed; opacity: 0.4; }\n.dt-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-btn-md { height: 36px; }\n.dt-btn-sm { height: 28px; font-size: 12px; line-height: 18px; padding: 0 10px; border-radius: 14px; }\n.dt-btn-primary { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }\n.dt-btn-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }\n.dt-btn-ghost:hover:not(:disabled), .dt-btn-outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-btn-ghost:active:not(:disabled) { background: var(--dsw-alias-interactive-bg-active); }\n.dt-btn-outline { border: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-btn-icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; }\n.dt-tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 1px 8px; font-size: 11px; line-height: 17px; font-weight: 500; white-space: nowrap; }\n.dt-tag[data-tone='outline'] { border: 0.5px solid var(--dsw-alias-border-l4); color: var(--dsw-alias-label-tertiary); }\n.dt-tag[data-tone='neutral'] { background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); }\n.dt-tag[data-tone='quiet'] { color: var(--dsw-alias-label-tertiary); }\n.dt-tag[data-tone='success'] { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); color: var(--dsw-alias-state-success-primary); }\n.dt-tag[data-tone='info'] { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); color: var(--dsw-alias-state-business-primary); }\n.dt-tag[data-tone='warning'] { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent); color: var(--dsw-alias-state-warn-primary); }\n.dt-tag[data-tone='danger'] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); color: var(--dsw-alias-state-error-primary); }\n.dt-pill { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: none; border-radius: 12px; font: inherit; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); cursor: pointer; }\n.dt-pill:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-pill-active, .dt-pill-active:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border); }\n.dt-tabs { display: grid; padding: 4px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }\n.dt-tab { box-sizing: border-box; height: 34px; padding: 0 12px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 14px; line-height: 20px; white-space: nowrap; cursor: pointer; transition: color 180ms ease, background 180ms ease; }\n.dt-tab:hover { color: var(--dsw-alias-label-primary); }\n.dt-tab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 600; background: var(--dsw-alias-bg-layer-3); border-color: var(--dsw-alias-border-l3); }\n.dt-tab:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; }\n.dt-segment { height: 28px; padding: 0 16px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 120ms ease, background 160ms ease; }\n.dt-segment:hover:not(:disabled), .dt-segment[aria-selected='true'] { color: var(--dsw-alias-label-primary); }\n.dt-segment[aria-selected='true'] { background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); }\n.dt-segment:disabled { cursor: default; opacity: 0.4; }\n.dt-segment:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }\n.dt-input { box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 32px; min-width: 0; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }\n.dt-input:focus-within { border-color: var(--dsw-alias-brand-primary); }\n.dt-input-icon { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary); }\n.dt-input input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); }\n.dt-input input::placeholder { color: var(--dsw-alias-label-dimmed); }\n.dt-input input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }\n.dt-field .dt-input, .dt-search .dt-input, .dt-add-skill .dt-input { display: flex; width: 100%; }\n.dt-switch { box-sizing: border-box; flex: 0 0 auto; width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 10px; background: var(--dsw-alias-border-l3); cursor: pointer; }\n.dt-switch[aria-checked='true'] { background: var(--dsw-alias-brand-primary); }\n.dt-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-switch-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-primary-foreground); transition: transform 120ms ease; }\n.dt-switch[aria-checked='true'] .dt-switch-thumb { transform: translateX(16px); }\n.dt-state-dot { position: relative; display: inline-block; flex: none; width: 10px; height: 10px; color: var(--dsw-alias-state-idle-primary); }\n.dt-state-dot::after { content: ''; position: absolute; inset: 20%; border-radius: 50%; background: currentColor; }\n.dt-state-dot[data-state='done'] { color: var(--dsw-alias-state-success-primary); }\n.dt-state-dot[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-state-dot[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-spinner { flex: none; color: var(--dsw-alias-label-tertiary); }\n.dt-spinner g { transform-origin: center; animation: dt-spin 1.5s linear infinite; }\n.dt-spinner circle { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }\n.dt-spinner circle:first-child { opacity: 0.25; }\n.dt-spinner circle:last-child { stroke-dasharray: 18 150; }\n@keyframes dt-spin { to { transform: rotate(360deg); } }\n.dt-disclosure-row { display: flex; align-items: center; gap: 4px; min-height: 28px; min-width: 0; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }\n.dt-disclosure-row:hover { color: var(--dsw-alias-label-primary); }\n.dt-disclosure-row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\n.dt-disclosure-lead { position: relative; display: inline-flex; flex: none; width: 24px; height: 24px; align-items: center; justify-content: center; }\n.dt-disclosure-icon { display: inline-flex; align-items: center; justify-content: center; }\n.dt-disclosure-chevron { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }\n.dt-disclosure-row:hover .dt-disclosure-icon, .dt-disclosure[data-open] .dt-disclosure-icon { visibility: hidden; }\n.dt-disclosure-row:hover .dt-disclosure-chevron, .dt-disclosure[data-open] .dt-disclosure-chevron { display: inline-flex; }\n.dt-disclosure-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-modal-root { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: max(24px, var(--dsh-frame-top-clearance, 24px)) 24px; }\n.dt-modal-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }\n.dt-modal { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; width: min(380px, 100%); max-height: 100%; padding: 0 0 24px; overflow: hidden; border-radius: 24px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); color: var(--dsw-alias-label-primary); outline: none; }\n.dt-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 22px 14px 0 24px; }\n.dt-modal-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }\n.dt-modal-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent; cursor: pointer; color: var(--dsw-alias-label-secondary); }\n.dt-modal-close:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-modal-description { margin: -8px 0 0; padding: 0 24px; font-size: 14px; line-height: 22px; }\n.dt-modal-body { min-width: 0; min-height: 0; overflow: auto; padding: 0 24px; }\n.dt-modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 24px; }\n.dt-toast { position: fixed; top: 40px; left: 50%; z-index: 1100; pointer-events: none; width: max-content; max-width: min(640px, calc(100vw - 48px)); padding: 12px 16px; border-radius: 14px; background: var(--dsw-alias-toast-bg); color: var(--dsw-static-neutral-bluish-00); font-size: 14px; line-height: 22px; box-shadow: var(--dsw-shadow-lv3); transform: translateX(-50%); animation: dt-toast-in 160ms ease-out, dt-toast-fade 1000ms ease var(--dt-toast-hold, 3000ms) forwards; }\n@keyframes dt-toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }\n@keyframes dt-toast-fade { to { opacity: 0; visibility: hidden; } }\n@media (prefers-reduced-motion: reduce) {\n  .dt-tab, .dt-segment, .dt-switch-thumb, .dt-spinner g, .dt-btn-busy .dt-btn-icon svg, .dt-tooltip { transition: none; animation: none; }\n  .dt-toast { animation: dt-toast-fade 1000ms ease var(--dt-toast-hold, 3000ms) forwards; }\n}\n.dt-page .dt-tab { height: 34px; padding: 0 2px; border: 0; border-radius: 0; color: var(--dsw-alias-label-tertiary); font-size: 14px; }\n.dt-page .dt-tab[aria-selected='true'] { background: none; color: var(--dsw-alias-label-primary); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--dsw-alias-label-primary); }\n.dt-status-head { display: flex; align-items: center; gap: 8px; }\n.dt-status-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 4px; font-size: 15px; line-height: 22px; font-weight: 600; }\n.dt-status-text { margin-left: auto; flex: none; font-size: 12px; font-weight: 400; color: var(--dsw-alias-label-secondary); }\n.dt-status-line .dt-status-text { margin-left: 0; }\n.dt-status-text[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-status-text[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }\n.dt-lv { white-space: nowrap; }\n.dt-lv-label { color: var(--dsw-alias-label-caption); }\n.dt-lv-value { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }\n.dt-chip { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; overflow: hidden; font-size: 11px; line-height: 18px; color: var(--dsw-alias-label-secondary); }\n.dt-chip-source { padding: 0 6px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-module-platform); }\n.dt-chip-fact { padding: 0 6px; border-left: 0.5px solid var(--dsw-alias-border-l3); white-space: nowrap; }\n.dt-chip-label { margin-right: 4px; color: var(--dsw-alias-label-caption); }\n.dt-chip-link { position: relative; z-index: 1; text-decoration: none; cursor: pointer; transition: border-color 120ms ease; }\n.dt-chip-link:hover { border-color: var(--dsw-alias-brand-primary); }\n.dt-chip-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-chip-open { display: inline-flex; align-items: center; padding: 0 5px; border-left: 0.5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-brand-primary); }\n.dt-chip-problem, .dt-chip-problem .dt-chip-label { color: var(--dsw-alias-state-error-primary); }\n.dt-cards { gap: 8px; }\n.dt-att .dt-inline-link { font-size: 13px; font-weight: 500; }\n.dt-list > .dt-att { margin: 2px 8px; }\n.dt-att { padding: 10px 12px 10px 16px; border: 0; border-radius: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-att::before { content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 2px; border-radius: 1px; background: var(--dsw-alias-state-warn-primary); opacity: 0.7; }\n.dt-att-error::before { background: var(--dsw-alias-state-error-primary); }\n.dt-att-what { font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-state-warn-primary); }\n.dt-att-error .dt-att-what, .dt-att-error .dt-att-what .dt-open { color: var(--dsw-alias-state-error-primary); }\n.dt-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; }\n.dt-stat { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-stat-value { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }\n.dt-more-link { font-size: 12px; font-weight: 400; }\n.dt-settings { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 24px; align-items: start; }\n.dt-settings-nav { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; }\n.dt-settings-link { padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }\n.dt-settings-link:hover { color: var(--dsw-alias-label-primary); }\n.dt-settings-link[aria-current='page'] { background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-weight: 500; }\n.dt-settings-link[data-stage] + .dt-settings-link:not([data-stage]) { margin-top: 10px; }\n.dt-settings-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }\n.dt-settings-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }\n.dt-subtabs { display: flex; gap: 16px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-subtab { padding: 0 0 6px; border: 0; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 13px; cursor: pointer; }\n.dt-subtab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--dsw-alias-label-primary); }\n.dt-part { display: flex; flex-direction: column; gap: 12px; }\n.dt-rows-summary { text-align: left; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }\n.dt-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 18px; }\n.dt-table th { text-align: left; font-weight: 400; color: var(--dsw-alias-label-caption); padding: 2px 8px 2px 0; }\n.dt-table td { padding: 4px 8px 4px 0; border-top: 0.5px solid var(--dsw-alias-border-l3); vertical-align: top; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }\n@container (max-width: 640px) {\n  .dt-settings { grid-template-columns: 1fr; gap: 12px; }\n  .dt-settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }\n  .dt-settings-link[data-stage] + .dt-settings-link:not([data-stage]) { margin-top: 0; }\n  .dt-page .dt-tabs { gap: 14px; }\n}\n.dt-list > .dt-ticket { display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 12px; align-items: start; margin: 0; padding: 12px 8px 12px 18px; border-radius: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-list > .dt-ticket[data-state]::before { content: ''; position: absolute; left: 6px; top: 12px; bottom: 12px; width: 2px; border-radius: 1px; background: var(--dsw-alias-state-warn-primary); opacity: 0.7; }\n.dt-list > .dt-ticket[data-state='error']::before { background: var(--dsw-alias-state-error-primary); }\n.dt-ticket-stage { align-self: stretch; padding-top: 1px; border-right: 0.5px solid var(--dsw-alias-border-l3); }\n.dt-ticket-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }\n.dt-ticket-body .dt-row-title .dt-open { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-ticket-meta { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }\n.dt-ticket-meta .dt-chip { flex: none; }\n.dt-ticket-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dsw-alias-label-primary); }\n.dt-ticket-note-error { color: var(--dsw-alias-state-error-primary); }\n.dt-ticket-actions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; margin-top: 2px; }\n/* Pass pointer events through action containers to the row link, keeping only child controls interactive. */\n.dt-ticket-actions, .dt-row-buttons, .dt-row-actions { pointer-events: none; }\n.dt-ticket-actions > *, .dt-row-buttons > *, .dt-row-actions > * { pointer-events: auto; }\n.dt-line { min-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.dt-row-meta.dt-line { flex-wrap: nowrap; }\n.dt-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.dt-error-text { color: var(--dsw-alias-state-error-primary); }\n.dt-stage { display: inline-flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }\n.dt-stage svg { flex: none; margin-top: 2px; }\n.dt-stage[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }\n.dt-stage[data-state='error'] { color: var(--dsw-alias-state-error-primary); }\n.dt-stage[data-state='ongoing'] { color: var(--dsw-alias-state-business-primary); }\n.dt-icon-link { display: inline-flex; align-items: center; gap: 4px; }\na.dt-btn, a.dt-btn:hover { text-decoration: none; }\n.dt-section-icon { display: inline-flex; align-self: center; color: var(--dsw-alias-label-tertiary); }\n.dt-trigger-link { display: flex; flex-direction: column; gap: 2px; width: 100%; margin: -4px 0 -4px -8px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }\n.dt-trigger-link:hover { background: var(--dsw-alias-interactive-bg-hover); }\n.dt-trigger-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\n.dt-trigger-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.dt-kv-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }\n.dt-banner-actions { margin-top: 6px; }\n@container (max-width: 640px) {\n  .dt-list > .dt-ticket { grid-template-columns: 1fr; row-gap: 4px; }\n  .dt-ticket-stage { border-right: 0; }\n}\n.dt-nav-group { margin: 10px 10px 2px; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); }\n.dt-nav-group:first-child { margin-top: 0; }\n.dt-prompt-nav .dt-nav-item { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }\n.dt-nav-item > span { display: inline-flex; align-items: center; gap: 6px; }\n.dt-nav-item small { font-size: 12px; line-height: 18px; font-weight: 400; color: var(--dsw-alias-label-caption); }\n.dt-preview-part[data-editable] { border-left-color: var(--dsw-alias-brand-primary); }\n.dt-preview-head b { font-weight: 500; }\n.dt-preview-head > span { font-size: 12px; color: var(--dsw-alias-label-caption); }\n.dt-changed-tag { margin-left: 6px; padding: 0 5px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; font-size: 11px; line-height: 16px; font-weight: 400; color: var(--dsw-alias-label-secondary); }\n.dt-updated-tag { border-color: var(--dsw-alias-state-warn-primary); color: var(--dsw-alias-state-warn-primary); }\n.dt-default-updated { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-state-warn-primary); }\n.dt-diff-fold { color: var(--dsw-alias-label-caption); font-style: italic; }\n.dt-compare { margin-left: auto; }\n.dt-admission th { white-space: nowrap; }\n.dt-admission thead tr:first-child th:not(:first-child) { color: var(--dsw-alias-label-secondary); font-weight: 500; }\n.dt-admission td { vertical-align: middle; }\n.dt-admission-scope { color: var(--dsw-alias-label-primary); font-size: 13px; }\n.dt-admission-scope small { display: block; font-size: 11px; color: var(--dsw-alias-label-caption); }\n.dt-admission-na { color: var(--dsw-alias-label-caption); }\n.dt-admission-cell { display: flex; align-items: center; gap: 4px; }\n.dt-admission-cell .dt-select { flex: 1; min-width: 0; }\n.dt-admission-slot { display: inline-flex; flex: none; width: 16px; }\n.dt-info-warn { color: var(--dsw-alias-state-warn-primary); }\n.dt-field-segmented { max-width: 240px; }\n";
-		//#endregion
-		//#region src/core/reasons.ts
-		/**
-		* Structured reason codes and templates for decisions, filtered triggers, and ended assignments.
-		* Policy gates and source scopes may also emit their own literal reason codes.
-		*/
-		const REASONS = {
-			said: "{text}",
-			timeout: "Assessment timed out",
-			policyChanged: "Policy changed during assessment",
-			noAdmissible: "No admissible trigger",
-			startedTicket: "Already started ticket {ticket}",
-			acceptedBefore: "Trigger {trigger} was accepted before",
-			routed: "Routed to ticket {ticket}",
-			explicitRouted: "Explicit request from an allowed sender routed by the orchestrator",
-			humanStop: "Human asked to stop",
-			legacyImport: "Imported from the pre-domain-model task record",
-			forwarded: "Forwarded to the worker of the Ticket already on this Thread",
-			senderNotMember: "The sender is not on the Source's list",
-			retried: "Retried by a person",
-			hostRestarted: "dsh-superagent restarted",
-			stopUnknown: "Stop target is unknown or already ended",
-			stopNotExplicit: "A stop needs an explicit request from a sender on the list",
-			directionUnsettled: "Implementation intent or target direction is not established, or a product/design decision is still required",
-			noRuleMatched: "No enabled admission rule matched",
-			ignoredFromCard: "Ignored from its card, without a rule assessment",
-			observed: "Observe mode: would accept ({text})"
-		};
-		/** Formats reasons in English (prefixed by `triggerId` when present) for agent consumption. */
-		function reasonText(reasons) {
-			return [reasons ?? []].flat().map((reason) => {
-				const text = (REASONS[reason.code] ?? reason.code).replace(/\{(\w+)\}/g, (match, name) => reason.values?.[name] ?? match);
-				return reason.triggerId ? `${reason.triggerId}: ${text}` : text;
-			}).join("; ");
-		}
-		//#endregion
-		//#region src/client/text.ts
-		const errorText = (failure) => failure instanceof Error ? failure.message : String(failure);
-		const localized = (t, text) => typeof text === "string" ? text : text ? text[t("lang") === "en" ? "en" : "zh"] : "";
-		const actorName = (t, actor) => actor?.name ? localized(t, actor.name) : t("automatedNotice");
-		function valueLabel(t, group, key) {
-			if (!key) return "";
-			const name = `${group}.${key}`;
-			const text = t(name);
-			return text === name ? key : text;
-		}
-		/** Format one or more structured or raw reasons in the active UI language, truncating multi-line host errors to their first line. */
-		function reasonLabel(t, reason) {
-			if (typeof reason === "string") return reason ? label(t, { code: reason }) : "";
-			return [reason ?? []].flat().map((item) => label(t, item)).filter(Boolean).join("；");
-		}
-		function label(t, reason) {
-			const key = `reason.${reason.code}`;
-			const text = reason.code === "said" ? reason.values?.text ?? "" : t(key, reason.values);
-			if (reason.code !== "said" && text !== key) return text;
-			const written = reason.code === "said" ? text : reasonText({
-				...reason,
-				triggerId: void 0
-			});
-			if (/^\w*Error\b/.test(written)) {
-				const first = written.split("\n")[0];
-				return first.length > 140 ? `${first.slice(0, 140)}…` : first;
-			}
-			return written;
-		}
-		const setupText = (t, problem) => t(`setup.${problem.code}`, problem.values);
-		const healthText = (t, health) => health.code ? t(`healthCode.${health.code}`, health.values) : health.detail;
-		/** Replaces Feishu and GitHub content placeholders (images, cards, media, forwards, unresolved mentions) with localized labels. */
-		function readableMarkers(t, text) {
-			return text.replace(/!\[[^\]]*\]\([^)]*\)|\[Image: [^\]]*\]|\[image\]/g, t("imageMarker")).replace(/\[Chat card: [^\]]*\]/g, t("cardMarker")).replace(/\[Media: [^\]]*\]/g, t("mediaMarker")).replace(/\[Merged forward\]/g, t("forwardMarker")).replace(/@_user_\d+/g, t("unknownMention"));
-		}
-		const timeLocale = (lang) => lang === "en" ? "en" : "zh-CN";
-		function when(value, lang) {
-			if (!value) return "";
-			const date = new Date(value);
-			if (Number.isNaN(date.getTime())) return value;
-			const seconds = Math.round((date.getTime() - Date.now()) / 1e3);
-			if (Math.abs(seconds) < 86400) {
-				const relative = new Intl.RelativeTimeFormat(timeLocale(lang), { numeric: "auto" });
-				if (Math.abs(seconds) < 60) return relative.format(0, "second");
-				if (Math.abs(seconds) < 3600) return relative.format(Math.round(seconds / 60), "minute");
-				return relative.format(Math.round(seconds / 3600), "hour");
-			}
-			const year = date.getFullYear() === (/* @__PURE__ */ new Date()).getFullYear() ? {} : { year: "numeric" };
-			return date.toLocaleString(timeLocale(lang), {
-				...year,
-				month: "short",
-				day: "numeric",
-				hour: "2-digit",
-				minute: "2-digit"
-			});
-		}
-		function fullTime(value, lang) {
-			const date = new Date(value ?? "");
-			return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(timeLocale(lang));
-		}
-		//#endregion
-		//#region src/client/provider.tsx
-		/** Shared panel React contexts, state polling, restart detection, and action runner hook. */
-		const Panel = (0, react.createContext)(void 0);
-		const PanelState = (0, react.createContext)(void 0);
-		function usePanel() {
-			const value = (0, react.useContext)(Panel);
-			if (!value) throw new Error("dsh-superagent page rendered outside its panel");
-			return value;
-		}
-		function usePanelData() {
-			const value = (0, react.useContext)(PanelState);
-			if (!value) throw new Error("dsh-superagent page rendered outside its panel");
-			return value;
-		}
-		/** Wrap an async action with re-entrancy protection, busy state, optional reload, and error toast reporting. */
-		function useAction(action, { reload } = {}) {
-			const { notify } = usePanel();
-			const [busy, setBusy] = (0, react.useState)(false);
-			const running = (0, react.useRef)(false);
-			const run = async (...args) => {
-				if (running.current) return false;
-				running.current = true;
-				setBusy(true);
-				try {
-					await action(...args);
-					await reload?.();
-					return true;
-				} catch (failure) {
-					notify(errorText(failure));
-					return false;
-				} finally {
-					running.current = false;
-					setBusy(false);
-				}
-			};
-			return {
-				run,
-				busy
-			};
-		}
-		const messages = (t) => ({
-			offline: t("offline"),
-			notRunning: t("hostNotRunning"),
-			serverError: (status) => t("serverError", { status }),
-			requestFailed: (status) => t("requestFailed", { status }),
-			setup: (problem) => problem.values.output ? `${setupText(t, problem)}\n${problem.values.output}` : setupText(t, problem),
-			user: ({ code, values }) => t(`userError.${code}`, values.part ? {
-				...values,
-				part: valueLabel(t, "promptPart", values.part)
-			} : values)
-		});
-		function Toast({ text, onDone, holdMs = 3e3 }) {
-			const done = (0, react.useRef)(onDone);
-			done.current = onDone;
-			(0, react.useEffect)(() => {
-				const timer = setTimeout(() => done.current(), holdMs + 1e3);
-				return () => clearTimeout(timer);
-			}, [holdMs]);
-			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "dt-toast",
-				role: "status",
-				style: { ["--dt-toast-hold"]: `${holdMs}ms` },
-				children: text
-			}), document.body);
-		}
-		const stay = () => {};
-		const noSession = async () => {};
-		function PanelProvider({ t, interval = 5e3, openSession = noSession, navigate = stay, back = stay, backLabel = "", children }) {
-			const copy = (0, react.useRef)(t);
-			copy.current = t;
-			const call = (0, react.useMemo)(() => caller(() => messages(copy.current)), []);
-			const [toast, setToast] = (0, react.useState)();
-			const notify = (0, react.useCallback)((text) => setToast({
-				text,
-				id: Date.now()
-			}), []);
-			const [restarting, setRestarting] = (0, react.useState)();
-			const [restarts, setRestarts] = (0, react.useState)(0);
-			const restart = (0, react.useCallback)(() => setRestarting({ down: false }), []);
-			const { data: state, error, reload } = usePoll(() => call("GET state"), [call], restarting ? 1e3 : interval);
-			if (restarting && !!error !== restarting.down) {
-				setRestarting(error ? { down: true } : void 0);
-				if (!error) setRestarts(restarts + 1);
-			}
-			(0, react.useEffect)(() => {
-				if (!restarting) return;
-				const timer = setTimeout(() => setRestarting(void 0), 3e4);
-				return () => clearTimeout(timer);
-			}, [restarting]);
-			const context = (0, react.useMemo)(() => ({
-				t,
-				call,
-				navigate,
-				back,
-				backLabel,
-				openSession,
-				notify,
-				restart
-			}), [
-				t,
-				call,
-				navigate,
-				back,
-				backLabel,
-				openSession,
-				notify,
-				restart
-			]);
-			const data = (0, react.useMemo)(() => ({
-				state,
-				error,
-				reload,
-				setup: state?.setup,
-				running: state?.load.running ?? 0,
-				restarts
-			}), [
-				state,
-				error,
-				reload,
-				restarts
-			]);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Panel.Provider, {
-				value: context,
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(PanelState.Provider, {
-					value: data,
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: client_default }),
-						children,
-						toast && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Toast, {
-							text: toast.text,
-							onDone: () => setToast(void 0)
-						}, toast.id)
-					]
-				})
-			});
-		}
-		//#endregion
 		//#region src/client/draft.tsx
 		/**
 		* Optimistic settings draft state with sessionStorage persistence and three-way rebase against concurrent saves.
 		*/
-		const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+		const same$1 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 		const isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 		const LIST_KEYS = ["id", "chatId"];
 		const named = (list, field) => list.every((item) => isRecord(item) && typeof item[field] === "string") && new Set(list.map((item) => item[field])).size === list.length;
@@ -914,8 +917,8 @@ window.__ModuleLoader__.load({
 		* deleted if the other side left it unchanged; a removal against a modification keeps `mine` and is recorded in `conflicts`.
 		*/
 		function merge3(base, mine, theirs, conflicts = [], path = []) {
-			if (same(mine, base) || same(mine, theirs)) return theirs;
-			if (same(theirs, base)) return mine;
+			if (same$1(mine, base) || same$1(mine, theirs)) return theirs;
+			if (same$1(theirs, base)) return mine;
 			if (Array.isArray(mine) && Array.isArray(theirs) && (base === void 0 || Array.isArray(base))) {
 				const lists = [
 					base ?? [],
@@ -978,7 +981,7 @@ window.__ModuleLoader__.load({
 			switch (action.type) {
 				case "edit":
 					if (phase === "saving" || phase === "awaitingRevision") return state;
-					if (same(action.value, action.saved)) return {
+					if (same$1(action.value, action.saved)) return {
 						phase: "clean",
 						seen
 					};
@@ -1031,7 +1034,7 @@ window.__ModuleLoader__.load({
 					};
 					const paths = [];
 					const value = merge3(draft.base, draft.value, saved, paths);
-					if (same(value, saved)) return {
+					if (same$1(value, saved)) return {
 						phase: "clean",
 						seen: revision
 					};
@@ -3779,6 +3782,64 @@ window.__ModuleLoader__.load({
 			"stage.queued": ["排队中", "Queued"],
 			"stage.working": ["执行中", "Working"],
 			"stage.idle": ["等待新触发", "Waiting for a Trigger"],
+			"dock.title": ["Superagent 任务", "Superagent tasks"],
+			"dock.running": ["{count} 个执行中", "{count} working"],
+			"dock.awaiting": ["{count} 个待你处理", "{count} for you"],
+			"dock.queued": ["{count} 个排队", "{count} queued"],
+			"dock.omitted": ["还有 {count} 个", "{count} more"],
+			"dock.openCanvas": ["打开画布", "Open canvas"],
+			"dock.collapse": ["收起任务列表", "Collapse the task list"],
+			"dock.expand": ["展开任务列表", "Expand the task list"],
+			"dock.paused": ["已暂停", "Paused"],
+			"dock.select": ["勾选后可就「{title}」向主会话提问", "Tick to ask the main Session about “{title}”"],
+			"dock.live": ["执行器运行中", "Worker running"],
+			"dock.idle": ["执行器空闲", "Worker idle"],
+			"dock.openWorker": ["执行器会话", "Worker session"],
+			"dock.started": ["开始于 {time}", "Started {time}"],
+			"dock.askAbout": ["就「{title}」提问", "Ask about “{title}”"],
+			"dock.askPlaceholder": ["向主会话提问，例如：现在到哪一步了？", "Ask the main Session, for example: which step is it on?"],
+			"dock.ask": ["提问", "Ask"],
+			"dock.unsupported": ["当前 DeepSeek Harness 版本不支持从任务栏写入输入框，请直接在输入框里提问。", "This DeepSeek Harness version cannot write to the composer from the task dock; ask in the composer instead."],
+			"dock.draftBusy": ["输入框里还有未发送的内容，先发送或清空它，再在这里提问。", "The composer holds an unsent draft; send or clear it before asking here."],
+			"dock.sending": ["主会话正在发送上一条消息，稍后再试。", "The main Session is still sending a message; try again shortly."],
+			"dock.changed": ["输入框刚刚变化，请再点一次提问。", "The composer just changed; press Ask again."],
+			"canvas.title": ["Superagent 画布", "Superagent canvas"],
+			"canvas.lane.master": ["主会话", "Main Session"],
+			"canvas.lane.tasks": ["任务", "Tasks"],
+			"canvas.lane.workers": ["执行器", "Workers"],
+			"canvas.legend": ["图例", "Legend"],
+			"canvas.edge.dispatch": ["实线箭头：主会话 → 工单（派单）", "Solid arrow: main Session → ticket (dispatched)"],
+			"canvas.edge.run": ["实线箭头：工单 → 执行器（执行）", "Solid arrow: ticket → worker (running it)"],
+			"canvas.edge.ask": ["虚线：勾选的工单 → Composer（提问）", "Dashed: ticked ticket → Composer (asking)"],
+			"canvas.edge.runLabel": ["执行", "runs"],
+			"canvas.edge.askLabel": ["提问", "asks"],
+			"canvas.pickNeed": ["定位待你处理的任务", "Go to a task for you"],
+			"canvas.hint": ["拖动空白处或滚轮平移，⌘/Ctrl + 滚轮缩放，拖动卡片标题移动它", "Drag the background or scroll to pan, ⌘/Ctrl + scroll to zoom, drag a card title to move it"],
+			"canvas.master": ["Superagent 主会话", "Superagent main Session"],
+			"canvas.masterActive": ["运行中", "Running"],
+			"canvas.masterIdle": ["空闲", "Idle"],
+			"canvas.masterLoad": ["{total} 个工单 · {awaiting} 个待你处理", "{total} tickets · {awaiting} for you"],
+			"canvas.conversation": ["最近的问答", "Latest exchanges"],
+			"canvas.noReply": ["主会话还没有回答。", "The main Session has not answered yet."],
+			"canvas.operator": ["你", "You"],
+			"canvas.composer": ["Composer · 主会话", "Composer · main Session"],
+			"canvas.composerAbout": ["关于「{title}」", "About “{title}”"],
+			"canvas.composerNone": ["未勾选任务：作为主会话的一条消息发送", "No ticket ticked: sent as a message of the main Session"],
+			"canvas.composerNote": ["发送后由主会话在它的对话里回答。", "The main Session answers in its conversation."],
+			"canvas.placeholder": ["直接用主会话发送（Enter 发送，Shift+Enter 换行）", "Send through the main Session (Enter to send, Shift+Enter for a new line)"],
+			"canvas.send": ["发送", "Send"],
+			"canvas.sent": ["已送达主会话。", "Sent to the main Session."],
+			"canvas.openConversation": ["在对话中打开", "Open the conversation"],
+			"canvas.empty": ["当前没有进行中的任务。在主会话里下达任务后，工单会出现在这里。", "No task is open. State a task in the main Session and its ticket appears here."],
+			"canvas.needsYou": ["需要你处理 {count}", "{count} need you"],
+			"canvas.allTickets": ["全部工单", "All tickets"],
+			"canvas.zoomIn": ["放大", "Zoom in"],
+			"canvas.zoomOut": ["缩小", "Zoom out"],
+			"canvas.fit": ["适应画布", "Fit the canvas"],
+			"canvas.workers": ["执行器 {running} / {max}", "Workers {running} / {max}"],
+			"canvas.worker": ["执行器", "Worker"],
+			"canvas.workerOf": ["执行「{title}」", "Running “{title}”"],
+			"canvas.minimap": ["小地图：点击定位", "Minimap: click to go there"],
 			deliveredInputs: ["已送达的输入 · {count}", "Delivered Inputs · {count}"],
 			endedAtShort: ["{time} {outcome}", "{time} {outcome}"],
 			legacyAssignment: ["原始说明", "Original brief"],
@@ -6830,11 +6891,1133 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/core/questions.ts
+		/**
+		* The first line of a message about one ticket. The main Session's prompt tells the model to read a message that carries this
+		* line as the operator's question about that ticket, whether the operator typed the line or a task view wrote it for them.
+		*/
+		/** Replaces the characters that would close or break the line inside a title. */
+		const oneLine = (title) => title.replace(/[[\]\r\n]+/g, " ").trim();
+		/** The line that names a ticket in a message: its id, which `orchestrator_read` reads as `ticket/<id>`, and its title. */
+		const ticketLine = (ticketId, title) => `[ticket ${ticketId} · ${oneLine(title)}]`;
+		//#endregion
+		//#region src/client/dock.tsx
+		/**
+		* The task dock above the main Session's composer: every open ticket with its stage and progress, their number in a collapsed
+		* pill, and a question box for the one the operator ticks. It reads `GET tasks` and writes nothing of its own: a question goes
+		* into the composer and is sent the way the Send button sends it, so the main Session answers it as a turn of the operator.
+		*/
+		/** The storage key and value that remember a collapsed dock across Sessions and reloads. */
+		const COLLAPSED = "dsh-superagent.dock.collapsed";
+		/** How often the dock reads the task list; a hidden page polls six times more slowly. */
+		const POLL_MS$1 = 2e3;
+		/** How often the relative start time of a task is re-read, between two unchanged polls. */
+		const TICK_MS = 3e4;
+		/** How long a refusal to ask stays visible before it clears itself. */
+		const NOTICE_MS = 6e3;
+		/** Whether the operator collapsed the dock, as they last left it; a storage that cannot be read leaves it expanded. */
+		function readCollapsed(storage = globalThis.localStorage) {
+			try {
+				return storage?.getItem(COLLAPSED) === "1";
+			} catch {
+				return false;
+			}
+		}
+		/** The message the main Session receives for a question about one ticket: a first line naming the ticket, then the question. */
+		const taskQuestion = (ticketId, title, question) => `${ticketLine(ticketId, title)}\n${question}`;
+		/**
+		* Puts `text` into the composer and submits it, as the Send button does. Nothing is sent while the composer holds a draft of
+		* the operator's, or an attachment of theirs, or is still sending: their message is theirs to send.
+		*/
+		function askThroughComposer(input, actions, text) {
+			const insert = actions?.captureInsertion && actions.insertText;
+			if (!actions?.submit || !(insert || actions.setDraft)) return "unsupported";
+			if (input && (input.draft.trim() !== "" || input.attachmentIds.length > 0)) return "draftBusy";
+			if (input && input.phase !== "plain") return "sending";
+			if (insert) {
+				if (!actions.insertText(text, actions.captureInsertion())) return "changed";
+			} else actions.setDraft(text);
+			actions.submit();
+			return "sent";
+		}
+		/** The one dot that summarizes a task list: what failed, then what else waits for a person, then what runs, then nothing. */
+		function dockDot(tasks) {
+			if (tasks.some((task) => task.stage === "person" && (task.action === "failed" || task.action === "delivery"))) return "error";
+			if (tasks.some((task) => task.stage === "person")) return "warning";
+			if (tasks.some((task) => task.stage === "working" && (task.live || task.action !== "queued"))) return "ongoing";
+			return "idle";
+		}
+		/** What a task's progress line says: what waits for the person, else the worker's checklist, else its latest report. */
+		function taskProgress(t, task) {
+			if (task.stage === "person" && task.note) return { text: readableMarkers(t, task.note.text) };
+			if (task.todos && task.todos.total > 0) return {
+				ratio: `${task.todos.done}/${task.todos.total}`,
+				text: task.todos.current
+			};
+			return { text: task.summary ?? "" };
+		}
+		/** The moment a task's progress counts from: when its worker started, else when the ticket opened. */
+		const started = (task) => task.startedAt ?? task.createdAt;
+		/** Whether a ticket has a worker whose state is worth naming: one that was assigned, and is not waiting for a slot. */
+		const hasWorker = (task) => task.stage === "working" && task.action !== "queued";
+		/** The dock of the main Session: nothing in any other Session, and nothing while no ticket is open. */
+		function TaskDock({ t, sessionId, input, inputActions, openSession, openPanel, intervalMs = POLL_MS$1 }) {
+			const copy = (0, react.useRef)(t);
+			copy.current = t;
+			const { data, error } = usePoll(() => caller(() => messages(copy.current))("GET tasks"), [], intervalMs);
+			const [collapsed, setCollapsed] = (0, react.useState)(() => readCollapsed());
+			const [selected, setSelected] = (0, react.useState)();
+			const [question, setQuestion] = (0, react.useState)("");
+			const [notice, setNotice] = (0, react.useState)();
+			const [tick, setTick] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				const timer = setInterval(() => setTick((now) => now + 1), TICK_MS);
+				return () => clearInterval(timer);
+			}, []);
+			(0, react.useEffect)(() => {
+				if (!notice) return;
+				const timer = setTimeout(() => setNotice(void 0), NOTICE_MS);
+				return () => clearTimeout(timer);
+			}, [notice]);
+			const shown = data && data.masterId === sessionId ? data : void 0;
+			if (!shown || shown.total === 0) return null;
+			const toggle = () => {
+				const next = !collapsed;
+				setCollapsed(next);
+				try {
+					globalThis.localStorage?.setItem(COLLAPSED, next ? "1" : "0");
+				} catch {}
+			};
+			const picked = shown.tasks.find((task) => task.id === selected);
+			const ask = (event) => {
+				event.preventDefault();
+				if (!picked) return;
+				const text = question.trim();
+				if (!text) return;
+				const outcome = askThroughComposer(input, inputActions, taskQuestion(picked.id, picked.title, text));
+				if (outcome !== "sent") {
+					setNotice(t(`dock.${outcome}`));
+					return;
+				}
+				setQuestion("");
+				setSelected(void 0);
+				setNotice(void 0);
+			};
+			const counts = [
+				[shown.running, "dock.running"],
+				[shown.awaiting, "dock.awaiting"],
+				[shown.queued, "dock.queued"]
+			].filter(([count]) => count > 0);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+				className: "dt-dock",
+				"data-collapsed": collapsed ? "1" : void 0,
+				"data-tick": tick,
+				"aria-label": t("dock.title"),
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: client_default }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "dt-dock-head",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: "dt-dock-toggle",
+							"aria-expanded": !collapsed,
+							"aria-label": t(collapsed ? "dock.expand" : "dock.collapse"),
+							title: error ? errorText(error) : void 0,
+							onClick: toggle,
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+									name: collapsed ? "chevron-right" : "chevron-down",
+									size: 14
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "dt-dock-title",
+									children: t("dock.title")
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: dockDot(shown.tasks) }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "dt-dock-count",
+									children: shown.total
+								})
+							]
+						}), !collapsed && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "dt-dock-summary",
+								children: [counts.map(([count, key]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t(key, { count: String(count) }) }, key)), shown.omitted > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("dock.omitted", { count: String(shown.omitted) }) })]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "dt-dock-spacer" }),
+							shown.paused && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Tag, {
+								tone: "quiet",
+								children: t("dock.paused")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Button, {
+								variant: "ghost",
+								size: "sm",
+								onClick: openPanel,
+								children: [t("dock.openCanvas"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+									name: "chevron-right",
+									size: 12
+								})]
+							})
+						] })]
+					}),
+					!collapsed && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+						className: "dt-dock-list",
+						children: shown.tasks.map((task, index) => {
+							const mark = ticketMark(t, task), on = task.id === selected, progress = taskProgress(t, task), start = started(task);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
+								className: "dt-dock-card",
+								"data-tone": mark.tone,
+								"data-selected": on ? "1" : void 0,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "dt-dock-top",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+												type: "checkbox",
+												className: "dt-dock-check",
+												checked: on,
+												"aria-label": t("dock.select", { title: task.title }),
+												onChange: () => {
+													setSelected(on ? void 0 : task.id);
+													setNotice(void 0);
+												}
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "dt-dock-name",
+												title: task.title,
+												children: [
+													index + 1,
+													". ",
+													task.title
+												]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StageMark, {
+												state: task.live && mark.dot === "ongoing" ? "ongoing" : mark.dot,
+												icon: mark.icon,
+												label: mark.label
+											})
+										]
+									}),
+									(progress.text || progress.ratio) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "dt-dock-line",
+										children: [progress.ratio && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "dt-dock-ratio",
+											children: progress.ratio
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "dt-dock-ellipsis",
+											title: progress.text,
+											children: progress.text
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "dt-dock-meta",
+										children: [
+											hasWorker(task) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "dt-dock-live",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: task.live ? "ongoing" : "idle" }), t(task.live ? "dock.live" : "dock.idle")]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("time", {
+												dateTime: start,
+												title: t("dock.started", { time: fullTime(start, t("lang")) }),
+												children: when(start, t("lang"))
+											}),
+											task.sessionId && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												type: "button",
+												className: "dt-dock-open",
+												onClick: () => {
+													openSession(task.sessionId).catch((failure) => setNotice(errorText(failure)));
+												},
+												children: t("dock.openWorker")
+											})
+										]
+									})
+								]
+							}, task.id);
+						})
+					}),
+					!collapsed && picked && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
+						className: "dt-dock-ask",
+						onSubmit: ask,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-dock-target",
+								title: picked.title,
+								children: t("dock.askAbout", { title: picked.title })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Input, {
+								className: "dt-dock-question",
+								"aria-label": t("dock.askAbout", { title: picked.title }),
+								placeholder: t("dock.askPlaceholder"),
+								value: question,
+								onChange: (event) => setQuestion(event.target.value),
+								autoFocus: true
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+								variant: "primary",
+								size: "sm",
+								type: "submit",
+								disabled: !question.trim(),
+								children: t("dock.ask")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+								variant: "ghost",
+								size: "sm",
+								onClick: () => {
+									setSelected(void 0);
+									setQuestion("");
+									setNotice(void 0);
+								},
+								children: t("cancel")
+							}),
+							notice && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-dock-notice",
+								role: "status",
+								children: notice
+							})
+						]
+					})
+				]
+			});
+		}
+		//#endregion
+		//#region src/client/canvas.tsx
+		/**
+		* The task canvas: a page of its own where the main Session, its tickets and their workers lie as cards on a plane the operator
+		* pans, zooms and rearranges, joined by lines that say which Session dispatched a ticket and which worker runs it. The Composer
+		* card sends the operator's question to the main Session about the one ticket they tick. It reads `GET tasks` and writes only
+		* through `POST tasks/:id/ask`, so the canvas holds no state of its own beyond where the operator put the cards.
+		*/
+		/** How far the operator can zoom out and in. */
+		const MIN_SCALE = .3;
+		/** The storage key of the cards the operator moved. */
+		const LAYOUT = "dsh-superagent.canvas.layout.v1";
+		/** How often the canvas reads the tasks. */
+		const POLL_MS = 2e3;
+		const LANE_WIDTH = 360;
+		const LANES = [
+			"master",
+			"tasks",
+			"workers"
+		];
+		/** The three cards that are not a ticket: the main Session, the Composer, and the note that no ticket is open. */
+		const MASTER = "master";
+		const COMPOSER = "composer";
+		const EMPTY = "empty";
+		/** The view that shows every rect with `padding` around it, centered in a viewport of `width` × `height`, never zoomed in past 1. */
+		function fitView(rects, width, height, padding = 48) {
+			if (!rects.length || width <= padding * 2 || height <= padding * 2) return {
+				x: 24,
+				y: 24,
+				scale: 1
+			};
+			const left = Math.min(...rects.map((rect) => rect.x)), top = Math.min(...rects.map((rect) => rect.y));
+			const right = Math.max(...rects.map((rect) => rect.x + rect.w)), bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
+			const scale = Math.max(MIN_SCALE, Math.min(1, (width - padding * 2) / (right - left), (height - padding * 2) / (bottom - top)));
+			return {
+				scale,
+				x: (width - (right - left) * scale) / 2 - left * scale,
+				y: (height - (bottom - top) * scale) / 2 - top * scale
+			};
+		}
+		/** Zooms by `factor` about the viewport point (`px`, `py`), which stays where it is. */
+		function zoomAbout(view, factor, px, py) {
+			const scale = Math.min(2, Math.max(MIN_SCALE, view.scale * factor)), ratio = scale / view.scale;
+			return {
+				scale,
+				x: px - (px - view.x) * ratio,
+				y: py - (py - view.y) * ratio
+			};
+		}
+		/** The curve that joins the right edge of `from`, at `share` of its height, to the left edge of `to`, at `toShare` of its height. */
+		function edgePath(from, to, fromShare = .5, toShare = .5) {
+			const sx = from.x + from.w, sy = from.y + from.h * fromShare, tx = to.x, ty = to.y + to.h * toShare;
+			const bend = Math.max(40, Math.abs(tx - sx) / 2);
+			return `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`;
+		}
+		/** The one rect that covers every rect, with `padding` around it. */
+		function union(rects, padding = 0) {
+			const left = Math.min(...rects.map((rect) => rect.x)), top = Math.min(...rects.map((rect) => rect.y));
+			return {
+				x: left - padding,
+				y: top - padding,
+				w: Math.max(...rects.map((rect) => rect.x + rect.w)) - left + padding * 2,
+				h: Math.max(...rects.map((rect) => rect.y + rect.h)) - top + padding * 2
+			};
+		}
+		/** The cards the operator moved last, by node; a storage that cannot be read moves none. */
+		function readLayout(storage = globalThis.localStorage) {
+			try {
+				const value = JSON.parse(storage?.getItem(LAYOUT) ?? "{}");
+				return Object.fromEntries(Object.entries(value).filter(([, point]) => {
+					const { x, y } = point ?? {};
+					return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y);
+				}));
+			} catch {
+				return {};
+			}
+		}
+		const same = (one, other) => Object.keys(one).length === Object.keys(other).length && Object.entries(other).every(([id, rect]) => {
+			const before = one[id];
+			return before && Math.abs(before.x - rect.x) < .5 && Math.abs(before.y - rect.y) < .5 && Math.abs(before.w - rect.w) < .5 && Math.abs(before.h - rect.h) < .5;
+		});
+		/** The page: the plane with its lanes, cards and lines, the legend, the zoom controls, the minimap and the bottom bar. */
+		function CanvasPage({ intervalMs = POLL_MS }) {
+			const { t, call, notify, openSession } = usePanel();
+			const { data, error, reload } = usePoll(() => call("GET tasks"), [call], intervalMs);
+			const [selected, setSelected] = (0, react.useState)();
+			const [question, setQuestion] = (0, react.useState)("");
+			const [sent, setSent] = (0, react.useState)(false);
+			const [moved, setMoved] = (0, react.useState)(readLayout);
+			const [view, setView] = (0, react.useState)({
+				x: 24,
+				y: 24,
+				scale: 1
+			});
+			const [rects, setRects] = (0, react.useState)({});
+			const [size, setSize] = (0, react.useState)({
+				w: 0,
+				h: 0
+			});
+			const viewport = (0, react.useRef)(null);
+			const pan = (0, react.useRef)(void 0);
+			const drag = (0, react.useRef)(void 0);
+			const layout = (0, react.useRef)(moved);
+			layout.current = moved;
+			const fitted = (0, react.useRef)(false);
+			(0, react.useLayoutEffect)(() => {
+				const element = viewport.current;
+				if (!element) return;
+				const measure = () => {
+					const box = element.getBoundingClientRect();
+					const next = {};
+					for (const node of element.querySelectorAll("[data-node]")) {
+						const rect = node.getBoundingClientRect();
+						next[node.dataset.node] = {
+							x: (rect.left - box.left - view.x) / view.scale,
+							y: (rect.top - box.top - view.y) / view.scale,
+							w: rect.width / view.scale,
+							h: rect.height / view.scale
+						};
+					}
+					setSize({
+						w: box.width,
+						h: box.height
+					});
+					setRects((previous) => same(previous, next) ? previous : next);
+				};
+				measure();
+				if (typeof ResizeObserver === "undefined") return;
+				const observer = new ResizeObserver(measure);
+				observer.observe(element);
+				return () => observer.disconnect();
+			}, [
+				data,
+				moved,
+				selected,
+				question,
+				sent,
+				t
+			]);
+			(0, react.useEffect)(() => {
+				if (fitted.current || size.w <= 0 || !Object.keys(rects).length) return;
+				fitted.current = true;
+				setView(fitView(Object.values(rects), size.w, size.h));
+			}, [rects, size]);
+			(0, react.useEffect)(() => {
+				const element = viewport.current;
+				if (!element) return;
+				const onWheel = (event) => {
+					event.preventDefault();
+					const box = element.getBoundingClientRect();
+					if (event.ctrlKey || event.metaKey) {
+						const factor = Math.exp(-Math.max(-25, Math.min(25, event.deltaY)) * .01);
+						setView((current) => zoomAbout(current, factor, event.clientX - box.left, event.clientY - box.top));
+					} else setView((current) => ({
+						...current,
+						x: current.x - event.deltaX,
+						y: current.y - event.deltaY
+					}));
+				};
+				element.addEventListener("wheel", onWheel, { passive: false });
+				return () => element.removeEventListener("wheel", onWheel);
+			}, []);
+			const fit = () => setView(fitView(Object.values(rects), size.w, size.h));
+			const tasks = data?.tasks ?? [];
+			const picked = tasks.find((task) => task.id === selected);
+			const ask = useAction(async (task, text) => {
+				await call("POST tasks/:id/ask", {
+					id: task.id,
+					body: { question: text }
+				});
+			}, { reload });
+			const send = async () => {
+				const text = question.trim();
+				if (!picked || !text || !await ask.run(picked, text)) return;
+				setQuestion("");
+				setSelected(void 0);
+				setSent(true);
+				notify(t("canvas.sent"));
+			};
+			const submit = (event) => {
+				if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+				event.preventDefault();
+				send();
+			};
+			/** Pressing a card's title moves that card; pressing anywhere else in the card is a click on what is there. */
+			const handle = (id) => ({
+				onPointerDown: (event) => {
+					if (event.button !== 0) return;
+					const before = layout.current[id] ?? {
+						x: 0,
+						y: 0
+					};
+					drag.current = {
+						id,
+						px: event.clientX,
+						py: event.clientY,
+						x: before.x,
+						y: before.y
+					};
+					event.currentTarget.setPointerCapture(event.pointerId);
+				},
+				onPointerMove: (event) => {
+					const start = drag.current;
+					if (!start || start.id !== id) return;
+					setMoved((previous) => ({
+						...previous,
+						[id]: {
+							x: start.x + (event.clientX - start.px) / view.scale,
+							y: start.y + (event.clientY - start.py) / view.scale
+						}
+					}));
+				},
+				onPointerUp: () => {
+					if (!drag.current) return;
+					drag.current = void 0;
+					const ids = /* @__PURE__ */ new Set([
+						MASTER,
+						COMPOSER,
+						...tasks.flatMap((task) => [`task:${task.id}`, ...task.sessionId ? [`worker:${task.sessionId}`] : []])
+					]);
+					const kept = Object.fromEntries(Object.entries(layout.current).filter(([id]) => ids.has(id)));
+					try {
+						globalThis.localStorage?.setItem(LAYOUT, JSON.stringify(kept));
+					} catch {}
+				}
+			});
+			const place = (id) => {
+				const point = moved[id];
+				return point ? { transform: `translate(${point.x}px, ${point.y}px)` } : void 0;
+			};
+			const stop = (event) => event.stopPropagation();
+			const node = (id) => rects[id];
+			const screen = (rect) => ({
+				x: rect.x * view.scale + view.x,
+				y: rect.y * view.scale + view.y,
+				w: rect.w * view.scale,
+				h: rect.h * view.scale
+			});
+			const lines = (() => {
+				const out = [];
+				const join = (id, kind, from, to, fromShare, toShare, label) => {
+					const a = node(from), b = node(to);
+					if (!a || !b) return;
+					const d = edgePath(screen(a), screen(b), fromShare, toShare), at = curveMiddle(d);
+					out.push({
+						id,
+						kind,
+						d,
+						...label ? { label: {
+							text: label,
+							...at
+						} } : {}
+					});
+				};
+				for (const task of tasks) join(`dispatch:${task.id}`, "dispatch", MASTER, `task:${task.id}`, .5, .3);
+				for (const task of tasks) if (task.sessionId) join(`run:${task.id}`, "run", `task:${task.id}`, `worker:${task.sessionId}`, .5, .5, t("canvas.edge.runLabel"));
+				if (picked) join("ask", "ask", `task:${picked.id}`, COMPOSER, .7, .5, t("canvas.edge.askLabel"));
+				return out;
+			})();
+			const cover = Object.values(rects);
+			const mini = cover.length ? fitInto(union(cover, 24), 176, 112) : void 0;
+			const needs = tasks.find((task) => task.stage === "person");
+			const openMaster = () => {
+				if (data) openSession(data.masterId).catch((failure) => notify(failure instanceof Error ? failure.message : String(failure)));
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				ref: viewport,
+				className: "dt-canvas",
+				style: {
+					backgroundSize: `${20 * view.scale}px ${20 * view.scale}px`,
+					backgroundPosition: `${view.x}px ${view.y}px`
+				},
+				"aria-label": t("canvas.title"),
+				onPointerDown: (event) => {
+					if (event.button !== 0) return;
+					pan.current = {
+						px: event.clientX,
+						py: event.clientY,
+						x: view.x,
+						y: view.y
+					};
+					event.currentTarget.setPointerCapture(event.pointerId);
+				},
+				onPointerMove: (event) => {
+					const start = pan.current;
+					if (!start) return;
+					setView({
+						scale: view.scale,
+						x: start.x + event.clientX - start.px,
+						y: start.y + event.clientY - start.py
+					});
+				},
+				onPointerUp: () => {
+					pan.current = void 0;
+				},
+				onPointerCancel: () => {
+					pan.current = void 0;
+				},
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "dt-canvas-world",
+						style: { transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` },
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+								className: "dt-canvas-lane",
+								style: {
+									left: 0,
+									width: LANE_WIDTH
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+									className: "dt-canvas-lane-title",
+									children: t("canvas.lane.master")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "dt-canvas-stack",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+										className: "dt-canvas-card",
+										"data-node": MASTER,
+										style: place(MASTER),
+										onPointerDown: stop,
+										"data-picked": !selected ? "1" : void 0,
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+												className: "dt-canvas-card-head",
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", {
+														className: "dt-canvas-card-title dt-canvas-handle",
+														...handle(MASTER),
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+															name: "session",
+															size: 14
+														}), t("canvas.master")]
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: data?.active ? "ongoing" : "idle" }),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "dt-canvas-state",
+														children: t(data?.active ? "canvas.masterActive" : "canvas.masterIdle")
+													})
+												]
+											}),
+											data && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "dt-canvas-meta",
+												children: t("canvas.masterLoad", {
+													total: String(data.total),
+													awaiting: String(data.awaiting)
+												})
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", {
+												className: "dt-canvas-subhead",
+												children: t("canvas.conversation")
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("ol", {
+												className: "dt-canvas-thread",
+												children: [(data?.conversation ?? []).slice(-4).map((entry, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
+													"data-role": entry.role,
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+														className: "dt-canvas-speaker",
+														children: [t(entry.role === "operator" ? "canvas.operator" : "canvas.master"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("time", {
+															dateTime: entry.at,
+															title: fullTime(entry.at, t("lang")),
+															children: when(entry.at, t("lang"))
+														})]
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "dt-canvas-clamp",
+														children: entry.text
+													})]
+												}, `${entry.at}:${index}`)), !data?.conversation.length && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", {
+													className: "dt-canvas-quiet",
+													children: t("canvas.noReply")
+												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("footer", {
+												className: "dt-canvas-card-foot",
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+													variant: "ghost",
+													size: "sm",
+													icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+														name: "session",
+														size: 14
+													}),
+													disabled: !data,
+													onClick: openMaster,
+													children: t("canvas.openConversation")
+												})
+											})
+										]
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+										className: "dt-canvas-card",
+										"data-node": COMPOSER,
+										style: place(COMPOSER),
+										onPointerDown: stop,
+										"data-picked": picked ? "1" : void 0,
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("header", {
+												className: "dt-canvas-card-head",
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", {
+													className: "dt-canvas-card-title dt-canvas-handle",
+													...handle(COMPOSER),
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+														name: "message",
+														size: 14
+													}), t("canvas.composer")]
+												})
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "dt-canvas-composer-about",
+												"data-none": picked ? void 0 : "1",
+												title: picked?.title,
+												children: picked ? t("canvas.composerAbout", { title: picked.title }) : t("canvas.composerNone")
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+												className: "dt-canvas-composer-input",
+												rows: 4,
+												value: question,
+												placeholder: t("canvas.placeholder"),
+												"aria-label": t("canvas.composer"),
+												onChange: (event) => {
+													setQuestion(event.target.value);
+													setSent(false);
+												},
+												onKeyDown: submit
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "dt-canvas-quiet",
+												role: "status",
+												children: sent ? t("canvas.sent") : t("canvas.composerNote")
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("footer", {
+												className: "dt-canvas-card-foot",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+													variant: "ghost",
+													size: "sm",
+													disabled: !data,
+													onClick: openMaster,
+													children: t("canvas.openConversation")
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+													variant: "primary",
+													size: "sm",
+													disabled: !picked || !question.trim() || ask.busy,
+													onClick: () => {
+														send();
+													},
+													children: t("canvas.send")
+												})]
+											})
+										]
+									})]
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+								className: "dt-canvas-lane",
+								style: {
+									left: 440,
+									width: LANE_WIDTH
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+									className: "dt-canvas-lane-title",
+									children: t("canvas.lane.tasks")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "dt-canvas-stack",
+									children: [tasks.map((task, index) => {
+										const id = `task:${task.id}`, mark = ticketMark(t, task), on = task.id === selected, progress = taskProgress(t, task);
+										return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+											className: "dt-canvas-card",
+											"data-node": id,
+											"data-tone": mark.tone,
+											"data-picked": on ? "1" : void 0,
+											style: place(id),
+											onPointerDown: stop,
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+													className: "dt-canvas-card-head",
+													children: [
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+															type: "checkbox",
+															className: "dt-canvas-check",
+															checked: on,
+															"aria-label": t("dock.select", { title: task.title }),
+															onChange: () => {
+																setSelected(on ? void 0 : task.id);
+																setSent(false);
+															}
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", {
+															className: "dt-canvas-card-title dt-canvas-handle",
+															title: task.title,
+															...handle(id),
+															children: [
+																index + 1,
+																". ",
+																task.title
+															]
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StageMark, {
+															state: mark.dot,
+															icon: mark.icon,
+															label: mark.label
+														})
+													]
+												}),
+												(progress.text || progress.ratio) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+													className: "dt-canvas-progress",
+													children: [progress.ratio && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
+														className: "dt-canvas-ratio",
+														children: progress.ratio
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "dt-canvas-clamp",
+														title: progress.text,
+														children: progress.text
+													})]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+													className: "dt-canvas-meta",
+													children: [task.stage === "working" && task.action !== "queued" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+														className: "dt-canvas-live",
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: task.live ? "ongoing" : "idle" }), t(task.live ? "dock.live" : "dock.idle")]
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("time", {
+														dateTime: started(task),
+														title: t("dock.started", { time: fullTime(started(task), t("lang")) }),
+														children: when(started(task), t("lang"))
+													})]
+												})
+											]
+										}, task.id);
+									}), !tasks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+										className: "dt-canvas-card dt-canvas-card-quiet",
+										"data-node": EMPTY,
+										onPointerDown: stop,
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+											className: "dt-canvas-quiet",
+											children: t("canvas.empty")
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+											variant: "outline",
+											size: "sm",
+											disabled: !data,
+											onClick: openMaster,
+											children: t("canvas.openConversation")
+										})]
+									})]
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+								className: "dt-canvas-lane",
+								style: {
+									left: 880,
+									width: LANE_WIDTH
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+									className: "dt-canvas-lane-title",
+									children: t("canvas.lane.workers")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "dt-canvas-stack",
+									children: tasks.filter((task) => task.sessionId).map((task) => {
+										const id = `worker:${task.sessionId}`;
+										return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+											className: "dt-canvas-card",
+											"data-node": id,
+											style: place(id),
+											onPointerDown: stop,
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+													className: "dt-canvas-card-head",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", {
+														className: "dt-canvas-card-title dt-canvas-handle",
+														...handle(id),
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+															name: "running",
+															size: 14
+														}), t("canvas.worker")]
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: task.live ? "ongoing" : "idle" })]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+													className: "dt-canvas-clamp",
+													title: task.title,
+													children: t("canvas.workerOf", { title: task.title })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+													className: "dt-canvas-meta",
+													children: t(task.live ? "dock.live" : "dock.idle")
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("footer", {
+													className: "dt-canvas-card-foot",
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+														variant: "ghost",
+														size: "sm",
+														icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+															name: "session",
+															size: 14
+														}),
+														onClick: () => {
+															openSession(task.sessionId ?? "").catch((failure) => notify(failure instanceof Error ? failure.message : String(failure)));
+														},
+														children: t("dock.openWorker")
+													})
+												})
+											]
+										}, id);
+									})
+								})]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+						className: "dt-canvas-edges",
+						width: size.w,
+						height: size.h,
+						"aria-hidden": "true",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("defs", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("marker", {
+							id: "dt-canvas-arrow",
+							viewBox: "0 0 8 8",
+							refX: "7",
+							refY: "4",
+							markerWidth: "7",
+							markerHeight: "7",
+							orient: "auto",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M0,0 L8,4 L0,8 z" })
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("marker", {
+							id: "dt-canvas-arrow-ask",
+							viewBox: "0 0 8 8",
+							refX: "7",
+							refY: "4",
+							markerWidth: "7",
+							markerHeight: "7",
+							orient: "auto",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M0,0 L8,4 L0,8 z" })
+						})] }), lines.map((line) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("g", {
+							className: "dt-canvas-line",
+							"data-kind": line.kind,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+								className: "dt-canvas-edge",
+								d: line.d,
+								markerEnd: line.kind === "ask" ? "url(#dt-canvas-arrow-ask)" : "url(#dt-canvas-arrow)"
+							}), line.label && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("text", {
+								className: "dt-canvas-edge-label",
+								x: line.label.x,
+								y: line.label.y - 5,
+								children: line.label.text
+							})]
+						}, line.id))]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+						className: "dt-canvas-legend",
+						onPointerDown: stop,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+								className: "dt-canvas-legend-title",
+								children: t("canvas.legend")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("ul", { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+									width: "28",
+									height: "8",
+									"aria-hidden": "true",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+										className: "dt-canvas-edge",
+										d: "M1 4 H21",
+										markerEnd: "url(#dt-canvas-arrow)"
+									})
+								}), t("canvas.edge.dispatch")] }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+									width: "28",
+									height: "8",
+									"aria-hidden": "true",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+										className: "dt-canvas-edge",
+										d: "M1 4 H21",
+										markerEnd: "url(#dt-canvas-arrow)"
+									})
+								}), t("canvas.edge.run")] }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+									width: "28",
+									height: "8",
+									"aria-hidden": "true",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+										className: "dt-canvas-edge dt-canvas-edge-ask",
+										d: "M1 4 H21",
+										markerEnd: "url(#dt-canvas-arrow-ask)"
+									})
+								}), t("canvas.edge.ask")] })
+							] }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+								className: "dt-canvas-quiet",
+								children: t("canvas.hint")
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "dt-canvas-tools",
+						role: "group",
+						onPointerDown: stop,
+						"aria-label": t("canvas.fit"),
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "dt-canvas-tool",
+								title: t("canvas.zoomIn"),
+								"aria-label": t("canvas.zoomIn"),
+								onClick: () => setView((current) => zoomAbout(current, 1.25, size.w / 2, size.h / 2)),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+									name: "plus",
+									size: 14
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "dt-canvas-tool",
+								title: t("canvas.zoomOut"),
+								"aria-label": t("canvas.zoomOut"),
+								onClick: () => setView((current) => zoomAbout(current, .8, size.w / 2, size.h / 2)),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+									name: "minus",
+									size: 14
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "dt-canvas-tool",
+								title: t("canvas.fit"),
+								"aria-label": t("canvas.fit"),
+								onClick: fit,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+									name: "fullscreen",
+									size: 14
+								})
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: "dt-canvas-load",
+						role: "status",
+						onPointerDown: stop,
+						children: error ? void 0 : data && t("canvas.workers", {
+							running: String(data.running),
+							max: String(data.maxWorkers)
+						})
+					}),
+					mini && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "dt-canvas-minimap",
+						role: "button",
+						tabIndex: 0,
+						"aria-label": t("canvas.minimap"),
+						onPointerDown: stop,
+						onClick: (event) => {
+							const box = event.currentTarget.getBoundingClientRect(), inside = union(cover, 24);
+							setView({
+								scale: view.scale,
+								x: size.w / 2 - ((event.clientX - box.left - mini.x) / mini.scale + inside.x) * view.scale,
+								y: size.h / 2 - ((event.clientY - box.top - mini.y) / mini.scale + inside.y) * view.scale
+							});
+						},
+						children: [cover.map((rect, index) => {
+							const id = Object.keys(rects)[index];
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-canvas-mini-node",
+								"data-picked": id === `task:${selected}` || id === COMPOSER ? "1" : void 0,
+								style: {
+									left: rect.x * mini.scale + mini.x,
+									top: rect.y * mini.scale + mini.y,
+									width: rect.w * mini.scale,
+									height: rect.h * mini.scale
+								}
+							}, id);
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "dt-canvas-mini-view",
+							style: {
+								left: -view.x / view.scale * mini.scale + mini.x,
+								top: -view.y / view.scale * mini.scale + mini.y,
+								width: size.w / view.scale * mini.scale,
+								height: size.h / view.scale * mini.scale
+							}
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("nav", {
+						className: "dt-canvas-bar",
+						"aria-label": t("canvas.title"),
+						onPointerDown: stop,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-canvas-bar-title",
+								children: t("canvas.title")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-canvas-bar-lanes",
+								children: LANES.map((lane) => t(`canvas.lane.${lane}`)).join(" / ")
+							}),
+							error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "dt-error",
+								role: "alert",
+								children: error.message
+							}),
+							data && data.paused && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Tag, {
+								tone: "quiet",
+								children: t("dock.paused")
+							}),
+							data && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "dt-canvas-bar-sum",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: dockDot(tasks) }), t("canvas.needsYou", { count: String(data.awaiting) })]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
+								variant: "ghost",
+								size: "sm",
+								disabled: !needs,
+								onClick: () => {
+									setSelected(needs?.id);
+									setSent(false);
+								},
+								children: t("canvas.pickNeed")
+							})
+						]
+					})
+				]
+			});
+		}
+		/** How `inside` fits a box of `width` × `height`: where it starts, and how much of a plane pixel a box pixel is. */
+		function fitInto(inside, width, height) {
+			const scale = Math.min(width / inside.w, height / inside.h);
+			return {
+				scale,
+				x: (width - inside.w * scale) / 2 - inside.x * scale,
+				y: (height - inside.h * scale) / 2 - inside.y * scale
+			};
+		}
+		/** The middle of a cubic curve's path, where its label sits: a cubic bends within its ends, and its middle reads beside them. */
+		function curveMiddle(path) {
+			const [sx, sy, c1x, c1y, c2x, c2y, tx, ty] = path.match(/-?[\d.]+/g).map(Number);
+			return {
+				x: (sx + 3 * c1x + 3 * c2x + tx) / 8,
+				y: (sy + 3 * c1y + 3 * c2y + ty) / 8
+			};
+		}
+		//#endregion
 		//#region src/client/index.tsx
-		/** Browser plugin entry point registering the sidebar icon, main management panel, and Plugin Manager config view. */
+		/** Browser plugin entry point registering the sidebar icons, the management panel, the task canvas, the task dock, and the Plugin Manager config view. */
 		const NS = "dshSuperagent";
 		const PANEL_ID = "dsh-superagent";
+		/** The task canvas, a main panel of its own beside the management panel. */
+		const CANVAS_ID = "dsh-superagent-canvas";
 		const ENTRY = "dsh-superagent";
+		/** The entry's cell in `conversation.input.dock`, beside the shipped `queue`, `todo` and `goal` entries. */
+		const DOCK_ID = "dsh-superagent";
 		function HammerIcon({ size }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
 				width: size,
@@ -6853,13 +8036,47 @@ window.__ModuleLoader__.load({
 				]
 			});
 		}
-		/** Mounted panel wrapper; cancels any pending Session navigation when a new one starts or the panel unmounts. */
-		function Mounted({ ctx, t }) {
+		function CanvasIcon({ size }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+				width: size,
+				height: size,
+				viewBox: "0 0 24 24",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 1.8,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": true,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "3",
+						y: "4",
+						width: "8",
+						height: "6",
+						rx: "1.5"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "13",
+						y: "14",
+						width: "8",
+						height: "6",
+						rx: "1.5"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M11 7h5.5a2 2 0 0 1 2 2V14" }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 15.5h5" })
+				]
+			});
+		}
+		/**
+		* Opens a DeepSeek Harness Session in the Workspace UI once the host's catalog lists it; a later request cancels the one
+		* before it, and unmounting cancels the one in flight.
+		*/
+		function useOpenSession(ctx, t) {
 			const pending = (0, react.useRef)(void 0);
 			(0, react.useEffect)(() => () => {
 				pending.current?.abort();
 			}, []);
-			const openSession = (0, react.useCallback)(async (id) => {
+			return (0, react.useCallback)(async (id) => {
 				pending.current?.abort();
 				const request = new AbortController();
 				pending.current = request;
@@ -6872,11 +8089,40 @@ window.__ModuleLoader__.load({
 					throw error;
 				}
 			}, [ctx, t]);
+		}
+		/** Mounted panel wrapper. */
+		function Mounted({ ctx, t }) {
+			const openSession = useOpenSession(ctx, t);
 			const form = usePageForm(ctx.get("configForms")?.get(ENTRY));
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(App, {
 				t,
 				openSession,
 				deploymentForm: form
+			});
+		}
+		/** The task canvas panel; it shares the management panel's styles, polling and Session navigation. */
+		function MountedCanvas({ ctx, t }) {
+			const openSession = useOpenSession(ctx, t);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelProvider, {
+				t,
+				openSession,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasPage, {})
+			});
+		}
+		/** The task dock of the main Session; its button opens the task canvas. */
+		function MountedDock(props) {
+			const { ctx, t, sessionId, input, inputActions } = props;
+			const openSession = useOpenSession(ctx, t);
+			const openPanel = (0, react.useCallback)(() => {
+				ctx.get("layout")?.selectPanel(CANVAS_ID);
+			}, [ctx]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TaskDock, {
+				t,
+				sessionId,
+				input,
+				inputActions,
+				openSession,
+				openPanel
 			});
 		}
 		const inject = [
@@ -6885,7 +8131,7 @@ window.__ModuleLoader__.load({
 			"sessions",
 			"uiWorkspace"
 		];
-		/** Registers the panel, sidebar icon, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
+		/** Registers the panel, the task canvas, the task dock, the sidebar icons, and the Plugin Manager config view; `configForms` and `layout` are optional. */
 		function apply(ctx) {
 			ctx.effect(() => ctx.locale.register(NS, {
 				zh,
@@ -6908,6 +8154,31 @@ window.__ModuleLoader__.load({
 				label: () => t("panel"),
 				locale: NS
 			}, HammerIcon));
+			ctx.slots.inject("main", () => ctx.slots.register({
+				name: "main",
+				key: CANVAS_ID,
+				locale: NS,
+				inject: () => ({})
+			}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MountedCanvas, {
+				ctx,
+				t: props.t
+			})));
+			ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
+				name: "sidebar.panellist",
+				id: CANVAS_ID,
+				order: 11,
+				label: () => t("canvas.title"),
+				locale: NS
+			}, CanvasIcon));
+			ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: DOCK_ID,
+				order: 10,
+				locale: NS
+			}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MountedDock, {
+				ctx,
+				...props
+			})));
 			ctx.slots.inject("plugins.row.config", () => ctx.slots.register({
 				name: "plugins.row.config",
 				key: `${ENTRY}#${ENTRY}`,

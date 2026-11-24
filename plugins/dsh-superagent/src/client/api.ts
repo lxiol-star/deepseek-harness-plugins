@@ -117,6 +117,8 @@ export function caller(messages: () => ApiMessages): Call {
 }
 
 export type StateView = ApiResponse<'GET state'>
+export type TasksView = ApiResponse<'GET tasks'>
+export type TaskView = TasksView['tasks'][number]
 export type SetupView = StateView['setup']
 export type SettingsView = ApiResponse<'GET settings'>
 export type Settings = { [B in keyof SettingsView['blocks']]: SettingsView['blocks'][B]['value'] }

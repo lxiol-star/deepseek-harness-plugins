@@ -44,6 +44,36 @@ export interface SessionsHost {
  */
 interface SessionBinding { disposers: (() => void)[]; scope?: Context; skills?: { revision: number; dispose: () => void }; subagent?: true }
 
+/** A Session's todo list as it last wrote it: how many items are done, how many there are, and the one in hand. */
+export interface Todos { done: number; total: number; current: string }
+/** Reads the list of one `todo/write` event; a list that is not an array is not a todo list. */
+export function todosOf(data: unknown): Todos | undefined {
+  const list = (data as { todos?: unknown } | null | undefined)?.todos
+  if (!Array.isArray(list)) return undefined
+  const items = list.filter((item): item is { content?: unknown; status?: unknown } => typeof item === 'object' && item !== null)
+  const inHand = items.find(item => item.status === 'in_progress')
+  return { done: items.filter(item => item.status === 'completed').length, total: items.length,
+    current: typeof inHand?.content === 'string' ? inHand.content : '' }
+}
+/** One entry of the main Session's conversation as the task canvas shows it: a question the operator asked, or the reply that ended a turn. */
+export interface Exchange { at: string; role: 'operator' | 'orchestrator'; text: string }
+/** How many of the main Session's latest exchanges the task canvas keeps. */
+export const EXCHANGES = 12
+/**
+ * The text of the assistant message that ended a turn: it says something and calls no tool. A step that calls tools says
+ * nothing here, whatever text it carries, because its turn goes on.
+ */
+export function replyText(event: { type?: string; data?: unknown }): string | undefined {
+  if (event.type !== 'assistant/message') return undefined
+  const content = (event.data as { message?: { content?: unknown } } | null | undefined)?.message?.content
+  if (!Array.isArray(content)) return undefined
+  const blocks = content.filter((block): block is { type?: unknown; text?: unknown } => typeof block === 'object' && block !== null)
+  if (blocks.some(block => block.type === 'tool-call')) return undefined
+  const text = blocks.filter(block => block.type === 'text' && typeof block.text === 'string').map(block => block.text as string)
+    .join('\n\n').trim()
+  return text || undefined
+}
+
 /** The agent presets Executor Sessions and the main Session are created with, which the bundle's patch defines. */
 export const WORKER_PRESET = 'dsh-superagent-worker', ROUTER_PRESET = 'dsh-superagent-router'
 declare module '@deepseek-ai/cordis' {
@@ -103,6 +133,10 @@ export class Sessions {
   /** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
   private readonly bindings = new Map<Agent, SessionBinding>()
   private readonly retryHealth = new RetryHealth()
+  /** Each managed Session's last todo list: a derived cache of its `todo/write` events, empty after a restart until the next write. */
+  private readonly todos = new Map<string, Todos>()
+  /** The main Session's latest exchanges, oldest first: a derived cache of its log that this process holds (docs/007). */
+  private readonly exchanges: Exchange[] = []
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
   constructor(private readonly host: SessionsHost) {
@@ -117,13 +151,22 @@ export class Sessions {
     const ctx = this.ctx
     ctx.on('agent/disposed', ({ agent }) => {
       this.release(agent)
-      this.retryHealth.clear(agent.id); this.updateModelHealth()
+      this.retryHealth.clear(agent.id); this.todos.delete(agent.id); this.updateModelHealth()
     })
     ctx.on('session/event', (session, event) => {
       const agent = ctx.agents.get(session.id)
       const binding = agent && agent.session === session ? this.bindings.get(agent) : undefined
       if (!agent || !binding || binding.subagent) return
       this.retryHealth.observe(agent.id, event)
+      const written = event as { type?: string; data?: unknown }
+      if (written.type === 'todo/write') {
+        const list = todosOf(written.data)
+        if (list) this.todos.set(agent.id, list); else this.todos.delete(agent.id)
+      }
+      if (agent.id === this.host.masterId) {
+        const reply = replyText(written)
+        if (reply) this.record({ at: new Date().toISOString(), role: 'orchestrator', text: reply })
+      }
       this.updateModelHealth()
     })
     ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
@@ -227,6 +270,27 @@ export class Sessions {
     const retry = sessionId ? this.retryHealth.get(sessionId) : undefined
     return retry ? { model_retry: retry } : {}
   }
+  /** The todo list a managed Session last wrote, or undefined when it wrote none since this process started. */
+  todoList(sessionId: string | undefined): Todos | undefined {
+    return sessionId ? this.todos.get(sessionId) : undefined
+  }
+  /** Keeps the newest `EXCHANGES` exchanges of the main Session's conversation. */
+  private record(exchange: Exchange): void {
+    this.exchanges.push(exchange)
+    if (this.exchanges.length > EXCHANGES) this.exchanges.splice(0, this.exchanges.length - EXCHANGES)
+  }
+  /**
+   * Carries the operator's question about a ticket to the main Session as a relay, which `Effects` orders and retries until
+   * delivered at most once under `requestId`, and shows the question in the conversation the task canvas keeps.
+   */
+  ask(requestId: string, text: string, question: string): void {
+    this.record({ at: new Date().toISOString(), role: 'operator', text: question })
+    this.relay(requestId, text)
+  }
+  /** The main Session's latest exchanges, oldest first, as far back as this process remembers. */
+  conversation(): readonly Exchange[] { return [...this.exchanges] }
+  /** Whether the Session's turn runs now; false for a Session that is not loaded. */
+  active(sessionId: string): boolean { return this.ctx.agents.get(sessionId as SessionId)?.status === 'running' }
   private updateModelHealth(): void {
     const retries = this.retryHealth.list()
     this.host.health.set(retries.length

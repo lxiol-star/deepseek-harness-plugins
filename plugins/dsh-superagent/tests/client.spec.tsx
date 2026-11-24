@@ -51,12 +51,30 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 it('registers a localized main panel, sidebar entry and Plugin Manager row page, and no settings section', () => {
   const { entries, dictionaries, main, nav } = fixture([])
-  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'plugins.row.config'])
-  expect(entries[2]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'main', 'sidebar.panellist', 'conversation.input.dock', 'plugins.row.config'])
+  expect(entries[5]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
   expect(nav.options.label?.()).toBe('Superagent')
+})
+
+it('registers the task canvas as a main panel of its own beside the panel, and the task dock in the composer slot', async () => {
+  serve()
+  const { entries } = fixture([])
+  const [canvas, icon, dock] = [entries[2]!, entries[3]!, entries[4]!]
+  expect(canvas.options).toMatchObject({ key: 'dsh-superagent-canvas', locale: 'dshSuperagent' })
+  expect(icon.options).toMatchObject({ id: 'dsh-superagent-canvas', order: 11, locale: 'dshSuperagent' })
+  expect(icon.options.label?.()).toBe(zh['canvas.title'])
+  expect(dock.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
+  // The canvas lays its lanes out with nothing to show, and the dock is empty in a Session the host does not call its main one.
+  const view = await render(canvas, { t })
+  expect([...view.container.querySelectorAll('.dt-canvas-lane-title')].map(title => title.textContent)).toEqual(['主会话', '任务', '执行器'])
+  expect(view.container.querySelector('[data-node="empty"]')?.textContent).toContain(zh['canvas.empty'])
+  view.dispose()
+  const bar = await render(dock, { t, sessionId: 'some-other-session' })
+  expect(bar.container.textContent).toBe('')
+  bar.dispose()
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {

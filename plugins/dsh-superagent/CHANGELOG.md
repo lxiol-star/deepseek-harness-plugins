@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6 — 2026-11-24
+
+- **任务列表与任务画布**：主会话现在有两个看任务的地方，都不经过桌面 UI 自动化。
+  - **输入框上方的任务条（dock）**：挂在 `conversation.input.dock` 槽位（DSH `0.2.2-rc.5` 起由 `dsh-client-ui-conversation` 声明），只在主会话里出现。列出每张未结束工单的阶段、进度和执行器是否在跑，可收起成一颗带计数的药丸并记住收起状态，没有未结束工单时不渲染。
+  - **任务画布**：侧栏独立入口「Superagent 画布」。主会话、任务、执行器三列卡片，可拖动空白处平移、⌘/Ctrl + 滚轮缩放、拖动卡片标题移动位置（记在本地），主会话 → 工单、工单 → 执行器用实线箭头相连，右下小地图、左上图例、底部状态栏。
+  - **勾选任务后向主会话提问**：勾选一张工单，画布上的 Composer 或任务条里的提问框就能就它提问。画布走新路由 `POST tasks/:id/ask`，由宿主经 `Effects` 的 relay 送达主会话（有序、重试、每个 `requestId` 至多一次）；任务条则把问题写进输入框并像点「发送」一样提交，输入框里有未发送的草稿、附件或正在发送时一律不写。
+  - 问题带一行 `[ticket <id> · <title>]`，主会话提示词据此识别「这是关于该工单的提问」，按工单记录回答，不开新单。
+  - **进度口径**：worker 最近一次 `todo/write` 的 `已完成/总数` 与当前项；没有待办时显示最近一次汇报；等人处理时显示等人做什么。重启后待办要等 worker 下一次写入才有。
+- 新增只读路由 `GET tasks`（任务条与画布共用的快照）与 `POST tasks/:id/ask`。
+- 主会话提示词末尾重写为三句（原「不要等」「不要走桌面 UI」「不要自己做」三句合并进同一预算）：`masterPrompt` 仍 < 1400 字符。
+- 单测：`tests/tasks.spec.ts`（排序、列表、ticket 行、待办与回复读取、两条路由）、`tests/dock.spec.tsx`、`tests/canvas.spec.tsx`、`tests/installed-bundle.spec.tsx`（加载 **profile 里实际安装的** `lib/client.js`，而不是源码）。
+- 兼容：`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-conversation`。宿主半边在真实 DSH `0.2.2-rc.5` 上热重载后 `GET tasks` 返回 200；客户端半边在 jsdom 中对着已安装产物验证了加载、注册、渲染与提问请求——**真实页面里的视觉效果尚未人工确认**。
+
 ## 0.2.5 — 2026-11-18
 
 - **主会话可以直接管理自己创建的子级工作区了**：新工具 `orchestrator_workspaces`（`op=list|archive|delete`），此前这类清理只能靠桌面 UI 自动化（osascript 盲点 DevTools 控制台粘 IIFE，实测把脚本粘进了别的会话和侧栏终端）。

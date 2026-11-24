@@ -10,7 +10,7 @@ import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, buil
   environmentSection, policySection, promptParts } from '../../src/app/prompts.ts'
 import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
-  TicketRow, TicketStage,
+  TicketRow, TicketStage, TaskView, TasksView,
   TriggerRow } from '../../src/client/api.ts'
 import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
@@ -90,6 +90,8 @@ export interface PanelServer {
   settings: Settings; revisions: Record<string, number>
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
+  /** The task dock's answer; unset means the host derives it from the open and person tickets. */
+  tasks?: TasksView | undefined
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
@@ -163,6 +165,19 @@ const stateView = (): StateView => ({
   // The panel does not read health; the service script does.
   health: {},
 })
+/** Every ticket the fake host holds open: its open ones and the ones that wait for a person. */
+const openTickets = () => [...server.tickets.open, ...server.person]
+/** The task views' list of the open tickets, as the host ranks them; the first worker runs and keeps a todo list. */
+const tasksView = (): TasksView => {
+  const tasks = openTickets().map((ticket, index): TaskView => ({ id: ticket.id, title: ticket.title,
+    ...ticket.stage === 'person' || ticket.stage === 'working' ? { stage: ticket.stage, action: ticket.action } : { stage: ticket.stage },
+    ...'note' in ticket && ticket.note ? { note: ticket.note } : {}, summary: ticket.summary ?? '', sessionId: ticket.sessionId ?? '',
+    createdAt: ticket.createdAt, updatedAt: ticket.updatedAt, live: index === 0 && !!ticket.sessionId,
+    ...index === 0 && ticket.sessionId ? { todos: { done: 1, total: 3, current: '补测试' } } : {} }))
+  return { masterId: 'master', active: false, paused: server.settings.paused, maxWorkers: server.settings.executor.maxWorkers,
+    running: tasks.filter(task => task.live).length, awaiting: tasks.filter(task => task.stage === 'person').length,
+    queued: tasks.filter(task => task.action === 'queued').length, total: tasks.length, omitted: 0, tasks, conversation: [] }
+}
 const settingsView = (): ApiResponse<'GET settings'> => ({
   policyVersion: 'abcdef1234567890',
   blocks: { policy: { value: server.settings.policy, revision: server.revisions.policy ?? 0 },
@@ -292,6 +307,8 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
+  // As the host ranks them: a worker that runs, then what waits for a person. The first ticket's worker runs and keeps a todo list.
+  'GET tasks': { answer: () => server.tasks ?? tasksView() },
   'GET overview': { answer: overviewView },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
@@ -327,6 +344,15 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
+  // The question reaches the main Session as a relay; the fake only records that it was asked.
+  'POST tasks/:id/ask': { body: true, answer: ({ params, body }) => {
+    // A test that supplies its own task list asks about one of its tasks; the default list asks about one of its tickets.
+    const known = server.tasks?.tasks.some(task => task.id === params.id) || openTickets().some(item => item.id === params.id)
+    if (!known) return refuse(404, 'Ticket not found')
+    const { question } = body as { question: string }
+    if (typeof question !== 'string' || !question.trim()) return refuse(400, 'A question is required')
+    return { delivered: 'queued' }
+  } },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
     if (!ticket) return refuse(404, 'Ticket not found')

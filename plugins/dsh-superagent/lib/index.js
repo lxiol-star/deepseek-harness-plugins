@@ -3471,7 +3471,7 @@ function threadFacts(store, thread) {
 		facts: thread.meta.facts ?? {}
 	};
 }
-const ticketLine = (view, ticket) => ({
+const ticketLine$1 = (view, ticket) => ({
 	...ticketSummary(ticket),
 	threads: view.threadsOf(ticket.id).map((thread) => threadFacts(view.store, thread))
 });
@@ -7453,7 +7453,7 @@ function ticketList(host, stage, offset, limit) {
 	};
 }
 function ticketRow(view, ticket) {
-	const line = ticketLine(view, ticket);
+	const line = ticketLine$1(view, ticket);
 	const channel = ticket.channels[0];
 	const reply = line.stage === "person" && channel ? channelLink(view, channel) : void 0;
 	return {
@@ -7502,7 +7502,7 @@ function ticketDetail(host, id) {
 	};
 	const human = ticket.mandate.basis.via !== "bot";
 	return {
-		...ticketLine(view, ticket),
+		...ticketLine$1(view, ticket),
 		mandate: {
 			...ticket.mandate,
 			actor: view.actor(ticket.mandate.actor, human)
@@ -8466,7 +8466,7 @@ function threadDetail(host, key, before, limit, around) {
 		}),
 		tickets: thread.subscriptions.flatMap((id) => {
 			const ticket = store.tickets.get(id);
-			return ticket ? [ticketLine(view, ticket)] : [];
+			return ticket ? [ticketLine$1(view, ticket)] : [];
 		}),
 		decisions: decisions.slice().reverse().map((decision) => decisionView(view, decision)),
 		timeline: shown.map((trigger) => triggerView(view, trigger, decisions)),
@@ -8527,6 +8527,68 @@ function decisionList(host, kinds, offset, limit, since = "") {
 		next_offset: more ? offset + limit : null
 	};
 }
+//#endregion
+//#region src/core/questions.ts
+/**
+* The first line of a message about one ticket. The main Session's prompt tells the model to read a message that carries this
+* line as the operator's question about that ticket, whether the operator typed the line or a task view wrote it for them.
+*/
+/** Replaces the characters that would close or break the line inside a title. */
+const oneLine = (title) => title.replace(/[[\]\r\n]+/g, " ").trim();
+/** The line that names a ticket in a message: its id, which `orchestrator_read` reads as `ticket/<id>`, and its title. */
+const ticketLine = (ticketId, title) => `[ticket ${ticketId} · ${oneLine(title)}]`;
+/** The longest question about a ticket that the task views send, in characters. */
+const ASK_MAX = 4e3;
+/**
+* Orders tasks as the operator reads them: a worker that runs now, then what waits for a person, then the queue, then a worker
+* between turns, then a ticket waiting for a Trigger.
+*/
+function taskRank(task) {
+	if (task.stage === "working" && task.action !== "queued") return task.live ? 0 : 3;
+	if (task.stage === "person") return 1;
+	if (task.stage === "working") return 2;
+	return 4;
+}
+/** Builds the task list: the open tickets that are not dismissed, ranked, newest first within a rank. */
+function tasksView(host) {
+	const tasks = host.openTickets().filter((ticket) => ticket.dismissed !== true).map((ticket) => {
+		const summary = ticketSummary(ticket), startedAt = latestAssignment(ticket)?.startedAt;
+		const todos = summary.sessionId ? host.todos(summary.sessionId) : void 0;
+		return {
+			id: summary.id,
+			title: summary.title,
+			stage: summary.stage,
+			..."action" in summary ? { action: summary.action } : {},
+			..."note" in summary ? { note: summary.note } : {},
+			summary: summary.summary,
+			sessionId: summary.sessionId,
+			createdAt: summary.createdAt,
+			...startedAt ? { startedAt } : {},
+			updatedAt: summary.updatedAt,
+			live: host.live(ticket),
+			...todos ? { todos } : {}
+		};
+	}).sort((one, other) => taskRank(one) - taskRank(other) || other.updatedAt.localeCompare(one.updatedAt));
+	const count = (rank) => tasks.filter((task) => taskRank(task) === rank).length;
+	return {
+		masterId: host.masterId,
+		active: host.active,
+		paused: host.paused,
+		maxWorkers: host.maxWorkers,
+		running: count(0),
+		awaiting: count(1),
+		queued: count(2),
+		total: tasks.length,
+		omitted: Math.max(0, tasks.length - 12),
+		tasks: tasks.slice(0, 12),
+		conversation: host.conversation()
+	};
+}
+/**
+* The message that carries the operator's question about one ticket from the task canvas to the main Session. It names the
+* ticket on the line the prompt tells the model to read, after a line that says who asks.
+*/
+const operatorQuestion = (ticketId, title, question) => `The operator asks from the Superagent task canvas; answer here.\n${ticketLine(ticketId, title)}\n${question}`;
 //#endregion
 //#region src/app/http.ts
 /**
@@ -8721,6 +8783,22 @@ function routes(runtime) {
 	const promptBody = (input) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096);
 	return {
 		"GET state": () => stateView(runtime),
+		"GET tasks": () => tasksView({
+			masterId: runtime.masterId,
+			active: runtime.sessions.active(runtime.masterId),
+			paused: runtime.store.settings().paused,
+			maxWorkers: runtime.store.settings().executor.maxWorkers,
+			openTickets: () => runtime.store.tickets.open(),
+			live: (ticket) => runtime.executor.running(ticket),
+			todos: (sessionId) => runtime.sessions.todoList(sessionId),
+			conversation: () => runtime.sessions.conversation()
+		}),
+		"POST tasks/:id/ask": async ({ params, body }) => {
+			const id = ticket(params.id);
+			const { question } = z.object({ question: z.string().trim().min(1).max(ASK_MAX) }).parse(await body(65536));
+			runtime.sessions.ask(`ask:${id}:${Date.now()}`, operatorQuestion(id, store.tickets.get(id).title, question), question);
+			return { delivered: "queued" };
+		},
 		"GET overview": () => overview(views(runtime), runtime.health, policyVersion(store.settings()), executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
 		"GET search": ({ query }) => search(views(runtime), query.q ?? "", runtime.sourceLinks),
 		"GET sources": () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
@@ -9277,6 +9355,30 @@ var RetryHealth = class {
 };
 //#endregion
 //#region src/app/sessions.ts
+/** Reads the list of one `todo/write` event; a list that is not an array is not a todo list. */
+function todosOf(data) {
+	const list = data?.todos;
+	if (!Array.isArray(list)) return void 0;
+	const items = list.filter((item) => typeof item === "object" && item !== null);
+	const inHand = items.find((item) => item.status === "in_progress");
+	return {
+		done: items.filter((item) => item.status === "completed").length,
+		total: items.length,
+		current: typeof inHand?.content === "string" ? inHand.content : ""
+	};
+}
+/**
+* The text of the assistant message that ended a turn: it says something and calls no tool. A step that calls tools says
+* nothing here, whatever text it carries, because its turn goes on.
+*/
+function replyText(event) {
+	if (event.type !== "assistant/message") return void 0;
+	const content = event.data?.message?.content;
+	if (!Array.isArray(content)) return void 0;
+	const blocks = content.filter((block) => typeof block === "object" && block !== null);
+	if (blocks.some((block) => block.type === "tool-call")) return void 0;
+	return blocks.filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n\n").trim() || void 0;
+}
 /** The agent presets Executor Sessions and the main Session are created with, which the bundle's patch defines. */
 const WORKER_PRESET = "dsh-superagent-worker";
 const ROUTER_PRESET = "dsh-superagent-router";
@@ -9353,6 +9455,10 @@ var Sessions = class {
 	/** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
 	bindings = /* @__PURE__ */ new Map();
 	retryHealth = new RetryHealth();
+	/** Each managed Session's last todo list: a derived cache of its `todo/write` events, empty after a restart until the next write. */
+	todos = /* @__PURE__ */ new Map();
+	/** The main Session's latest exchanges, oldest first: a derived cache of its log that this process holds (docs/007). */
+	exchanges = [];
 	ctx;
 	/** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
 	constructor(host) {
@@ -9368,6 +9474,7 @@ var Sessions = class {
 		ctx.on("agent/disposed", ({ agent }) => {
 			this.release(agent);
 			this.retryHealth.clear(agent.id);
+			this.todos.delete(agent.id);
 			this.updateModelHealth();
 		});
 		ctx.on("session/event", (session, event) => {
@@ -9375,6 +9482,20 @@ var Sessions = class {
 			const binding = agent && agent.session === session ? this.bindings.get(agent) : void 0;
 			if (!agent || !binding || binding.subagent) return;
 			this.retryHealth.observe(agent.id, event);
+			const written = event;
+			if (written.type === "todo/write") {
+				const list = todosOf(written.data);
+				if (list) this.todos.set(agent.id, list);
+				else this.todos.delete(agent.id);
+			}
+			if (agent.id === this.host.masterId) {
+				const reply = replyText(written);
+				if (reply) this.record({
+					at: (/* @__PURE__ */ new Date()).toISOString(),
+					role: "orchestrator",
+					text: reply
+				});
+			}
 			this.updateModelHealth();
 		});
 		ctx.on("agent/created", async ({ agent }) => {
@@ -9514,6 +9635,35 @@ var Sessions = class {
 	modelRetry(sessionId) {
 		const retry = sessionId ? this.retryHealth.get(sessionId) : void 0;
 		return retry ? { model_retry: retry } : {};
+	}
+	/** The todo list a managed Session last wrote, or undefined when it wrote none since this process started. */
+	todoList(sessionId) {
+		return sessionId ? this.todos.get(sessionId) : void 0;
+	}
+	/** Keeps the newest `EXCHANGES` exchanges of the main Session's conversation. */
+	record(exchange) {
+		this.exchanges.push(exchange);
+		if (this.exchanges.length > 12) this.exchanges.splice(0, this.exchanges.length - 12);
+	}
+	/**
+	* Carries the operator's question about a ticket to the main Session as a relay, which `Effects` orders and retries until
+	* delivered at most once under `requestId`, and shows the question in the conversation the task canvas keeps.
+	*/
+	ask(requestId, text, question) {
+		this.record({
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			role: "operator",
+			text: question
+		});
+		this.relay(requestId, text);
+	}
+	/** The main Session's latest exchanges, oldest first, as far back as this process remembers. */
+	conversation() {
+		return [...this.exchanges];
+	}
+	/** Whether the Session's turn runs now; false for a Session that is not loaded. */
+	active(sessionId) {
+		return this.ctx.agents.get(sessionId)?.status === "running";
 	}
 	updateModelHealth() {
 		const retries = this.retryHealth.list();

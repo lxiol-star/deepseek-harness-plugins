@@ -6,11 +6,17 @@ import type { DotState, IconName, TagTone } from './controls.tsx'
 
 export interface Mark { label: string; tone: TagTone; dot: DotState; icon: IconName }
 
-export function ticketMark(t: T, ticket: TicketStage & Pick<TicketSummary, 'ended'>): Mark {
+/** What `ticketMark` reads: a stage, the action it names where it has one, and how the ticket ended. */
+/** What `ticketMark` reads: a stage, the action it names where it has one, and how the ticket ended. */
+export type TicketMarkState = { stage: string; action?: string; ended?: TicketSummary['ended'] }
+/** The actions a person's stage names. */
+type PersonAction = Extract<TicketStage, { stage: 'person' }>['action']
+export function ticketMark(t: T, ticket: TicketMarkState): Mark {
   switch (ticket.stage) {
     case 'ended': return { label: valueLabel(t, 'outcome', ticket.ended?.outcome), tone: 'neutral', dot: 'idle', icon: 'stop' }
     case 'person': {
-      const action = ticket.action
+      // A person's stage always names one of these actions.
+      const action = ticket.action as PersonAction
       const icon: IconName = action === 'review' ? 'review' : action === 'failed' ? 'alert' : action === 'blocked' ? 'blocked'
         : action === 'delivery' ? 'inbox' : 'ask'
       return { label: t(`stage.${action}`), tone: action === 'failed' ? 'danger' : 'warning', dot: action === 'failed' ? 'error'
