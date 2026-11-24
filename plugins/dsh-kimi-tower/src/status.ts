@@ -80,6 +80,30 @@ export function isAgentLive(ctx: SnapshotContext, entry: TowerRosterEntry): bool
   return ctx.agents.get(entry.agentId)?.status === 'running'
 }
 
+/** The model selection a Host agent reports right now. */
+export interface ModelSelection {
+  readonly model?: string
+  readonly reasoningEffort?: string
+}
+
+/**
+ * The model selection a Host agent reports, or undefined when it reports none.
+ *
+ * The selection is a nicety on a card, so nothing about it may take the whole
+ * snapshot down: the agent may be gone, carry no `model`, carry a `current`
+ * that is missing or not a function, or `current()` may itself fail. Each of
+ * those costs this one agent its model name and nothing else.
+ */
+export function modelSelection(ctx: SnapshotContext, agentId: string): ModelSelection | undefined {
+  const current = ctx.agents.get(agentId)?.model?.current
+  if (typeof current !== 'function') return undefined
+  try {
+    return current() ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Project one mission onto the card shared by the dock and the canvas. */
 export function towerCard(
   mission: TowerMission,
@@ -90,11 +114,7 @@ export function towerCard(
 ): TowerCard {
   const owner = mission.owner === undefined ? undefined : roster.get(mission.owner)
   const live = owner !== undefined && isAgentLive(ctx, owner)
-  // `current?.()`, as before the canvas work: a Host agent may carry a `model`
-  // whose `current` is missing or null, and that costs this card its model
-  // name instead of the whole snapshot. A `current` that is present but not
-  // callable still throws, here as it always has.
-  const selection = owner === undefined ? undefined : ctx.agents.get(owner.agentId)?.model?.current?.()
+  const selection = owner === undefined ? undefined : modelSelection(ctx, owner.agentId)
   const startedAt = owner?.spawnedAt
   const started = startedAt === undefined ? undefined : Date.parse(startedAt)
   const elapsedMs = started === undefined || Number.isNaN(started) ? 0 : Math.max(0, now - started)

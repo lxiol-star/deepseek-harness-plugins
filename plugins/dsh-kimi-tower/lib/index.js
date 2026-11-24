@@ -6997,10 +6997,19 @@ function isAgentLive(ctx, entry) {
   if (entry.diedAt !== void 0) return false;
   return ctx.agents.get(entry.agentId)?.status === "running";
 }
+function modelSelection(ctx, agentId) {
+  const current = ctx.agents.get(agentId)?.model?.current;
+  if (typeof current !== "function") return void 0;
+  try {
+    return current() ?? void 0;
+  } catch {
+    return void 0;
+  }
+}
 function towerCard(mission, roster, ctx, repoRoot, now) {
   const owner = mission.owner === void 0 ? void 0 : roster.get(mission.owner);
   const live = owner !== void 0 && isAgentLive(ctx, owner);
-  const selection = owner === void 0 ? void 0 : ctx.agents.get(owner.agentId)?.model?.current?.();
+  const selection = owner === void 0 ? void 0 : modelSelection(ctx, owner.agentId);
   const startedAt = owner?.spawnedAt;
   const started = startedAt === void 0 ? void 0 : Date.parse(startedAt);
   const elapsedMs = started === void 0 || Number.isNaN(started) ? 0 : Math.max(0, now - started);
@@ -7348,7 +7357,7 @@ function canvasMission(mission, card, review) {
   };
 }
 function canvasAgent(ctx, entry) {
-  const selection = ctx.agents.get(entry.agentId)?.model?.current?.();
+  const selection = modelSelection(ctx, entry.agentId);
   return {
     name: oneLine(entry.name, CANVAS_LIMITS.label),
     kind: entry.kind,

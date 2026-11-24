@@ -33,7 +33,7 @@ import {
   readFrontmatterPrefix,
 } from './protocol/index'
 import type { RosterIndex, SnapshotContext, TowerCard, TowerSnapshot } from './status'
-import { isAgentLive, rosterIndex, snapshotSource, towerCard } from './status'
+import { isAgentLive, modelSelection, rosterIndex, snapshotSource, towerCard } from './status'
 
 export interface CanvasTask {
   readonly text: string
@@ -546,8 +546,8 @@ function canvasMission(
 }
 
 function canvasAgent(ctx: SnapshotContext, entry: TowerRosterEntry): CanvasAgent {
-  // `current?.()` as in the dock card: an unusable Host model omits the name only.
-  const selection = ctx.agents.get(entry.agentId)?.model?.current?.()
+  // The same lookup as the dock card: an unusable Host model omits the name only.
+  const selection = modelSelection(ctx, entry.agentId)
   return {
     name: oneLine(entry.name, CANVAS_LIMITS.label),
     kind: entry.kind,

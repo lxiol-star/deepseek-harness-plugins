@@ -339,3 +339,89 @@ test('a worker whose Host model has no callable current() costs its own model na
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('a worker whose Host model current is present but unusable costs its own model name only, on both routes', async () => {
+  const dir = await makeRepo()
+  try {
+    const store = new TowerStore(dir)
+    await store.init('session-main')
+    const [healthy, broken] = await store.plan([
+      { title: 'M1 healthy model two', scope: ['src/healthy2/**'], tasks: ['do it'] },
+      { title: 'M2 broken model two', scope: ['src/broken2/**'], tasks: ['do it'] },
+    ])
+    for (const [mission, name, id] of [[healthy, 'worker-1', 'session-w1'], [broken, 'worker-2', 'session-w2']]) {
+      await store.registerSpawnedAgent(
+        {
+          name,
+          agentId: id,
+          sessionId: 'session-main',
+          kind: 'worker',
+          missionId: mission.id,
+          worktree: mission.worktree,
+          branch: mission.branch,
+          spawnedAt: new Date().toISOString(),
+        },
+        { id: mission.id, owner: name },
+      )
+    }
+    const warnings = []
+    const agents = new Map([
+      ['session-main', agent('session-main', dir)],
+      ['session-w1', agent('session-w1', dir, {
+        status: 'running',
+        model: { current: () => ({ model: 'healthy-model', reasoningEffort: 'high' }) },
+      })],
+    ])
+    const ctx = { agents: { get: (id) => agents.get(id) }, logger: { warn: (...args) => warnings.push(args) } }
+
+    // Unlike a missing `current`, these shapes were never survived before: the
+    // optional call `current?.()` still tries to call a value that is present.
+    // This is the hardening, and it fails against the baseline bundle.
+    const throws = () => { throw new Error('model selection unavailable') }
+    for (const [label, model] of [
+      ['current is a string', { current: 'glm-test' }],
+      ['current is a number', { current: 42 }],
+      ['current is an object', { current: {} }],
+      ['current throws', { current: throws }],
+      ['current returns nothing', { current: () => undefined }],
+      ['current returns null', { current: () => null }],
+    ]) {
+      agents.set('session-w2', agent('session-w2', dir, { status: 'running', model }))
+      const dock = await get(ctx, '/tower/state?sessionId=session-main')
+      assert.equal(dock.status, 200, `${label}: the dock stays up`)
+      assert.equal(dock.json.active, true, label)
+      const [healthyCard, brokenCard] = dock.json.missions
+      // The healthy neighbour is untouched, field for field.
+      assert.deepEqual(Object.keys(healthyCard), CARD_KEYS, label)
+      assert.equal(healthyCard.model, 'healthy-model', label)
+      assert.equal(healthyCard.effort, 'high', label)
+      assert.equal(healthyCard.live, true, label)
+      // The broken card loses only its model name; the card itself is intact.
+      assert.deepEqual(Object.keys(brokenCard), CARD_KEYS.filter((key) => key !== 'model' && key !== 'effort'), label)
+      assert.equal(brokenCard.id, 'M2', label)
+      assert.equal(brokenCard.owner, 'worker-2', label)
+      assert.equal(brokenCard.agentId, 'session-w2', label)
+      assert.equal(brokenCard.live, true, label)
+      assert.equal(brokenCard.state, 'running', label)
+      assert.equal(brokenCard.tasksTotal, 1, label)
+
+      const canvas = await get(ctx, '/tower/state?sessionId=session-main&detail=1')
+      assert.equal(canvas.status, 200, `${label}: the canvas stays up`)
+      assert.equal(canvas.json.active, true, label)
+      assert.equal(canvas.json.missions.length, 2, label)
+      assert.equal('model' in canvas.json.missions[1], false, label)
+      assert.equal('effort' in canvas.json.missions[1], false, label)
+      assert.equal(canvas.json.missions[1].id, 'M2', label)
+      assert.equal(canvas.json.missions[1].live, true, label)
+      assert.deepEqual(canvas.json.agents.map((entry) => [entry.name, entry.live]), [['worker-1', true], ['worker-2', true]], label)
+      assert.equal('model' in canvas.json.agents[1], false, label)
+      assert.equal('effort' in canvas.json.agents[1], false, label)
+      assert.equal(canvas.json.agents[0].model, 'healthy-model', label)
+      assert.equal(canvas.json.agents[0].effort, 'high', label)
+    }
+    // A broken model on one agent is not an error worth a warning either.
+    assert.deepEqual(warnings, [])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
