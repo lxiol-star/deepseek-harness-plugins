@@ -546,7 +546,8 @@ function canvasMission(
 }
 
 function canvasAgent(ctx: SnapshotContext, entry: TowerRosterEntry): CanvasAgent {
-  const selection = ctx.agents.get(entry.agentId)?.model?.current()
+  // `current?.()` as in the dock card: an unusable Host model omits the name only.
+  const selection = ctx.agents.get(entry.agentId)?.model?.current?.()
   return {
     name: oneLine(entry.name, CANVAS_LIMITS.label),
     kind: entry.kind,

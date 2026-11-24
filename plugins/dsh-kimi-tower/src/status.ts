@@ -90,7 +90,11 @@ export function towerCard(
 ): TowerCard {
   const owner = mission.owner === undefined ? undefined : roster.get(mission.owner)
   const live = owner !== undefined && isAgentLive(ctx, owner)
-  const selection = owner === undefined ? undefined : ctx.agents.get(owner.agentId)?.model?.current()
+  // `current?.()`, as before the canvas work: a Host agent may carry a `model`
+  // whose `current` is missing or null, and that costs this card its model
+  // name instead of the whole snapshot. A `current` that is present but not
+  // callable still throws, here as it always has.
+  const selection = owner === undefined ? undefined : ctx.agents.get(owner.agentId)?.model?.current?.()
   const startedAt = owner?.spawnedAt
   const started = startedAt === undefined ? undefined : Date.parse(startedAt)
   const elapsedMs = started === undefined || Number.isNaN(started) ? 0 : Math.max(0, now - started)

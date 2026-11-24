@@ -7000,7 +7000,7 @@ function isAgentLive(ctx, entry) {
 function towerCard(mission, roster, ctx, repoRoot, now) {
   const owner = mission.owner === void 0 ? void 0 : roster.get(mission.owner);
   const live = owner !== void 0 && isAgentLive(ctx, owner);
-  const selection = owner === void 0 ? void 0 : ctx.agents.get(owner.agentId)?.model?.current();
+  const selection = owner === void 0 ? void 0 : ctx.agents.get(owner.agentId)?.model?.current?.();
   const startedAt = owner?.spawnedAt;
   const started = startedAt === void 0 ? void 0 : Date.parse(startedAt);
   const elapsedMs = started === void 0 || Number.isNaN(started) ? 0 : Math.max(0, now - started);
@@ -7348,7 +7348,7 @@ function canvasMission(mission, card, review) {
   };
 }
 function canvasAgent(ctx, entry) {
-  const selection = ctx.agents.get(entry.agentId)?.model?.current();
+  const selection = ctx.agents.get(entry.agentId)?.model?.current?.();
   return {
     name: oneLine(entry.name, CANVAS_LIMITS.label),
     kind: entry.kind,
