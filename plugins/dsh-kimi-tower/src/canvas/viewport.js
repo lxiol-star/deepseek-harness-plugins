@@ -10,6 +10,13 @@
 export const ZOOM_MIN = 0.2
 /** How far the canvas can be zoomed in. */
 export const ZOOM_MAX = 2.5
+/**
+ * Below this zoom only the wires that carry a count keep their label: the
+ * chips are a fixed screen size, and past this point there is no room for the
+ * prose ones. The stage and the label placement must agree, so the rule lives
+ * here once.
+ */
+export const COMPACT_ZOOM = 0.5
 /** A small diagram is not blown up past this when it is fitted. */
 export const FIT_MAX_ZOOM = 1.25
 

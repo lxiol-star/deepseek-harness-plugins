@@ -552,3 +552,123 @@ test('describeError makes a short sentence of whatever a request threw', () => {
   assert.equal(describeError(new Error('')), '未知错误')
   for (const value of [null, undefined, 'boom', 42]) assert.equal(describeError(value), '未知错误')
 })
+
+// --------------------------------------------------------------- sentences ---
+
+test('overviewFacts states every count as a number, with or without findings and activity', async () => {
+  const { overviewFacts } = await import('../src/canvas/sentences.js')
+  const build = async (findings, activity) => {
+    // The fixtures already export their snapshots; the slice ends before the
+    // seeded generator below, which is not needed to build the fleet.
+    const { fleetSnapshot } = await import('data:text/javascript;base64,' + Buffer.from(
+      (await read('test/canvas-client-layout.test.mjs')).slice(
+        (await read('test/canvas-client-layout.test.mjs')).indexOf('const T0 = '),
+        (await read('test/canvas-client-layout.test.mjs')).indexOf('/** A seeded PRNG'),
+      ),
+    ).toString('base64'))
+    return layoutCanvas({ ...fleetSnapshot(), findings, activity })
+  }
+  const finding = { title: 't', type: 'bug', severity: 'low', location: 'src/a.ts', createdAt: '2026-11-24' }
+  const cases = [
+    [['no findings', 'no activity'], []],
+    [['no findings', 'two activity lines'], ['a', 'b']],
+    [['three findings', 'no activity'], []],
+    [['three findings', 'one activity line'], ['tower: init']],
+  ]
+  for (const [which, activity] of cases) {
+    const findings = which[0] === 'no findings' ? [] : [finding, { ...finding, title: 'u' }, { ...finding, title: 'v' }]
+    const graph = await build(findings, activity)
+    const rows = overviewFacts(graph)
+    assert.deepEqual(rows.map(row => row[0]), ['基线分支', '任务', '进行中', 'Agent', '消息', '发现', '活动日志'])
+    const text = rows.map(row => row[1]).join(' | ')
+    assert.equal(/undefined|NaN|null/.test(text), false, `${which.join(' / ')}: ${text}`)
+    const expect = which[0] === 'no findings' ? '0 条' : '3 条'
+    assert.equal(rows[5][1], expect, 'findings')
+    assert.equal(rows[6][1], `${activity.length} 行`, 'activity')
+    // Every cell is a plain string: a row is `[label, text]`, never an object or a count's `.length`.
+    for (const [label, value] of rows) {
+      assert.equal(typeof label, 'string')
+      assert.equal(typeof value, 'string')
+    }
+  }
+})
+
+test('the panel shows exactly what overviewFacts says, so no wording drifts back in', async () => {
+  const { overviewFacts, reviewSummary } = await import('../src/canvas/sentences.js')
+  const panel = await read('src/client/canvasPanel.js')
+  assert.match(panel, /rows:\s*overviewFacts\(graph\)/, 'the overview is fed by the pure function')
+  assert.equal(/stats\.(findings|activity|messages|missions|agents|live|open|running|blocked|unread)\.length/.test(panel), false,
+    'no count in the panel is read through `.length`')
+  assert.equal(/stats\.findings\.length|stats\.activity\.length/.test(panel), false)
+  const graph = layoutCanvas({ active: true, missions: [], agents: [], messages: [], findings: [], activity: [] })
+  assert.deepEqual(overviewFacts(graph).slice(5), [['发现', '0 条'], ['活动日志', '0 行']])
+  assert.equal(reviewSummary(graph.data.missions[0] ?? {}), '', 'no review, no sentence')
+})
+
+test('every label map an overlay module names is bound there, so no render throws over a missing import', async () => {
+  // A half-finished hardening pass can leave a bare `MERGE_LABEL` in a
+  // component: node never renders the tree, so only a real browser run finds
+  // it. This reads the modules the way the bundler does and checks each label
+  // table is an import or a declaration of the file that uses it.
+  const files = ['src/client.js', ...(await filesBelow('src/client')), ...(await filesBelow('src/canvas'))]
+  const NAMED = /\b([A-Z][A-Z0-9_]*(?:_LABEL|_TYPE|_TONE|_KINDS|_NAMES))\b/g
+  for (const file of files) {
+    const source = (await read(file)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const bound = new Set()
+    for (const match of source.matchAll(/import\s*\{([\s\S]*?)\}\s*from/g)) {
+      for (const part of match[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/)[0].trim()
+        if (name !== '') bound.add(name)
+      }
+    }
+    for (const match of source.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:const|let|var|function)\s+([A-Z][A-Z0-9_]*)/g)) bound.add(match[1])
+    const unbound = [...source.matchAll(NAMED)].map(match => match[1]).filter(name => !bound.has(name))
+    assert.deepEqual([...new Set(unbound)], [], `${file} names a label map it does not bind`)
+  }
+})
+
+test('a hostile or corrupted status, merge or finding type never hands back a prototype or a function', async () => {
+  const { lookup, STATUS_LABEL, MERGE_LABEL, KIND_LABEL, deathLabel, missionLabel, missionTone } = await import('../src/canvas/labels.js')
+  const { reviewSummary } = await import('../src/canvas/sentences.js')
+  // The maps themselves have no prototype to reach.
+  for (const map of [STATUS_LABEL, MERGE_LABEL, KIND_LABEL]) assert.equal(Object.getPrototypeOf(map), null)
+  const hostile = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']
+  for (const key of hostile) {
+    assert.equal(lookup(STATUS_LABEL, key, 'FALLBACK'), 'FALLBACK')
+    assert.equal(lookup(MERGE_LABEL, key, 'FALLBACK'), 'FALLBACK')
+    assert.equal(typeof deathLabel(key), 'string')
+  }
+  // The layout normalises the status the canvas acts on, and keeps the raw text for the label.
+  const mission = extra => ({
+    id: 'M1', title: 'one', status: 'active', state: 'running', branch: 'b', worktreePath: 'w', tasksDone: 0, tasksTotal: 1,
+    elapsedMs: 0, live: false, deps: [], scope: [], tasks: [], blockers: [], notes: [], ...extra,
+  })
+  const renderable = value => (typeof value === 'string' || typeof value === 'number' || value === null || value === undefined || typeof value === 'boolean')
+  for (const status of hostile) {
+    const graph = layoutCanvas({ active: true, missions: [mission({ status })], agents: [], messages: [], findings: [], activity: [] })
+    const read = graph.groups[0].mission
+    assert.equal(read.status, 'active', `status "${status}" is acted on as the open default`)
+    assert.equal(read.statusText, status, 'the raw value is kept for anyone diagnosing the file')
+    // The label falls back to the real card state the Host also sent, so the
+    // reader sees something true rather than the corrupted word. What matters
+    // is that it is a string, never `Object.prototype` or a function.
+    assert.equal(missionLabel(read), '运行中', 'falls back to the card state')
+    assert.equal(renderable(missionLabel(read)), true)
+    assert.equal(renderable(missionTone(read)), true)
+    assert.equal(['running', 'stale'].includes(missionTone(read)), true)
+    assert.equal(graph.edges.filter(edge => edge.type === 'dispatch').length, 1, 'it is still dispatched')
+    // With no card state from the Host, the reader derives one from the
+    // normalised status, so the label is still a true card state.
+    const bare = mission({ status, state: undefined })
+    const readBare = layoutCanvas({ active: true, missions: [bare], agents: [], messages: [], findings: [], activity: [] }).groups[0].mission
+    assert.equal(readBare.state, 'stale')
+    assert.equal(missionLabel(readBare), '已离线')
+  }
+  for (const merge of hostile) {
+    const text = reviewSummary(mission({ review: { round: 1, reviewer: 'r', status: 'clean', merge, at: '2026-11-24' } }))
+    assert.equal(renderable(text), true)
+    assert.equal(typeof text, 'string')
+    assert.ok(!/function|native code/.test(text), text)
+    assert.equal(lookup(MERGE_LABEL, merge, merge), merge)
+  }
+})

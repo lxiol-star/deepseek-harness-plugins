@@ -28,7 +28,7 @@
  * lines computed here, so the geometry and the screen agree.
  */
 import { fitLine, wrapLines } from './measure.js'
-import { MERGE_LABEL, compareNatural, isOpen, reviewLabel, stateOf } from './labels.js'
+import { MERGE_LABEL, compareNatural, isOpen, lookup, reviewLabel, stateOf } from './labels.js'
 import { sanitizeText } from './sanitize.js'
 
 /** Mission filters of the toolbar. */
@@ -102,6 +102,8 @@ const SIDES = Object.freeze(['left', 'right'])
 const SIGN = Object.freeze({ left: -1, right: 1 })
 /** The card states the Host may report. */
 const STATE_NAMES = new Set(['running', 'waiting', 'stale', 'blocked', 'paused', 'done'])
+/** The lifecycle statuses the protocol defines. */
+const STATUS_NAMES = new Set(['planned', 'active', 'completed', 'blocked', 'paused', 'merged', 'abandoned'])
 
 // ---------------------------------------------------------------- reading ---
 
@@ -140,7 +142,12 @@ function readMission(raw) {
     const item = pick(task)
     return { text: str(item.text), done: item.done === true, dropped: item.dropped === true }
   })
-  const status = str(mission.status)
+  // The lifecycle status drives what is open, what tone a card has and what a
+  // wire is painted. A value outside the protocol enum (a hand-edited or
+  // corrupted state file) must not reach that logic, let alone a label map:
+  // it is kept as the text that is shown, and treated as `active` otherwise.
+  const rawStatus = str(mission.status)
+  const status = STATUS_NAMES.has(rawStatus) ? rawStatus : 'active'
   const live = mission.live === true
   const review = pick(mission.review)
   const hasReview = str(review.status) !== '' || str(review.reviewer) !== ''
@@ -149,6 +156,9 @@ function readMission(raw) {
     title: str(mission.title),
     kind: mission.kind === 'survey' || mission.kind === 'artifact' ? mission.kind : 'build',
     status,
+    // The status exactly as the Host wrote it, for the label; `status` above is
+    // what the canvas acts on.
+    statusText: rawStatus,
     // A Host that predates the detail contract sends no state; derive it.
     state: STATE_NAMES.has(mission.state) ? mission.state : stateOf(status, live),
     owner: str(mission.owner),
@@ -305,8 +315,8 @@ function flagsText(mission, deps) {
   if (mission.blockers.length > 0) parts.push(`阻塞 ${mission.blockers.length}`)
   if (mission.review !== undefined) {
     const verdict = [reviewLabel(mission.review.status)]
-    const merge = MERGE_LABEL[mission.review.merge]
-    if (merge !== undefined) verdict.push(merge)
+    const merge = lookup(MERGE_LABEL, mission.review.merge, '')
+    if (merge !== '') verdict.push(merge)
     parts.push(`评审 第${Math.max(1, mission.review.round)}轮 ${verdict.join(' · ')}`)
   }
   if (deps.length > 0) parts.push(`依赖 ${deps.join(' ')}`)

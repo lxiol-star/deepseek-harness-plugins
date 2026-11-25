@@ -8,10 +8,8 @@
  * thing on the canvas, and handing an agent to `onOpenAgent`.
  */
 import { Children, cloneElement, createElement as h, isValidElement, useEffect, useRef } from 'react'
-import {
-  KIND_LABEL, MERGE_LABEL, deathLabel, elapsedSince, formatClock, formatElapsed, formatStamp, missionLabel, missionTone,
-  reviewLabel,
-} from '../canvas/labels.js'
+import { KIND_LABEL, MERGE_LABEL, deathLabel, elapsedSince, formatClock, formatElapsed, formatStamp, lookup, missionLabel, missionTone, reviewLabel } from '../canvas/labels.js'
+import { overviewFacts, reviewSummary } from '../canvas/sentences.js'
 import { ProgressBar, Tag } from './canvasNodes.js'
 
 /** The tabs, left to right. */
@@ -20,6 +18,12 @@ const TAB_LABEL = Object.freeze({ detail: '详情', messages: '消息', reviews:
 
 /** How a finding's type reads. Anything else is shown as sent. */
 const FINDING_TYPE = Object.freeze({ bug: '缺陷', improve: '改进', vuln: '漏洞', idea: '想法' })
+
+/** The type of a finding in brackets, or nothing when it is one of the known words that the title already carries. */
+function findingTypeLabel(type) {
+  const label = lookup(FINDING_TYPE, type, '')
+  return label === '' ? '' : `（${label}）`
+}
 
 const findingTone = severity => (severity === 'critical' || severity === 'high' ? 'danger'
   : severity === 'medium' ? 'warn' : severity === 'low' ? 'plain' : 'info')
@@ -72,20 +76,13 @@ const labelOf = id => (id === 'tower' ? '塔台' : id.slice(id.indexOf(':') + 1)
 /** The tower as a whole: what the snapshot holds. */
 function Overview({ graph, towerSelected }) {
   const data = graph.data
-  const stats = graph.stats
   return h('div', { className: 'dkc-detail' }, [
     h('h4', { key: 'title' }, towerSelected ? '塔台' : '全局'),
+    // The wording lives in `sentences.js`, where node can read it back; the
+    // branch name alone is set in the monospace face.
     h(Facts, {
       key: 'facts',
-      rows: [
-        ['基线分支', data.base === '' ? plain('（未知）') : code(data.base)],
-        ['任务', plain(`${stats.missions} 个，${stats.open} 个未完成`)],
-        ['进行中', plain(`${stats.running} 个运行中，${stats.blocked} 个被阻塞`)],
-        ['Agent', plain(`${stats.agents} 个，${stats.live} 个在线`)],
-        ['消息', plain(`${stats.messages} 条，${stats.unread} 条未读`)],
-        ['发现', plain(`${stats.findings.length} 条`)],
-        ['活动日志', plain(`${stats.activity.length} 行`)],
-      ],
+      rows: overviewFacts(graph).map(([label, value], index) => [label, index === 0 && data.base !== '' ? code(value) : value]),
     }),
     towerSelected ? null : h('p', { key: 'hint', className: 'dkc-hint' }, '点击画布上的任务、Agent 或连线，这里会显示它的详情。'),
     data.findings.length === 0
@@ -98,7 +95,7 @@ function Overview({ graph, towerSelected }) {
           h('span', { key: 'main', className: 'dkc-main' }, [
             h('span', { key: 'title' }, [
               finding.title,
-              FINDING_TYPE[finding.type] ? `（${FINDING_TYPE[finding.type]}）` : '',
+              findingTypeLabel(finding.type),
             ].join('')),
             h('span', { key: 'where', className: 'dkc-sub' }, inline([
               finding.location === '' ? null : code(finding.location),
@@ -126,7 +123,7 @@ function MissionDetail({ graph, mission, now, onSelect, onOpenAgent }) {
     h('h4', { key: 'title' }, `${mission.id} ${mission.title}`),
     h('div', { className: 'dkc-detail-tags', key: 'tags' }, [
       h(Tag, { key: 'state', tone }, missionLabel(mission)),
-      mission.kind === 'build' ? null : h(Tag, { key: 'kind', tone: 'plain', dot: false }, KIND_LABEL[mission.kind]),
+      mission.kind === 'build' ? null : h(Tag, { key: 'kind', tone: 'plain', dot: false }, lookup(KIND_LABEL, mission.kind, mission.kind)),
       mission.review === undefined ? null : h(Tag, { key: 'review', tone: 'info', dot: false }, `评审 第${Math.max(1, mission.review.round)}轮`),
     ]),
     h(Facts, {
@@ -182,7 +179,7 @@ function MissionDetail({ graph, mission, now, onSelect, onOpenAgent }) {
       ['轮次', plain(`第 ${Math.max(1, mission.review.round)} 轮`)],
       ['评审人', mission.review.reviewer === '' ? null : h(Link, { onSelect, id: agentId(mission.review.reviewer) }, mission.review.reviewer)],
       ['结论', plain(reviewLabel(mission.review.status))],
-      ['合并建议', MERGE_LABEL[mission.review.merge] ?? mission.review.merge],
+      ['合并建议', lookup(MERGE_LABEL, mission.review.merge, mission.review.merge)],
       ['时间', mission.review.at === '' ? null : plain(formatStamp(mission.review.at))],
     ] })),
     mission.context === undefined ? null : h(Section, { key: 'context', title: '用户原话' },
@@ -371,13 +368,7 @@ function Reviews({ graph, onSelect }) {
         }, [
           h('span', { key: 'main', className: 'dkc-main' }, [
             h('span', { key: 'title' }, `${mission.id} ${mission.title}`),
-            h('span', { key: 'sub', className: 'dkc-sub' }, [
-              `第 ${Math.max(1, mission.review.round)} 轮`,
-              reviewLabel(mission.review.status),
-              MERGE_LABEL[mission.review.merge] ?? mission.review.merge,
-              mission.review.reviewer,
-              formatStamp(mission.review.at),
-            ].filter(part => part !== '' && part !== undefined).join(' · ')),
+            h('span', { key: 'sub', className: 'dkc-sub' }, reviewSummary(mission)),
           ]),
           h('span', { key: 'tone', className: 'dkc-list-tag' }, h(Tag, {
             key: 'tag',

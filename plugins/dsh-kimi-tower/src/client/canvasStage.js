@@ -12,8 +12,9 @@
  */
 import { createElement as h, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EDGE_KINDS, STATE_TONES, missionTone } from '../canvas/labels.js'
+import { placeLabels } from '../canvas/placeLabels.js'
 import { relatedIds } from '../canvas/selection.js'
-import { ZOOM_MAX, ZOOM_MIN, centreOn, fitView, minimapProjection, panBy, visibleRect, zoomAt, zoomTo } from '../canvas/viewport.js'
+import { COMPACT_ZOOM, ZOOM_MAX, ZOOM_MIN, centreOn, fitView, minimapProjection, panBy, visibleRect, zoomAt, zoomTo } from '../canvas/viewport.js'
 import { AgentCard, MissionGroup, TowerCard, Wires, WireLabels } from './canvasNodes.js'
 
 /** Size of the minimap, in screen px. */
@@ -24,8 +25,6 @@ const ZOOM_STEP = 1.2
 const WHEEL_STEP = 0.0016
 /** After this many ms without a wheel event, the wheel gesture is over. */
 const WHEEL_SETTLE = 400
-/** Below this zoom only the wires that carry a count keep their label. */
-const COMPACT_ZOOM = 0.5
 /** Spacing of the dot grid at zoom 1. */
 const DOT_GRID = 18
 
@@ -210,8 +209,12 @@ export function CanvasStage(props) {
   const fitted = useRef({ filter: null, ready: false })
   const touched = useRef(false)
 
+  const shown = view ?? { x: 0, y: 0, zoom: 1 }
   const nodes = useMemo(() => new Map(graph.nodes.map(node => [node.id, node])), [graph])
   const related = useMemo(() => relatedIds(graph, selectedId), [graph, selectedId])
+  // Where each wire's label sits at this zoom. It depends on the zoom and the
+  // graph, never on the pan, so dragging does not rebuild it.
+  const labels = useMemo(() => placeLabels(graph, shown.zoom), [graph, shown.zoom])
 
   // The stage's own size, now and whenever it changes.
   useLayoutEffect(() => {
@@ -353,7 +356,6 @@ export function CanvasStage(props) {
     setView(next)
   }
 
-  const shown = view ?? { x: 0, y: 0, zoom: 1 }
   const tower = graph.tower
   const cards = []
   for (const node of graph.nodes) {
@@ -425,6 +427,7 @@ export function CanvasStage(props) {
     h(WireLabels, {
       key: 'labels',
       edges: graph.edges,
+      labels,
       view: shown,
       selectedId,
       onSelect,

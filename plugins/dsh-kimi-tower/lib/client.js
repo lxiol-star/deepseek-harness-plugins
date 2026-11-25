@@ -504,14 +504,17 @@ function fitLine(text, maxWidth, fontSize, mono = !1) {
 }
 
 // src/canvas/labels.js
-var STATE_LABEL = Object.freeze({
+function lookup(table2, key, fallback) {
+  return Object.hasOwn(table2, key) ? table2[key] : fallback;
+}
+var table = (entries) => Object.freeze(Object.assign(/* @__PURE__ */ Object.create(null), entries)), STATE_LABEL = table({
   running: "\u8FD0\u884C\u4E2D",
   waiting: "\u5F85\u6D3E\u53D1",
   stale: "\u5DF2\u79BB\u7EBF",
   blocked: "\u88AB\u963B\u585E",
   paused: "\u5DF2\u6682\u505C",
   done: "\u5DF2\u5B8C\u6210"
-}), STATUS_LABEL = Object.freeze({
+}), STATUS_LABEL = table({
   planned: "\u5F85\u6D3E\u53D1",
   active: "\u8FDB\u884C\u4E2D",
   completed: "\u5F85\u9A8C\u6536",
@@ -519,18 +522,18 @@ var STATE_LABEL = Object.freeze({
   paused: "\u5DF2\u6682\u505C",
   merged: "\u5DF2\u5408\u5E76",
   abandoned: "\u5DF2\u653E\u5F03"
-}), KIND_LABEL = Object.freeze({
+}), KIND_LABEL = table({
   build: "\u5F00\u53D1",
   survey: "\u8C03\u7814",
   artifact: "\u4EA4\u4ED8"
-}), MERGE_LABEL = Object.freeze({
+}), MERGE_LABEL = table({
   merge: "\u53EF\u5408\u5E76",
   "fix-then-merge": "\u4FEE\u540E\u5408\u5E76",
   hold: "\u6682\u7F13"
-}), AGENT_KIND_LABEL = Object.freeze({
+}), AGENT_KIND_LABEL = table({
   worker: "Worker",
   reviewer: "\u8BC4\u5BA1"
-}), EDGE_LABEL = Object.freeze({
+}), EDGE_LABEL = table({
   dispatch: "\u6D3E\u53D1",
   own: "\u62E5\u6709",
   former: "\u66FE\u8D1F\u8D23",
@@ -574,7 +577,8 @@ function missionTone(mission) {
   }
 }
 function missionLabel(mission) {
-  return STATUS_LABEL[mission.status] ?? STATE_LABEL[mission.state] ?? mission.state;
+  let written = mission.statusText ?? mission.status;
+  return lookup(STATUS_LABEL, written, lookup(STATE_LABEL, mission.state, written));
 }
 function reviewLabel(status) {
   if (status === "clean") return "\u901A\u8FC7";
@@ -624,7 +628,7 @@ function compareNatural(a, b) {
   }
   return 0;
 }
-var DEATH_LABEL = Object.freeze({
+var DEATH_LABEL = table({
   completed: "\u5DF2\u5B8C\u6210",
   error: "\u51FA\u9519",
   interrupted: "\u5DF2\u4E2D\u65AD",
@@ -637,10 +641,10 @@ var DEATH_LABEL = Object.freeze({
   stopped: "\u5DF2\u505C\u6B62"
 });
 function deathLabel(status) {
-  return status == null || status === "" ? "\u5DF2\u7ED3\u675F" : `\u5DF2\u7ED3\u675F \xB7 ${DEATH_LABEL[status] ?? status}`;
+  return status == null || status === "" ? "\u5DF2\u7ED3\u675F" : `\u5DF2\u7ED3\u675F \xB7 ${lookup(DEATH_LABEL, status, status)}`;
 }
 function agentMeta(agent) {
-  let parts = [AGENT_KIND_LABEL[agent.kind] ?? "Worker"];
+  let parts = [lookup(AGENT_KIND_LABEL, agent.kind, "Worker")];
   return agent.role === "owner" ? parts.push(`\u8D1F\u8D23 ${agent.missionId}`) : agent.role === "former" ? parts.push(`\u66FE\u8D1F\u8D23 ${agent.missionId}`) : agent.role === "reviewer" ? parts.push(agent.missionId !== "" ? agent.missionId : "\u672A\u5173\u8054\u4EFB\u52A1") : parts.push("\u672A\u5173\u8054\u4EFB\u52A1"), agent.model !== "" && parts.push(agent.model + (agent.effort !== "" ? ` \xB7 ${agent.effort}` : "")), parts.join(" \xB7 ");
 }
 function agentUptime(agent, now) {
@@ -720,7 +724,7 @@ var CANVAS_FILTERS = Object.freeze(["all", "open", "blocked"]), CANVAS_DENSITIES
     cardGap: 12,
     cardPad: 10
   })
-}), TASK_LIMIT = 7, SCOPE_LIMIT = 7, SIDES = Object.freeze(["left", "right"]), SIGN = Object.freeze({ left: -1, right: 1 }), STATE_NAMES = /* @__PURE__ */ new Set(["running", "waiting", "stale", "blocked", "paused", "done"]);
+}), TASK_LIMIT = 7, SCOPE_LIMIT = 7, SIDES = Object.freeze(["left", "right"]), SIGN = Object.freeze({ left: -1, right: 1 }), STATE_NAMES = /* @__PURE__ */ new Set(["running", "waiting", "stale", "blocked", "paused", "done"]), STATUS_NAMES = /* @__PURE__ */ new Set(["planned", "active", "completed", "blocked", "paused", "merged", "abandoned"]);
 function pick(raw) {
   return raw !== null && typeof raw == "object" ? raw : {};
 }
@@ -740,12 +744,15 @@ function readMission(raw) {
   let mission = pick(raw), tasks = (Array.isArray(mission.tasks) ? mission.tasks : []).map((task) => {
     let item = pick(task);
     return { text: str(item.text), done: item.done === !0, dropped: item.dropped === !0 };
-  }), status = str(mission.status), live = mission.live === !0, review = pick(mission.review), hasReview = str(review.status) !== "" || str(review.reviewer) !== "";
+  }), rawStatus = str(mission.status), status = STATUS_NAMES.has(rawStatus) ? rawStatus : "active", live = mission.live === !0, review = pick(mission.review), hasReview = str(review.status) !== "" || str(review.reviewer) !== "";
   return {
     id: str(mission.id),
     title: str(mission.title),
     kind: mission.kind === "survey" || mission.kind === "artifact" ? mission.kind : "build",
     status,
+    // The status exactly as the Host wrote it, for the label; `status` above is
+    // what the canvas acts on.
+    statusText: rawStatus,
     // A Host that predates the detail contract sends no state; derive it.
     state: STATE_NAMES.has(mission.state) ? mission.state : stateOf(status, live),
     owner: str(mission.owner),
@@ -846,8 +853,8 @@ var BADGES = 100, MORE_LINE = 28;
 function flagsText(mission, deps) {
   let parts = [];
   if (mission.blockers.length > 0 && parts.push(`\u963B\u585E ${mission.blockers.length}`), mission.review !== void 0) {
-    let verdict = [reviewLabel(mission.review.status)], merge = MERGE_LABEL[mission.review.merge];
-    merge !== void 0 && verdict.push(merge), parts.push(`\u8BC4\u5BA1 \u7B2C${Math.max(1, mission.review.round)}\u8F6E ${verdict.join(" \xB7 ")}`);
+    let verdict = [reviewLabel(mission.review.status)], merge = lookup(MERGE_LABEL, mission.review.merge, "");
+    merge !== "" && verdict.push(merge), parts.push(`\u8BC4\u5BA1 \u7B2C${Math.max(1, mission.review.round)}\u8F6E ${verdict.join(" \xB7 ")}`);
   }
   return deps.length > 0 && parts.push(`\u4F9D\u8D56 ${deps.join(" ")}`), mission.notes.length > 0 && parts.push(`\u5907\u6CE8 ${mission.notes.length}`), mission.keyArtifacts.length > 0 && parts.push(`\u5173\u952E\u4EA7\u7269 ${mission.keyArtifacts.length}`), mission.context !== void 0 && parts.push("\u542B\u7528\u6237\u539F\u8BDD"), parts.join(" \xB7 ");
 }
@@ -1381,6 +1388,30 @@ function layoutCanvas(snapshot, options = {}) {
 // src/client/canvasPanel.js
 var import_react3 = require("react");
 
+// src/canvas/sentences.js
+function overviewFacts(graph) {
+  let stats = graph.stats, data = graph.data;
+  return [
+    ["\u57FA\u7EBF\u5206\u652F", data.base === "" ? "\uFF08\u672A\u77E5\uFF09" : data.base],
+    ["\u4EFB\u52A1", `${stats.missions} \u4E2A\uFF0C${stats.open} \u4E2A\u672A\u5B8C\u6210`],
+    ["\u8FDB\u884C\u4E2D", `${stats.running} \u4E2A\u8FD0\u884C\u4E2D\uFF0C${stats.blocked} \u4E2A\u88AB\u963B\u585E`],
+    ["Agent", `${stats.agents} \u4E2A\uFF0C${stats.live} \u4E2A\u5728\u7EBF`],
+    ["\u6D88\u606F", `${stats.messages} \u6761\uFF0C${stats.unread} \u6761\u672A\u8BFB`],
+    ["\u53D1\u73B0", `${stats.findings} \u6761`],
+    ["\u6D3B\u52A8\u65E5\u5FD7", `${stats.activity} \u884C`]
+  ];
+}
+function reviewSummary(mission) {
+  let review = mission.review;
+  return review === void 0 ? "" : [
+    `\u7B2C ${Math.max(1, review.round)} \u8F6E`,
+    reviewLabel(review.status),
+    lookup(MERGE_LABEL, review.merge, review.merge),
+    review.reviewer,
+    formatStamp(review.at)
+  ].filter((part) => part !== "" && part !== void 0).join(" \xB7 ");
+}
+
 // src/client/canvasNodes.js
 var import_react2 = require("react");
 
@@ -1398,7 +1429,7 @@ function wireGeometry(points) {
 }
 
 // src/client/canvasNodes.js
-var TONE = { running: "running", blocked: "blocked", paused: "paused", stale: "stale", waiting: "waiting", done: "done" }, toneOf = (state) => TONE[state] ?? "idle", box = (node) => ({ left: node.x, top: node.y, width: node.w, height: node.h });
+var TONE = Object.assign(/* @__PURE__ */ Object.create(null), { running: "running", blocked: "blocked", paused: "paused", stale: "stale", waiting: "waiting", done: "done" }), toneOf = (state) => lookup(TONE, state, "idle"), box = (node) => ({ left: node.x, top: node.y, width: node.w, height: node.h });
 function onActivate(action) {
   return (event) => {
     event.key !== "Enter" && event.key !== " " || (event.preventDefault(), event.stopPropagation(), action(event));
@@ -1521,7 +1552,7 @@ function MissionGroup({ group, graph, nodes, selected, onSelect }) {
     ]),
     (0, import_react2.createElement)("div", { className: "dkc-group-badges", key: "badges" }, [
       (0, import_react2.createElement)(Tag, { key: "state", tone }, label),
-      mission.kind === "build" ? null : (0, import_react2.createElement)(Tag, { key: "kind", tone: "plain", dot: !1 }, KIND_LABEL[mission.kind])
+      mission.kind === "build" ? null : (0, import_react2.createElement)(Tag, { key: "kind", tone: "plain", dot: !1 }, lookup(KIND_LABEL, mission.kind, mission.kind))
     ]),
     ...density === "detail" ? group.cardIds.map((id) => (0, import_react2.createElement)(SubCard, { key: id, node: nodes.get(id), group, mission, onSelect })) : []
   ]);
@@ -1540,7 +1571,7 @@ function AgentCard({ node, graph, now, selected, onSelect, onOpen }) {
     "data-type": "agent",
     "data-role": node.role,
     "data-live": node.live ? "1" : "0",
-    "aria-label": `${node.name}\uFF0C${AGENT_KIND_LABEL[node.kind]}\uFF0C${node.live ? "\u5728\u7EBF" : "\u5DF2\u79BB\u7EBF"}\uFF0C\u67E5\u770B\u8BE6\u60C5`,
+    "aria-label": `${node.name}\uFF0C${lookup(AGENT_KIND_LABEL, node.kind, "Worker")}\uFF0C${node.live ? "\u5728\u7EBF" : "\u5DF2\u79BB\u7EBF"}\uFF0C\u67E5\u770B\u8BE6\u60C5`,
     "aria-pressed": selected ? "true" : "false",
     onClick: () => onSelect(node.id),
     onDoubleClick: open,
@@ -1617,11 +1648,13 @@ function Wires({ edges, related, onSelect }) {
     ]);
   }));
 }
-function WireLabels({ edges, view, selectedId, onSelect, compact: compact2 }) {
+function WireLabels({ edges, labels, view, selectedId, onSelect, compact: compact2 }) {
   let chips = [];
   for (let edge of edges) {
     if (compact2 && edge.type !== "dep" && edge.type !== "message") continue;
-    let focusable = edge.type === "dep" || edge.type === "message";
+    let spot = labels.get(edge.id);
+    if (spot === void 0 || spot.hidden) continue;
+    let text = spot.text ?? edge.label, focusable = edge.type === "dep" || edge.type === "message";
     chips.push((0, import_react2.createElement)("button", {
       key: edge.id,
       type: "button",
@@ -1631,23 +1664,28 @@ function WireLabels({ edges, view, selectedId, onSelect, compact: compact2 }) {
       "data-unread": edge.type === "message" && edge.unread ? "1" : "0",
       "data-selected": edge.id === selectedId ? "true" : "false",
       tabIndex: focusable ? 0 : -1,
-      "aria-label": `${edge.label}\uFF0C\u67E5\u770B\u8BE6\u60C5`,
-      title: edge.type === "message" && edge.latest !== void 0 ? edge.latest.subject : edge.label,
+      "aria-label": `${text}\uFF0C\u67E5\u770B\u8BE6\u60C5`,
+      title: edge.type === "message" && edge.latest !== void 0 ? edge.latest.subject : text,
       style: {
-        left: Math.round(edge.labelAt[0] * view.zoom + view.x),
-        top: Math.round(edge.labelAt[1] * view.zoom + view.y)
+        left: Math.round(spot.at[0] * view.zoom + view.x),
+        top: Math.round(spot.at[1] * view.zoom + view.y)
       },
       onClick: (event) => {
         event.stopPropagation(), onSelect(edge.id);
       },
       onDoubleClick: stop
-    }, edge.label));
+    }, text));
   }
   return (0, import_react2.createElement)("div", { className: "dkc-labels" }, chips);
 }
 
 // src/client/canvasPanel.js
-var TABS = Object.freeze(["detail", "messages", "reviews", "log"]), TAB_LABEL = Object.freeze({ detail: "\u8BE6\u60C5", messages: "\u6D88\u606F", reviews: "\u8BC4\u5BA1", log: "\u65E5\u5FD7" }), FINDING_TYPE = Object.freeze({ bug: "\u7F3A\u9677", improve: "\u6539\u8FDB", vuln: "\u6F0F\u6D1E", idea: "\u60F3\u6CD5" }), findingTone = (severity) => severity === "critical" || severity === "high" ? "danger" : severity === "medium" ? "warn" : severity === "low" ? "plain" : "info", code = (text) => (0, import_react3.createElement)("code", { className: "dkc-code" }, text), plain = (text) => (0, import_react3.createElement)("span", {}, text);
+var TABS = Object.freeze(["detail", "messages", "reviews", "log"]), TAB_LABEL = Object.freeze({ detail: "\u8BE6\u60C5", messages: "\u6D88\u606F", reviews: "\u8BC4\u5BA1", log: "\u65E5\u5FD7" }), FINDING_TYPE = Object.freeze({ bug: "\u7F3A\u9677", improve: "\u6539\u8FDB", vuln: "\u6F0F\u6D1E", idea: "\u60F3\u6CD5" });
+function findingTypeLabel(type) {
+  let label = lookup(FINDING_TYPE, type, "");
+  return label === "" ? "" : `\uFF08${label}\uFF09`;
+}
+var findingTone = (severity) => severity === "critical" || severity === "high" ? "danger" : severity === "medium" ? "warn" : severity === "low" ? "plain" : "info", code = (text) => (0, import_react3.createElement)("code", { className: "dkc-code" }, text), plain = (text) => (0, import_react3.createElement)("span", {}, text);
 function Link({ onSelect, id, children }) {
   return (0, import_react3.createElement)("button", { type: "button", className: "dkc-link", onClick: () => onSelect(id), title: "\u5728\u753B\u5E03\u4E0A\u67E5\u770B" }, children);
 }
@@ -1671,20 +1709,14 @@ function Facts({ rows }) {
 }
 var agentId = (name) => `agent:${name}`, missionId = (id) => `mission:${id}`, endpoint = (name, data) => name === "tower" ? "\u5854\u53F0" : name === "all" ? "\u6240\u6709\u4EBA" : data.agents.some((agent) => agent.name === name) ? name : `${name}\uFF08\u4E0D\u5728\u753B\u5E03\u4E0A\uFF09`, labelOf = (id) => id === "tower" ? "\u5854\u53F0" : id.slice(id.indexOf(":") + 1);
 function Overview({ graph, towerSelected }) {
-  let data = graph.data, stats = graph.stats;
+  let data = graph.data;
   return (0, import_react3.createElement)("div", { className: "dkc-detail" }, [
     (0, import_react3.createElement)("h4", { key: "title" }, towerSelected ? "\u5854\u53F0" : "\u5168\u5C40"),
+    // The wording lives in `sentences.js`, where node can read it back; the
+    // branch name alone is set in the monospace face.
     (0, import_react3.createElement)(Facts, {
       key: "facts",
-      rows: [
-        ["\u57FA\u7EBF\u5206\u652F", data.base === "" ? plain("\uFF08\u672A\u77E5\uFF09") : code(data.base)],
-        ["\u4EFB\u52A1", plain(`${stats.missions} \u4E2A\uFF0C${stats.open} \u4E2A\u672A\u5B8C\u6210`)],
-        ["\u8FDB\u884C\u4E2D", plain(`${stats.running} \u4E2A\u8FD0\u884C\u4E2D\uFF0C${stats.blocked} \u4E2A\u88AB\u963B\u585E`)],
-        ["Agent", plain(`${stats.agents} \u4E2A\uFF0C${stats.live} \u4E2A\u5728\u7EBF`)],
-        ["\u6D88\u606F", plain(`${stats.messages} \u6761\uFF0C${stats.unread} \u6761\u672A\u8BFB`)],
-        ["\u53D1\u73B0", plain(`${stats.findings.length} \u6761`)],
-        ["\u6D3B\u52A8\u65E5\u5FD7", plain(`${stats.activity.length} \u884C`)]
-      ]
+      rows: overviewFacts(graph).map(([label, value], index) => [label, index === 0 && data.base !== "" ? code(value) : value])
     }),
     towerSelected ? null : (0, import_react3.createElement)("p", { key: "hint", className: "dkc-hint" }, "\u70B9\u51FB\u753B\u5E03\u4E0A\u7684\u4EFB\u52A1\u3001Agent \u6216\u8FDE\u7EBF\uFF0C\u8FD9\u91CC\u4F1A\u663E\u793A\u5B83\u7684\u8BE6\u60C5\u3002"),
     data.findings.length === 0 ? null : (0, import_react3.createElement)(
@@ -1697,7 +1729,7 @@ function Overview({ graph, towerSelected }) {
         (0, import_react3.createElement)("span", { key: "main", className: "dkc-main" }, [
           (0, import_react3.createElement)("span", { key: "title" }, [
             finding.title,
-            FINDING_TYPE[finding.type] ? `\uFF08${FINDING_TYPE[finding.type]}\uFF09` : ""
+            findingTypeLabel(finding.type)
           ].join("")),
           (0, import_react3.createElement)("span", { key: "where", className: "dkc-sub" }, inline([
             finding.location === "" ? null : code(finding.location),
@@ -1717,7 +1749,7 @@ function MissionDetail({ graph, mission, now, onSelect, onOpenAgent }) {
     (0, import_react3.createElement)("h4", { key: "title" }, `${mission.id} ${mission.title}`),
     (0, import_react3.createElement)("div", { className: "dkc-detail-tags", key: "tags" }, [
       (0, import_react3.createElement)(Tag, { key: "state", tone }, missionLabel(mission)),
-      mission.kind === "build" ? null : (0, import_react3.createElement)(Tag, { key: "kind", tone: "plain", dot: !1 }, KIND_LABEL[mission.kind]),
+      mission.kind === "build" ? null : (0, import_react3.createElement)(Tag, { key: "kind", tone: "plain", dot: !1 }, lookup(KIND_LABEL, mission.kind, mission.kind)),
       mission.review === void 0 ? null : (0, import_react3.createElement)(Tag, { key: "review", tone: "info", dot: !1 }, `\u8BC4\u5BA1 \u7B2C${Math.max(1, mission.review.round)}\u8F6E`)
     ]),
     (0, import_react3.createElement)(Facts, {
@@ -1774,7 +1806,7 @@ function MissionDetail({ graph, mission, now, onSelect, onOpenAgent }) {
       ["\u8F6E\u6B21", plain(`\u7B2C ${Math.max(1, mission.review.round)} \u8F6E`)],
       ["\u8BC4\u5BA1\u4EBA", mission.review.reviewer === "" ? null : (0, import_react3.createElement)(Link, { onSelect, id: agentId(mission.review.reviewer) }, mission.review.reviewer)],
       ["\u7ED3\u8BBA", plain(reviewLabel(mission.review.status))],
-      ["\u5408\u5E76\u5EFA\u8BAE", MERGE_LABEL[mission.review.merge] ?? mission.review.merge],
+      ["\u5408\u5E76\u5EFA\u8BAE", lookup(MERGE_LABEL, mission.review.merge, mission.review.merge)],
       ["\u65F6\u95F4", mission.review.at === "" ? null : plain(formatStamp(mission.review.at))]
     ] })),
     mission.context === void 0 ? null : (0, import_react3.createElement)(
@@ -1941,13 +1973,7 @@ function Reviews({ graph, onSelect }) {
     }, [
       (0, import_react3.createElement)("span", { key: "main", className: "dkc-main" }, [
         (0, import_react3.createElement)("span", { key: "title" }, `${mission.id} ${mission.title}`),
-        (0, import_react3.createElement)("span", { key: "sub", className: "dkc-sub" }, [
-          `\u7B2C ${Math.max(1, mission.review.round)} \u8F6E`,
-          reviewLabel(mission.review.status),
-          MERGE_LABEL[mission.review.merge] ?? mission.review.merge,
-          mission.review.reviewer,
-          formatStamp(mission.review.at)
-        ].filter((part) => part !== "" && part !== void 0).join(" \xB7 "))
+        (0, import_react3.createElement)("span", { key: "sub", className: "dkc-sub" }, reviewSummary(mission))
       ]),
       (0, import_react3.createElement)("span", { key: "tone", className: "dkc-list-tag" }, (0, import_react3.createElement)(Tag, {
         key: "tag",
@@ -2011,37 +2037,6 @@ function CanvasPanel(props) {
 // src/client/canvasStage.js
 var import_react4 = require("react");
 
-// src/canvas/selection.js
-var AGENT_PREFIX2 = "agent:", MISSION_PREFIX = "mission:";
-function relatedIds(graph, selectedId) {
-  let nodes = /* @__PURE__ */ new Set(), edges = /* @__PURE__ */ new Set();
-  if (selectedId == null) return { nodes, edges };
-  let node = graph.nodes.find((candidate) => candidate.id === selectedId) ?? graph.groups.find((candidate) => candidate.id === selectedId);
-  if (node !== void 0) {
-    if (nodes.add(node.id), node.type === "tower") {
-      for (let candidate of graph.nodes) nodes.add(candidate.id);
-      for (let group of graph.groups) nodes.add(group.id);
-      for (let edge2 of graph.edges) edges.add(edge2.id);
-      return { nodes, edges };
-    }
-    if (nodes.add("tower"), node.type === "agent")
-      node.missionId !== "" && nodes.add(`${MISSION_PREFIX}${node.missionId}`);
-    else {
-      let group = node.type === "mission" ? node : graph.groups.find((candidate) => candidate.missionId === node.missionId);
-      if (group !== void 0) {
-        for (let name of group.agents) nodes.add(`${AGENT_PREFIX2}${name}`);
-        for (let edge2 of graph.edges)
-          edge2.type === "dep" && (edge2.from === group.id || edge2.to === group.id) && (edges.add(edge2.id), nodes.add(edge2.from), nodes.add(edge2.to));
-      }
-    }
-    for (let edge2 of graph.edges)
-      edges.has(edge2.id) || nodes.has(edge2.from) && nodes.has(edge2.to) && edges.add(edge2.id);
-    return { nodes, edges };
-  }
-  let edge = graph.edges.find((candidate) => candidate.id === selectedId);
-  return edge !== void 0 && (edges.add(edge.id), nodes.add(edge.from), nodes.add(edge.to)), { nodes, edges };
-}
-
 // src/canvas/viewport.js
 var FIT_PADDING = Object.freeze({ top: 88, right: 48, bottom: 100, left: 48 }), INITIAL = Object.freeze({ x: 0, y: 0, zoom: 1 });
 function finite(value, fallback) {
@@ -2091,8 +2086,140 @@ function minimapProjection(bounds, width, height, margin = 6) {
   };
 }
 
+// src/canvas/placeLabels.js
+var LABEL = Object.freeze({
+  height: 16,
+  padX: 5,
+  fontSize: 10.5,
+  /** Least clear space between a chip and a card or another chip. */
+  gap: 1,
+  /** How far the centre of a chip may sit from its own wire. */
+  drift: 16
+}), RANK = Object.freeze({ dispatch: 0, former: 1, own: 2, message: 3, review: 4, dep: 5 }), COUNTED = /* @__PURE__ */ new Set(["message"]), COMPACT_KINDS = /* @__PURE__ */ new Set(["dep", "message"]), DRIFT_STEP = 4, ALONG_STEP = 4;
+function labelWidth(text) {
+  return Math.ceil(textWidth(text, LABEL.fontSize, !1, 1.06)) + LABEL.padX * 2;
+}
+function overlaps(a, b, gap = 0) {
+  return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+}
+function legsOf(edge, view) {
+  let toScreen = (point) => [point[0] * view.zoom + view.x, point[1] * view.zoom + view.y], legs = [];
+  for (let index = 1; index < edge.points.length; index += 1) {
+    let [x0, y0] = toScreen(edge.points[index - 1]), [x1, y1] = toScreen(edge.points[index]), horizontal = Math.abs(y1 - y0) < 0.5, vertical = Math.abs(x1 - x0) < 0.5;
+    !horizontal && !vertical || horizontal && vertical || legs.push(horizontal ? { axis: "x", fixed: y0, from: Math.min(x0, x1), to: Math.max(x0, x1), length: Math.abs(x1 - x0) } : { axis: "y", fixed: x0, from: Math.min(y0, y1), to: Math.max(y0, y1), length: Math.abs(y1 - y0) });
+  }
+  return legs.sort((a, b) => b.length - a.length || (a.axis < b.axis ? -1 : a.axis > b.axis ? 1 : a.fixed - b.fixed)), legs;
+}
+function runsOf(edge, view) {
+  let legs = legsOf(edge, view);
+  if (legs.length > 0) return legs;
+  let x = edge.labelAt[0] * view.zoom + view.x;
+  return [{ axis: "x", fixed: edge.labelAt[1] * view.zoom + view.y, from: x, to: x, length: 0 }];
+}
+function rectAt(leg, along, drift, w) {
+  return leg.axis === "x" ? { x: along - w / 2, y: leg.fixed - LABEL.height / 2 + drift, w, h: LABEL.height } : { x: leg.fixed - w / 2 + drift, y: along - LABEL.height / 2, w, h: LABEL.height };
+}
+function positionsAlong(leg, anchor) {
+  let start = Math.min(leg.to, Math.max(leg.from, anchor)), seen = /* @__PURE__ */ new Set(), positions = [], take = (value) => {
+    let clamped = Math.min(leg.to, Math.max(leg.from, value)), key = clamped.toFixed(3);
+    seen.has(key) || (seen.add(key), positions.push(clamped));
+  };
+  take(start);
+  for (let offset = ALONG_STEP; offset <= Math.max(start - leg.from, leg.to - start); offset += ALONG_STEP)
+    take(start + offset), take(start - offset);
+  return take(leg.from), take(leg.to), positions;
+}
+function placeLabels(graph, zoom) {
+  let view = { x: 0, y: 0, zoom }, compact2 = zoom < 0.5, placed = /* @__PURE__ */ new Map(), kept = [], cards = [
+    ...graph.nodes,
+    ...graph.groups
+  ].map((node) => ({ x: node.x * zoom, y: node.y * zoom, w: node.w * zoom, h: node.h * zoom })), runs = new Map(graph.edges.map((edge) => [edge.id, runsOf(edge, view)])), order = [...graph.edges].sort((a, b) => RANK[b.type] - RANK[a.type] || runs.get(b.id)[0].length - runs.get(a.id)[0].length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (let edge of order) {
+    if (compact2 && !COMPACT_KINDS.has(edge.type)) {
+      placed.set(edge.id, { at: [edge.labelAt[0], edge.labelAt[1]], hidden: !0 });
+      continue;
+    }
+    let w = labelWidth(edge.label), anchor = edge.labelAt[0] * zoom, chosen = null;
+    for (let leg of runs.get(edge.id)) {
+      let along = leg.axis === "x" ? anchor : edge.labelAt[1] * zoom, positions = positionsAlong(leg, along);
+      for (let drift = 0; drift <= LABEL.drift + 0.5 && chosen === null; drift += DRIFT_STEP)
+        for (let side of drift === 0 ? [0] : [1, -1]) {
+          let offset = drift * side;
+          for (let position of positions) {
+            let rect = rectAt(leg, position, offset, w);
+            if (!cards.some((card) => overlaps(rect, card, LABEL.gap)) && !kept.some((other) => overlaps(rect, other.rect, LABEL.gap))) {
+              chosen = { leg, position, offset };
+              break;
+            }
+          }
+          if (chosen !== null) break;
+        }
+      if (chosen !== null) break;
+    }
+    if (chosen === null) {
+      placed.set(edge.id, { at: [edge.labelAt[0], edge.labelAt[1]], hidden: !0 });
+      continue;
+    }
+    kept.push({ id: edge.id, rect: rectAt(chosen.leg, chosen.position, chosen.offset, w), leg: chosen.leg });
+    let centre = chosen.leg.axis === "x" ? [chosen.position, chosen.leg.fixed + chosen.offset] : [chosen.leg.fixed + chosen.offset, chosen.position];
+    placed.set(edge.id, {
+      at: [(centre[0] - view.x) / zoom, (centre[1] - view.y) / zoom],
+      hidden: !1
+    });
+  }
+  for (let [id, spot] of placed) {
+    if (!spot.hidden) continue;
+    let edge = graph.edges.find((candidate) => candidate.id === id);
+    if (edge === void 0 || !COUNTED.has(edge.type)) continue;
+    let host = kept.find((other) => {
+      let twin = graph.edges.find((candidate) => candidate.id === other.id);
+      if (twin === void 0 || twin.type !== edge.type || twin.from !== edge.from || twin.to !== edge.to) return !1;
+      let twinLeg = other.leg;
+      return legsOf(edge, view).some((leg) => leg.axis === twinLeg.axis && Math.abs(leg.fixed - twinLeg.fixed) <= LABEL.drift && leg.from < twinLeg.to && twinLeg.from < leg.to);
+    });
+    host !== void 0 && (host.folded = (host.folded ?? 0) + 1);
+  }
+  for (let other of kept) {
+    if ((other.folded ?? 0) === 0) continue;
+    let edge = graph.edges.find((candidate) => candidate.id === other.id), count = (edge.count ?? 1) + other.folded;
+    placed.set(other.id, { ...placed.get(other.id), text: count > 1 ? `${edge.label.replace(/ ×\d+$/, "")} \xD7${count}` : edge.label });
+  }
+  return placed;
+}
+
+// src/canvas/selection.js
+var AGENT_PREFIX2 = "agent:", MISSION_PREFIX = "mission:";
+function relatedIds(graph, selectedId) {
+  let nodes = /* @__PURE__ */ new Set(), edges = /* @__PURE__ */ new Set();
+  if (selectedId == null) return { nodes, edges };
+  let node = graph.nodes.find((candidate) => candidate.id === selectedId) ?? graph.groups.find((candidate) => candidate.id === selectedId);
+  if (node !== void 0) {
+    if (nodes.add(node.id), node.type === "tower") {
+      for (let candidate of graph.nodes) nodes.add(candidate.id);
+      for (let group of graph.groups) nodes.add(group.id);
+      for (let edge2 of graph.edges) edges.add(edge2.id);
+      return { nodes, edges };
+    }
+    if (nodes.add("tower"), node.type === "agent")
+      node.missionId !== "" && nodes.add(`${MISSION_PREFIX}${node.missionId}`);
+    else {
+      let group = node.type === "mission" ? node : graph.groups.find((candidate) => candidate.missionId === node.missionId);
+      if (group !== void 0) {
+        for (let name of group.agents) nodes.add(`${AGENT_PREFIX2}${name}`);
+        for (let edge2 of graph.edges)
+          edge2.type === "dep" && (edge2.from === group.id || edge2.to === group.id) && (edges.add(edge2.id), nodes.add(edge2.from), nodes.add(edge2.to));
+      }
+    }
+    for (let edge2 of graph.edges)
+      edges.has(edge2.id) || nodes.has(edge2.from) && nodes.has(edge2.to) && edges.add(edge2.id);
+    return { nodes, edges };
+  }
+  let edge = graph.edges.find((candidate) => candidate.id === selectedId);
+  return edge !== void 0 && (edges.add(edge.id), nodes.add(edge.from), nodes.add(edge.to)), { nodes, edges };
+}
+
 // src/client/canvasStage.js
-var MINIMAP = Object.freeze({ width: 184, height: 116 }), ZOOM_STEP = 1.2, WHEEL_STEP = 16e-4, WHEEL_SETTLE = 400, COMPACT_ZOOM = 0.5, DOT_GRID = 18, icon = (d) => (0, import_react4.createElement)(
+var MINIMAP = Object.freeze({ width: 184, height: 116 }), ZOOM_STEP = 1.2, WHEEL_STEP = 16e-4, WHEEL_SETTLE = 400, DOT_GRID = 18, icon = (d) => (0, import_react4.createElement)(
   "svg",
   { viewBox: "0 0 16 16", "aria-hidden": "true" },
   (0, import_react4.createElement)("path", { d, fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round", strokeLinejoin: "round" })
@@ -2215,7 +2342,7 @@ function StageState({ state, onRetry }) {
   ]);
 }
 function CanvasStage(props) {
-  let { graph, now, selectedId, onSelect, onOpenAgent, onGesture, notice, state, onRetry, ready } = props, stageRef = (0, import_react4.useRef)(null), [size, setSize] = (0, import_react4.useState)({ width: 0, height: 0 }), [view, setView] = (0, import_react4.useState)(null), [dragging, setDragging] = (0, import_react4.useState)(!1), [legendOpen, setLegendOpen] = (0, import_react4.useState)(!0), drag = (0, import_react4.useRef)(null), settle = (0, import_react4.useRef)(null), fitted = (0, import_react4.useRef)({ filter: null, ready: !1 }), touched = (0, import_react4.useRef)(!1), nodes = (0, import_react4.useMemo)(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph]), related = (0, import_react4.useMemo)(() => relatedIds(graph, selectedId), [graph, selectedId]);
+  let { graph, now, selectedId, onSelect, onOpenAgent, onGesture, notice, state, onRetry, ready } = props, stageRef = (0, import_react4.useRef)(null), [size, setSize] = (0, import_react4.useState)({ width: 0, height: 0 }), [view, setView] = (0, import_react4.useState)(null), [dragging, setDragging] = (0, import_react4.useState)(!1), [legendOpen, setLegendOpen] = (0, import_react4.useState)(!0), drag = (0, import_react4.useRef)(null), settle = (0, import_react4.useRef)(null), fitted = (0, import_react4.useRef)({ filter: null, ready: !1 }), touched = (0, import_react4.useRef)(!1), shown = view ?? { x: 0, y: 0, zoom: 1 }, nodes = (0, import_react4.useMemo)(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph]), related = (0, import_react4.useMemo)(() => relatedIds(graph, selectedId), [graph, selectedId]), labels = (0, import_react4.useMemo)(() => placeLabels(graph, shown.zoom), [graph, shown.zoom]);
   (0, import_react4.useLayoutEffect)(() => {
     let element = stageRef.current;
     if (element === null) return;
@@ -2305,7 +2432,7 @@ function CanvasStage(props) {
         return;
     }
     event.preventDefault(), event.key !== "0" && (touched.current = !0), setView(next);
-  }, shown = view ?? { x: 0, y: 0, zoom: 1 }, tower = graph.tower, cards = [];
+  }, tower = graph.tower, cards = [];
   for (let node of graph.nodes)
     node.type === "tower" ? cards.push((0, import_react4.createElement)(TowerCard, { key: node.id, node, graph, selected: node.id === selectedId, onSelect })) : node.type === "agent" && cards.push((0, import_react4.createElement)(AgentCard, {
       key: node.id,
@@ -2368,10 +2495,11 @@ function CanvasStage(props) {
     (0, import_react4.createElement)(WireLabels, {
       key: "labels",
       edges: graph.edges,
+      labels,
       view: shown,
       selectedId,
       onSelect,
-      compact: shown.zoom < COMPACT_ZOOM
+      compact: shown.zoom < 0.5
     }),
     legendOpen ? (0, import_react4.createElement)(Legend, { key: "legend", onClose: () => setLegendOpen(!1) }) : (0, import_react4.createElement)("button", {
       key: "legend-open",

@@ -12,12 +12,14 @@
  * Nothing here writes to the tower.
  */
 import { createElement as h } from 'react'
-import { AGENT_KIND_LABEL, KIND_LABEL, agentMeta, agentUptime, deathLabel, formatStamp, missionLabel, missionTone } from '../canvas/labels.js'
+import { AGENT_KIND_LABEL, KIND_LABEL, agentMeta, agentUptime, deathLabel, formatStamp, lookup, missionLabel, missionTone } from '../canvas/labels.js'
 import { wireGeometry } from '../canvas/wires.js'
 
 /** The tone of a wire: the state of the mission it is about. */
-const TONE = { running: 'running', blocked: 'blocked', paused: 'paused', stale: 'stale', waiting: 'waiting', done: 'done' }
-const toneOf = state => TONE[state] ?? 'idle'
+// No prototype on the table: a state string that is not one of these reads as
+// `idle` instead of handing back `Object.prototype`.
+const TONE = Object.assign(Object.create(null), { running: 'running', blocked: 'blocked', paused: 'paused', stale: 'stale', waiting: 'waiting', done: 'done' })
+const toneOf = state => lookup(TONE, state, 'idle')
 const box = node => ({ left: node.x, top: node.y, width: node.w, height: node.h })
 
 /** Fire on Enter or Space, as a button does, without letting the key bubble. */
@@ -175,7 +177,7 @@ export function MissionGroup({ group, graph, nodes, selected, onSelect }) {
     ]),
     h('div', { className: 'dkc-group-badges', key: 'badges' }, [
       h(Tag, { key: 'state', tone }, label),
-      mission.kind === 'build' ? null : h(Tag, { key: 'kind', tone: 'plain', dot: false }, KIND_LABEL[mission.kind]),
+      mission.kind === 'build' ? null : h(Tag, { key: 'kind', tone: 'plain', dot: false }, lookup(KIND_LABEL, mission.kind, mission.kind)),
     ]),
     ...(density === 'detail'
       ? group.cardIds.map(id => h(SubCard, { key: id, node: nodes.get(id), group, mission, onSelect }))
@@ -203,7 +205,7 @@ export function AgentCard({ node, graph, now, selected, onSelect, onOpen }) {
     'data-type': 'agent',
     'data-role': node.role,
     'data-live': node.live ? '1' : '0',
-    'aria-label': `${node.name}，${AGENT_KIND_LABEL[node.kind]}，${node.live ? '在线' : '已离线'}，查看详情`,
+    'aria-label': `${node.name}，${lookup(AGENT_KIND_LABEL, node.kind, 'Worker')}，${node.live ? '在线' : '已离线'}，查看详情`,
     'aria-pressed': selected ? 'true' : 'false',
     onClick: () => onSelect(node.id),
     onDoubleClick: open,
@@ -285,11 +287,16 @@ export function Wires({ edges, related, onSelect }) {
 }
 
 /** The label chips of the wires, drawn in screen space so they stay legible at any zoom. */
-export function WireLabels({ edges, view, selectedId, onSelect, compact }) {
+export function WireLabels({ edges, labels, view, selectedId, onSelect, compact }) {
   const chips = []
   for (const edge of edges) {
     // Far out, only the wires that carry a count keep their label.
     if (compact && edge.type !== 'dep' && edge.type !== 'message') continue
+    const spot = labels.get(edge.id)
+    // A chip with nowhere to sit on its own wire is not drawn at all: a label
+    // that cannot be told apart from its neighbours is worse than none.
+    if (spot === undefined || spot.hidden) continue
+    const text = spot.text ?? edge.label
     const focusable = edge.type === 'dep' || edge.type === 'message'
     chips.push(h('button', {
       key: edge.id,
@@ -300,18 +307,18 @@ export function WireLabels({ edges, view, selectedId, onSelect, compact }) {
       'data-unread': edge.type === 'message' && edge.unread ? '1' : '0',
       'data-selected': edge.id === selectedId ? 'true' : 'false',
       tabIndex: focusable ? 0 : -1,
-      'aria-label': `${edge.label}，查看详情`,
-      title: edge.type === 'message' && edge.latest !== undefined ? edge.latest.subject : edge.label,
+      'aria-label': `${text}，查看详情`,
+      title: edge.type === 'message' && edge.latest !== undefined ? edge.latest.subject : text,
       style: {
-        left: Math.round(edge.labelAt[0] * view.zoom + view.x),
-        top: Math.round(edge.labelAt[1] * view.zoom + view.y),
+        left: Math.round(spot.at[0] * view.zoom + view.x),
+        top: Math.round(spot.at[1] * view.zoom + view.y),
       },
       onClick: event => {
         event.stopPropagation()
         onSelect(edge.id)
       },
       onDoubleClick: stop,
-    }, edge.label))
+    }, text))
   }
   return h('div', { className: 'dkc-labels' }, chips)
 }

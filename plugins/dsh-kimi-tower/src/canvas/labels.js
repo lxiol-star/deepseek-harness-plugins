@@ -6,8 +6,27 @@
  * the detail panel, and so a label is decided in exactly one place.
  */
 
+/**
+ * Read a label map without ever reaching its prototype.
+ *
+ * A snapshot is data an agent wrote. `status: "__proto__"` or `merge:
+ * "constructor"` must not hand back `Object.prototype` or a function to
+ * render; a key that is not the table's own reads as absent.
+ *
+ * @param table - one of the frozen label maps below.
+ * @param key - the raw value from the snapshot.
+ * @param fallback - what to show when the table has no such key.
+ * @returns the label, or the fallback.
+ */
+export function lookup(table, key, fallback) {
+  return Object.hasOwn(table, key) ? table[key] : fallback
+}
+
+/** A label map with no prototype, so nothing can be found on it by accident. */
+const table = entries => Object.freeze(Object.assign(Object.create(null), entries))
+
 /** Card state, as the Host reports it on `missions[].state`. */
-export const STATE_LABEL = Object.freeze({
+export const STATE_LABEL = table({
   running: '运行中',
   waiting: '待派发',
   stale: '已离线',
@@ -17,7 +36,7 @@ export const STATE_LABEL = Object.freeze({
 })
 
 /** Lifecycle status, as the protocol stores it on `missions[].status`. */
-export const STATUS_LABEL = Object.freeze({
+export const STATUS_LABEL = table({
   planned: '待派发',
   active: '进行中',
   completed: '待验收',
@@ -28,27 +47,27 @@ export const STATUS_LABEL = Object.freeze({
 })
 
 /** Mission kind. */
-export const KIND_LABEL = Object.freeze({
+export const KIND_LABEL = table({
   build: '开发',
   survey: '调研',
   artifact: '交付',
 })
 
 /** How a merge recommendation reads. */
-export const MERGE_LABEL = Object.freeze({
+export const MERGE_LABEL = table({
   merge: '可合并',
   'fix-then-merge': '修后合并',
   hold: '暂缓',
 })
 
 /** Agent kind, as a short tag on a card. */
-export const AGENT_KIND_LABEL = Object.freeze({
+export const AGENT_KIND_LABEL = table({
   worker: 'Worker',
   reviewer: '评审',
 })
 
 /** Edge types, in legend order. */
-export const EDGE_LABEL = Object.freeze({
+export const EDGE_LABEL = table({
   dispatch: '派发',
   own: '拥有',
   former: '曾负责',
@@ -124,7 +143,11 @@ export function missionTone(mission) {
  * @returns the label.
  */
 export function missionLabel(mission) {
-  return STATUS_LABEL[mission.status] ?? STATE_LABEL[mission.state] ?? mission.state
+  // `statusText` is the status as the Host wrote it; a corrupted one shows as
+  // its own raw text rather than borrowing the label of the status it was
+  // normalised to.
+  const written = mission.statusText ?? mission.status
+  return lookup(STATUS_LABEL, written, lookup(STATE_LABEL, mission.state, written))
 }
 
 /**
@@ -236,7 +259,7 @@ export function compareNatural(a, b) {
 }
 
 /** How an agent's end status reads. Anything the Host sends that is not here is shown as sent. */
-const DEATH_LABEL = Object.freeze({
+const DEATH_LABEL = table({
   completed: '已完成',
   error: '出错',
   interrupted: '已中断',
@@ -257,7 +280,7 @@ const DEATH_LABEL = Object.freeze({
  */
 export function deathLabel(status) {
   if (status === undefined || status === null || status === '') return '已结束'
-  return `已结束 · ${DEATH_LABEL[status] ?? status}`
+  return `已结束 · ${lookup(DEATH_LABEL, status, status)}`
 }
 
 /**
@@ -268,7 +291,7 @@ export function deathLabel(status) {
  * @returns one line of text.
  */
 export function agentMeta(agent) {
-  const parts = [AGENT_KIND_LABEL[agent.kind] ?? 'Worker']
+  const parts = [lookup(AGENT_KIND_LABEL, agent.kind, 'Worker')]
   if (agent.role === 'owner') parts.push(`负责 ${agent.missionId}`)
   else if (agent.role === 'former') parts.push(`曾负责 ${agent.missionId}`)
   else if (agent.role === 'reviewer') parts.push(agent.missionId !== '' ? agent.missionId : '未关联任务')

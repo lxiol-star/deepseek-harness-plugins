@@ -16,7 +16,9 @@ import test from 'node:test'
 
 import { compareNatural, formatClock, formatStamp, reviewLabel } from '../src/canvas/labels.js'
 import { CANVAS_DENSITIES, CANVAS_FILTERS, layoutCanvas } from '../src/canvas/layout.js'
+import { LABEL, labelRect, labelWidth, legsOf, overlaps, placeLabels } from '../src/canvas/placeLabels.js'
 import { fitLine, textWidth, wrapLines } from '../src/canvas/measure.js'
+import { COMPACT_ZOOM } from '../src/canvas/viewport.js'
 
 // ---------------------------------------------------------------- fixture ---
 
@@ -82,7 +84,7 @@ const TASKS = [
  * a reviewer whose mission is not on the canvas; tower, peer and broadcast
  * messages.
  */
-function fleetSnapshot() {
+export function fleetSnapshot() {
   return {
     active: true,
     sessionId: 'session-tower',
@@ -128,8 +130,42 @@ function fleetSnapshot() {
   }
 }
 
+/**
+ * The shape the independent review measured the canvas against: 8 missions,
+ * 7 agents and 9 messages, with a dependency chain, a reviewer, a survey and a
+ * paused mission. It is the fleet the label placement is tuned for.
+ */
+export function reviewShapeSnapshot() {
+  const done = (count) => Array.from({ length: count }, (_, index) => ({ text: `任务 ${index + 1}`, done: true }))
+  return {
+    ...emptySnapshot(),
+    running: 3,
+    missions: [
+      mission('M1', { status: 'merged', state: 'done', owner: 'w1', agentId: 'a1', tasksDone: 3, tasksTotal: 3, tasks: done(3), scope: ['src/**'] }),
+      mission('M2', { status: 'active', state: 'running', owner: 'w2', agentId: 'a2', live: true, deps: ['M1'], tasksDone: 1, tasksTotal: 3, tasks: [{ text: 'a', done: true }, { text: 'b' }, { text: 'c' }], scope: ['src/**', 'test/**'] }),
+      mission('M3', { status: 'blocked', state: 'blocked', owner: 'w3', agentId: 'a3', live: true, deps: ['M2'], blockers: ['等待依赖'], tasksDone: 0, tasksTotal: 2, tasks: [{ text: 'a' }, { text: 'b' }] }),
+      mission('M4', { status: 'active', state: 'running', owner: 'w4', agentId: 'a4', live: true, deps: ['M3'], review: { round: 1, reviewer: 'r4', status: 'p1-2items', merge: 'fix-then-merge', at: '2026-11-24' }, tasksDone: 2, tasksTotal: 4, tasks: [{ text: 'a', done: true }, { text: 'b', done: true }, { text: 'c' }, { text: 'd' }], scope: ['lib/**'] }),
+      mission('M5', { status: 'planned', state: 'waiting', deps: ['M4'], tasksTotal: 1, tasks: [{ text: 'a' }] }),
+      mission('M6', { status: 'paused', state: 'paused', owner: 'w6', agentId: 'a6', live: false, deps: ['M5'] }),
+      mission('M7', { kind: 'survey', status: 'active', state: 'stale', owner: 'w7', agentId: 'a7', live: false }),
+      mission('M8', { status: 'abandoned', state: 'done', deps: ['M7'] }),
+    ],
+    agents: [
+      agent('w1', { missionId: 'M1', live: false }), agent('w2', { missionId: 'M2' }), agent('w3', { missionId: 'M3' }),
+      agent('w4', { missionId: 'M4' }), agent('r4', { kind: 'reviewer', reviewMissionId: 'M4' }),
+      agent('w6', { missionId: 'M6', live: false }), agent('w7', { missionId: 'M7', live: false }),
+    ],
+    messages: [
+      message(1, 'tower', 'w2'), message(2, 'tower', 'w3'), message(3, 'tower', 'w4'), message(4, 'w2', 'tower'),
+      message(5, 'w4', 'r4'), message(6, 'r4', 'tower'), message(7, 'tower', 'w7'), message(8, 'w7', 'tower'), message(9, 'w6', 'tower'),
+    ],
+    findings: [],
+    activity: ['tower: init'],
+  }
+}
+
 /** An active tower with no mission at all. */
-function emptySnapshot() {
+export function emptySnapshot() {
   return { active: true, sessionId: 'session-tower', base: 'main', running: 0, missions: [], agents: [], messages: [], findings: [], activity: [] }
 }
 
@@ -145,7 +181,7 @@ function prng(seed) {
 }
 
 /** A larger fleet: ten missions, extra agents, sixty messages. */
-function stressSnapshot(seed = 7) {
+export function stressSnapshot(seed = 7) {
   const random = prng(seed)
   const pick = list => list[Math.floor(random() * list.length)]
   const statuses = ['active', 'active', 'blocked', 'paused', 'completed', 'merged', 'abandoned', 'planned']
@@ -761,4 +797,189 @@ test('review verdicts and merge recommendations read in Chinese', () => {
 
 test('ids sort the way a person reads them', () => {
   assert.deepEqual(['M10', 'M2', 'M1', 'worker-b', 'worker-a', 'M1-2'].sort(compareNatural), ['M1', 'M1-2', 'M2', 'M10', 'worker-a', 'worker-b'])
+})
+
+// ---------------------------------------------------------------- labels ----
+//
+// The chips are drawn at a fixed size in screen pixels while their anchors
+// scale with the zoom, so whether two labels overlap depends on the zoom the
+// picture is shown at. `placeLabels` places them for one zoom; what follows
+// pins that, after placing, no two chips overlap and none sits on a card, for
+// every density, filter and zoom the canvas is used at.
+
+const ZOOMS = [1, 0.56, 0.44, 0.3, 0.2]
+
+/** Every chip after placing, in screen px, with the text it shows. */
+function chipsOf(graph, zoom, placed = placeLabels(graph, zoom)) {
+  return graph.edges
+    .filter(edge => !placed.get(edge.id).hidden)
+    .map(edge => {
+      const spot = placed.get(edge.id)
+      const w = labelWidth(spot.text ?? edge.label)
+      return {
+        id: edge.id,
+        type: edge.type,
+        text: spot.text ?? edge.label,
+        x: spot.at[0] * zoom - w / 2,
+        y: spot.at[1] * zoom - LABEL.height / 2,
+        w,
+        h: LABEL.height,
+      }
+    })
+}
+
+/** Whether the stage draws this kind of label at this zoom (see `COMPACT_ZOOM`). */
+function renderedAt(zoom, type) {
+  return zoom >= COMPACT_ZOOM || type === 'dep' || type === 'message'
+}
+
+/** The distance, in screen px, from a point to a straight run of a wire. */
+function distanceToRun(point, leg) {
+  const clamped = Math.min(leg.to, Math.max(leg.from, leg.axis === 'x' ? point.x : point.y))
+  return leg.axis === 'x'
+    ? Math.hypot(point.x - clamped, point.y - leg.fixed)
+    : Math.hypot(point.x - leg.fixed, point.y - clamped)
+}
+
+/** Pairs of chips that overlap. */
+function overlappingChips(chips) {
+  const pairs = []
+  for (let i = 0; i < chips.length; i += 1) {
+    for (let j = i + 1; j < chips.length; j += 1) {
+      if (overlaps(chips[i], chips[j], 0)) pairs.push([chips[i].id, chips[j].id])
+    }
+  }
+  return pairs
+}
+
+/** Chips that sit on a card or a group frame. */
+function chipsOnCards(graph, zoom, chips) {
+  const cards = [...graph.nodes, ...graph.groups]
+    .map(node => ({ id: node.id, x: node.x * zoom, y: node.y * zoom, w: node.w * zoom, h: node.h * zoom }))
+  return chips.filter(chip => cards.some(card => overlaps(chip, card, 0))).map(chip => chip.id)
+}
+
+/** The chips as they were before placing: each on the anchor the layout chose, and only those the stage draws. */
+function chipsBefore(graph, zoom) {
+  return graph.edges
+    .filter(edge => renderedAt(zoom, edge.type))
+    .map(edge => ({ id: edge.id, ...labelRect(edge, { x: 0, y: 0, zoom }) }))
+}
+
+function assertNoLabelOverlap(name, snapshot) {
+  for (const density of CANVAS_DENSITIES) {
+    for (const filter of CANVAS_FILTERS) {
+      const graph = layoutCanvas(snapshot, { density, filter })
+      for (const zoom of ZOOMS) {
+        const where = `${name} [${density}/${filter} @${zoom}]`
+        const placed = placeLabels(graph, zoom)
+        const chips = chipsOf(graph, zoom, placed)
+        assert.deepEqual(overlappingChips(chips), [], `${where}: two chips overlap`)
+        assert.deepEqual(chipsOnCards(graph, zoom, chips), [], `${where}: a chip sits on a card`)
+        // Every shown chip still belongs to its own wire: its centre lies on
+        // one of the wire's straight runs, or within 1.5 chip heights of it
+        // (`LABEL.drift` is 16px, so it can hug its wire while clearing a card).
+        for (const edge of graph.edges) {
+          const spot = placed.get(edge.id)
+          if (spot.hidden) continue
+          const centre = { x: spot.at[0] * zoom, y: spot.at[1] * zoom }
+          const legs = legsOf(edge, { x: 0, y: 0, zoom })
+          const distance = legs.length === 0
+            ? Math.hypot(centre.x - edge.labelAt[0] * zoom, centre.y - edge.labelAt[1] * zoom)
+            : Math.min(...legs.map(leg => distanceToRun(centre, leg)))
+          assert.ok(distance <= LABEL.height * 1.5, `${where}: ${edge.id}'s chip is ${distance.toFixed(1)}px from its wire`)
+        }
+      }
+    }
+  }
+}
+
+test('label placement: after placing, no two chips overlap and none sits on a card', () => {
+  assertNoLabelOverlap('review shape', reviewShapeSnapshot())
+  assertNoLabelOverlap('fleet', fleetSnapshot())
+  assertNoLabelOverlap('empty', emptySnapshot())
+  assertNoLabelOverlap('single', { ...emptySnapshot(), missions: [mission('M1', { live: true, owner: 'w', deps: [] })], agents: [agent('w', { missionId: 'M1' })], messages: [message(1, 'tower', 'w')] })
+  assertNoLabelOverlap('stack', {
+    ...emptySnapshot(),
+    missions: [mission('M1'), mission('M2', { deps: ['M1'] }), mission('M3', { deps: ['M2'] })],
+    agents: [agent('w1', { missionId: 'M1' }), agent('w2', { missionId: 'M2' }), agent('w3', { missionId: 'M3' }), agent('r1', { kind: 'reviewer', reviewMissionId: 'M1' }), agent('r2', { kind: 'reviewer', reviewMissionId: 'M2' })],
+    messages: [1, 2, 3, 4, 5].map(index => message(index, 'tower', `w${index % 3 + 1}`)),
+  })
+  for (const seed of [1, 7, 42, 2026]) assertNoLabelOverlap(`stress ${seed}`, stressSnapshot(seed))
+})
+
+test('label placement is deterministic and never depends on the order of the snapshot', () => {
+  const snapshot = reviewShapeSnapshot()
+  for (const zoom of ZOOMS) {
+    const graph = layoutCanvas(snapshot)
+    assert.deepEqual(placeLabels(shuffled(snapshot) && layoutCanvas(shuffled(snapshot)), zoom), placeLabels(graph, zoom))
+    assert.deepEqual(placeLabels(JSON.parse(JSON.stringify(graph)), zoom), placeLabels(graph, zoom))
+  }
+})
+
+/** The order in which labels give way: the lowest number goes first. */
+const PRIORITY = Object.freeze({ dep: 5, review: 4, message: 3, own: 2, former: 1, dispatch: 0 })
+
+test('label placement keeps what matters and gives up the least first', () => {
+  // A label may be hidden because its own wire has no place for it, but never
+  // because a less important label edged it out. So: first check that the wire
+  // really has no room (place the label alone), then give it every label of its
+  // own or a higher priority — if it still cannot sit, only equal or better
+  // labels took the room, which the order allows.
+  for (const density of CANVAS_DENSITIES) {
+    for (const zoom of ZOOMS) {
+      const graph = layoutCanvas(reviewShapeSnapshot(), { density })
+      const placed = placeLabels(graph, zoom)
+      const hidden = graph.edges.filter(edge => renderedAt(zoom, edge.type) && placed.get(edge.id).hidden)
+      for (const edge of hidden) {
+        const alone = placeLabels({ ...graph, edges: [edge] }, zoom)
+        if (alone.get(edge.id).hidden) continue
+        const important = graph.edges.filter(other => (PRIORITY[other.type] ?? -1) >= PRIORITY[edge.type])
+        const reduced = placeLabels({ ...graph, edges: important }, zoom)
+        // Still hidden without anything less important around: the room was
+        // taken by a label of the same or a better rank, which is allowed.
+        assert.equal(reduced.get(edge.id).hidden, true,
+          `${density} @${zoom}: ${edge.id} (${edge.type}) was hidden while something less important was shown`)
+      }
+    }
+  }
+})
+
+test('at the zoom the canvas opens at, no review or dependency label gives way to a dispatch one', () => {
+  // The independent review measured the default view: a 评审 label was hidden
+  // while eight 派发 chips were shown. The stage opens fitted, and the fit of
+  // the review shape is under 0.56 for both densities; 1 is the other zoom the
+  // reader starts from (the zoom bar's 100%).
+  for (const density of CANVAS_DENSITIES) {
+    for (const zoom of ZOOMS.filter(value => value >= COMPACT_ZOOM)) {
+      const graph = layoutCanvas(reviewShapeSnapshot(), { density })
+      const placed = placeLabels(graph, zoom)
+      const shownDispatch = graph.edges.filter(edge => edge.type === 'dispatch' && !placed.get(edge.id).hidden)
+      if (shownDispatch.length === 0) continue
+      const hiddenImportant = graph.edges
+        .filter(edge => (edge.type === 'dep' || edge.type === 'review') && placed.get(edge.id).hidden)
+        .map(edge => edge.id)
+      assert.deepEqual(hiddenImportant, [], `${density} @${zoom}: ${hiddenImportant.join(', ')} hidden while ${shownDispatch.length} 派发 labels were shown`)
+    }
+  }
+})
+
+test('label placement: the count of overlaps the reviewer measured drops to zero', () => {
+  // Before placing (each chip on the layout's own anchor) there were overlaps;
+  // this is what the review measured, and it must be reproducible here.
+  for (const [density, zoom, atLeast] of [['summary', 1, 3], ['summary', 0.56, 8], ['detail', 0.44, 5]]) {
+    const graph = layoutCanvas(reviewShapeSnapshot(), { density })
+    const before = overlappingChips(chipsBefore(graph, zoom)).length
+    assert.ok(before >= atLeast, `${density} @${zoom}: expected at least ${atLeast} overlapping pairs before placing, found ${before}`)
+    assert.equal(overlappingChips(chipsOf(graph, zoom)).length, 0, `${density} @${zoom}: none after`)
+  }
+})
+
+test('a label chip is as wide as its text and as high as the CSS says', () => {
+  assert.equal(LABEL.height, 16)
+  assert.ok(labelWidth('派发') > labelWidth('依赖') || labelWidth('派发') === labelWidth('依赖'), 'same character count')
+  assert.ok(labelWidth('消息 ×12') > labelWidth('消息'), 'a longer text is a wider chip')
+  assert.ok(labelWidth('A') >= 10.5 * 0.68 + 10, 'padding and at least one glyph')
+  assert.equal(overlaps({ x: 0, y: 0, w: 10, h: 10 }, { x: 12, y: 0, w: 10, h: 10 }), false)
+  assert.equal(overlaps({ x: 0, y: 0, w: 10, h: 10 }, { x: 11, y: 0, w: 10, h: 10 }, 2), true, 'the gap is honoured')
 })
