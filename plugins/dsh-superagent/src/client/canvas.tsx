@@ -42,11 +42,22 @@ export function zoomAbout(view: View, factor: number, px: number, py: number): V
   const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * factor)), ratio = scale / view.scale
   return { scale, x: px - (px - view.x) * ratio, y: py - (py - view.y) * ratio }
 }
-/** The curve that joins the right edge of `from`, at `share` of its height, to the left edge of `to`, at `toShare` of its height. */
-export function edgePath(from: Rect, to: Rect, fromShare = 0.5, toShare = 0.5): string {
-  const sx = from.x + from.w, sy = from.y + from.h * fromShare, tx = to.x, ty = to.y + to.h * toShare
-  const bend = Math.max(40, Math.abs(tx - sx) / 2)
-  return `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`
+/** The vertical edge a line leaves a card by, or arrives at it by. */
+export type Side = 'left' | 'right'
+/**
+ * The curve that joins the `out` edge of `from` to the `in` edge of `to`. A line to a card that lies to the left leaves by the
+ * left edge and arrives at the right, instead of bulging out and sweeping back through the cards between.
+ *
+ * The curve bends at most to the middle of the gap between the two edges, so it stays between them however close the cards are;
+ * where the edges touch or overlap (a card the operator dragged onto another) it is a straight run, which cannot loop over a card.
+ */
+export function edgePath(from: Rect, to: Rect, fromShare = 0.5, toShare = 0.5, out: Side = 'right', into: Side = 'left'): string {
+  const sx = out === 'right' ? from.x + from.w : from.x, sy = from.y + from.h * fromShare
+  const tx = into === 'left' ? to.x : to.x + to.w, ty = to.y + to.h * toShare
+  // Out of the right edge the line runs rightward (towards `to`), out of the left edge leftward; likewise as it arrives.
+  const outward = out === 'right' ? 1 : -1, inward = into === 'left' ? 1 : -1
+  const bend = Math.max(0, Math.min(40, (tx - sx) * outward / 2, (tx - sx) * inward / 2))
+  return `M ${sx} ${sy} C ${sx + bend * outward} ${sy}, ${tx - bend * inward} ${ty}, ${tx} ${ty}`
 }
 /** The one rect that covers every rect, with `padding` around it. */
 export function union(rects: readonly Rect[], padding = 0): Rect {
@@ -84,7 +95,9 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const drag = useRef<{ id: string; px: number; py: number; x: number; y: number } | undefined>(undefined)
   const layout = useRef(moved)
   layout.current = moved
-  const fitted = useRef(false)
+  const fitted = useRef(0)
+  /** Set once the operator pans, zooms or drags, which ends the automatic fitting of the plane to its cards. */
+  const movedByHand = useRef(false)
 
   // Where each card lies on the plane, read back from the DOM once the cards and their offsets settle.
   useLayoutEffect(() => {
@@ -110,19 +123,30 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, moved, selected, question, sent, t])
 
-  // The first layout fills the viewport; a later one keeps where the operator left the plane.
+  // The first layout fills the viewport, and so does each later one that brings more cards into it: a plane fitted to the two
+  // cards of an empty canvas would leave the tickets and the Executors below the fold once they arrive. Once the operator
+  // moves or zooms the plane themselves it stays where they put it.
+  const cards = Object.keys(rects).length
+  const autoFit = useRef(true)
   useEffect(() => {
-    if (fitted.current || size.w <= 0 || !Object.keys(rects).length) return
-    fitted.current = true
+    if (!autoFit.current || size.w <= 0 || cards <= fitted.current) return
+    fitted.current = cards
     setView(fitView(Object.values(rects), size.w, size.h))
-  }, [rects, size])
+  }, [cards, size])
+  // Any pan, zoom or drag of the operator's ends the automatic fitting.
+  useEffect(() => { if (movedByHand.current && autoFit.current) autoFit.current = false }, [moved, view])
 
   // The wheel pans the plane; with ⌘ or Ctrl, or a trackpad pinch, it zooms about the pointer. Neither scrolls the page.
   useEffect(() => {
     const element = viewport.current
     if (!element) return
     const onWheel = (event: WheelEvent) => {
+      // A list or a text field inside a card scrolls itself: the plane takes the wheel only on its own background and cards.
+      const target = event.target as HTMLElement | null
+      const scrolls = target?.closest('[data-scroll]') ?? target?.closest('textarea, input, [contenteditable="true"]')
+      if (scrolls && element.contains(scrolls) && !event.ctrlKey && !event.metaKey) return
       event.preventDefault()
+      movedByHand.current = true
       const box = element.getBoundingClientRect()
       if (event.ctrlKey || event.metaKey) {
         const factor = Math.exp(-Math.max(-25, Math.min(25, event.deltaY)) * 0.01)
@@ -133,7 +157,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     return () => element.removeEventListener('wheel', onWheel)
   }, [])
 
-  const fit = () => setView(fitView(Object.values(rects), size.w, size.h))
+  const fit = () => { autoFit.current = true; movedByHand.current = false; fitted.current = Object.keys(rects).length
+    setView(fitView(Object.values(rects), size.w, size.h)) }
   const tasks = data?.tasks ?? []
   const picked = tasks.find(task => task.id === selected)
   const ask = useAction(async (task: TaskView, text: string) => {
@@ -141,7 +166,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   }, { reload })
   const send = async () => {
     const text = question.trim()
-    if (!picked || !text || !(await ask.run(picked, text))) return
+    if (!picked) { if (text) notify(t('canvas.pickFirst')); return }
+    if (!text || !(await ask.run(picked, text))) return
     setQuestion(''); setSelected(undefined); setSent(true)
     notify(t('canvas.sent'))
   }
@@ -154,6 +180,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const handle = (id: string) => ({
     onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
       if (event.button !== 0) return
+      // A click alone is not a move: nothing is stored until the pointer has actually travelled.
       const before = layout.current[id] ?? { x: 0, y: 0 }
       drag.current = { id, px: event.clientX, py: event.clientY, x: before.x, y: before.y }
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -161,6 +188,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
       const start = drag.current
       if (!start || start.id !== id) return
+      movedByHand.current = true
       setMoved(previous => ({ ...previous, [id]: { x: start.x + (event.clientX - start.px) / view.scale,
         y: start.y + (event.clientY - start.py) / view.scale } }))
     },
@@ -172,6 +200,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
       const kept = Object.fromEntries(Object.entries(layout.current).filter(([id]) => ids.has(id)))
       try { globalThis.localStorage?.setItem(LAYOUT, JSON.stringify(kept)) } catch { /* a storage that cannot be written keeps the layout for this mount */ }
     },
+    // A cancelled pointer (a window switch, a system gesture) ends the drag as a release does.
+    onPointerCancel: () => { drag.current = undefined },
   })
   const place = (id: string) => {
     const point = moved[id]
@@ -186,7 +216,11 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     const join = (id: string, kind: 'dispatch' | 'run' | 'ask', from: string, to: string, fromShare: number, toShare: number, label?: string) => {
       const a = node(from), b = node(to)
       if (!a || !b) return
-      const d = edgePath(screen(a), screen(b), fromShare, toShare), at = curveMiddle(d)
+      // The line leaves `from` towards `to`: by its right edge when `to` lies to the right, by its left edge otherwise.
+      // The line leaves `from` by the edge that faces `to`: its right edge when `to` lies to the right, its left edge otherwise.
+      const rightward = b.x + b.w / 2 >= a.x + a.w / 2
+      const d = edgePath(screen(a), screen(b), fromShare, toShare, rightward ? 'right' : 'left', rightward ? 'left' : 'right')
+      const at = curveMiddle(d)
       out.push({ id, kind, d, ...label ? { label: { text: label, ...at } } : {} })
     }
     for (const task of tasks) join(`dispatch:${task.id}`, 'dispatch', MASTER, `task:${task.id}`, 0.5, 0.3)
@@ -209,6 +243,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     onPointerMove={event => {
       const start = pan.current
       if (!start) return
+      movedByHand.current = true
       setView({ scale: view.scale, x: start.x + event.clientX - start.px, y: start.y + event.clientY - start.py })
     }}
     onPointerUp={() => { pan.current = undefined }} onPointerCancel={() => { pan.current = undefined }}>
@@ -217,13 +252,13 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
         <div className="dt-canvas-stack">
           <article className="dt-canvas-card" data-node={MASTER} style={place(MASTER)} onPointerDown={stop} data-picked={!selected ? '1' : undefined}>
             <header className="dt-canvas-card-head">
-              <h3 className="dt-canvas-card-title dt-canvas-handle" {...handle(MASTER)}><Icon name="session" size={14} />{t('canvas.master')}</h3>
+              <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(MASTER)}><Icon name="session" size={14} />{t('canvas.master')}</h3>
               <StateDot state={data?.active ? 'ongoing' : 'idle'} />
               <span className="dt-canvas-state">{t(data?.active ? 'canvas.masterActive' : 'canvas.masterIdle')}</span>
             </header>
             {data && <p className="dt-canvas-meta">{t('canvas.masterLoad', { total: String(data.total), awaiting: String(data.awaiting) })}</p>}
             <h4 className="dt-canvas-subhead">{t('canvas.conversation')}</h4>
-            <ol className="dt-canvas-thread">
+            <ol className="dt-canvas-thread" data-scroll>
               {(data?.conversation ?? []).slice(-4).map((entry, index) => <li key={`${entry.at}:${index}`} data-role={entry.role}>
                 <span className="dt-canvas-speaker">{t(entry.role === 'operator' ? 'canvas.operator' : 'canvas.master')}
                   <time dateTime={entry.at} title={fullTime(entry.at, t('lang'))}>{when(entry.at, t('lang'))}</time></span>
@@ -239,7 +274,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
           </article>
           <article className="dt-canvas-card" data-node={COMPOSER} style={place(COMPOSER)} onPointerDown={stop} data-picked={picked ? '1' : undefined}>
             <header className="dt-canvas-card-head">
-              <h3 className="dt-canvas-card-title dt-canvas-handle" {...handle(COMPOSER)}><Icon name="message" size={14} />{t('canvas.composer')}</h3>
+              <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(COMPOSER)}><Icon name="message" size={14} />{t('canvas.composer')}</h3>
             </header>
             <p className="dt-canvas-composer-about" data-none={picked ? undefined : '1'} title={picked?.title}>
               {picked ? t('canvas.composerAbout', { title: picked.title }) : t('canvas.composerNone')}</p>
@@ -263,7 +298,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
               <header className="dt-canvas-card-head">
                 <input type="checkbox" className="dt-canvas-check" checked={on} aria-label={t('dock.select', { title: task.title })}
                   onChange={() => { setSelected(on ? undefined : task.id); setSent(false) }} />
-                <h3 className="dt-canvas-card-title dt-canvas-handle" title={task.title} {...handle(id)}>{index + 1}. {task.title}</h3>
+                <h3 className="dt-canvas-card-title dt-canvas-handle" title={task.title} tabIndex={0} {...handle(id)}>{index + 1}. {task.title}</h3>
                 <StageMark state={mark.dot} icon={mark.icon} label={mark.label} />
               </header>
               {(progress.text || progress.ratio) && <p className="dt-canvas-progress">
@@ -289,7 +324,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
             const id = `worker:${task.sessionId}`
             return <article key={id} className="dt-canvas-card" data-node={id} style={place(id)} onPointerDown={stop}>
               <header className="dt-canvas-card-head">
-                <h3 className="dt-canvas-card-title dt-canvas-handle" {...handle(id)}><Icon name="running" size={14} />{t('canvas.worker')}</h3>
+                <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(id)}><Icon name="running" size={14} />{t('canvas.worker')}</h3>
                 <StateDot state={task.live ? 'ongoing' : 'idle'} />
               </header>
               <p className="dt-canvas-clamp" title={task.title}>{t('canvas.workerOf', { title: task.title })}</p>
@@ -325,9 +360,9 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     </aside>
     <div className="dt-canvas-tools" role="group" onPointerDown={stop} aria-label={t('canvas.fit')}>
       <button type="button" className="dt-canvas-tool" title={t('canvas.zoomIn')} aria-label={t('canvas.zoomIn')}
-        onClick={() => setView(current => zoomAbout(current, 1.25, size.w / 2, size.h / 2))}><Icon name="plus" size={14} /></button>
+        onClick={() => { movedByHand.current = true; setView(current => zoomAbout(current, 1.25, size.w / 2, size.h / 2)) }}><Icon name="plus" size={14} /></button>
       <button type="button" className="dt-canvas-tool" title={t('canvas.zoomOut')} aria-label={t('canvas.zoomOut')}
-        onClick={() => setView(current => zoomAbout(current, 0.8, size.w / 2, size.h / 2))}><Icon name="minus" size={14} /></button>
+        onClick={() => { movedByHand.current = true; setView(current => zoomAbout(current, 0.8, size.w / 2, size.h / 2)) }}><Icon name="minus" size={14} /></button>
       <button type="button" className="dt-canvas-tool" title={t('canvas.fit')} aria-label={t('canvas.fit')} onClick={fit}><Icon name="fullscreen" size={14} /></button>
     </div>
     <p className="dt-canvas-load" role="status" onPointerDown={stop}>{error ? undefined : data && t('canvas.workers', { running: String(data.running), max: String(data.maxWorkers) })}</p>

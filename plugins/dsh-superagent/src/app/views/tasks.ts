@@ -8,7 +8,7 @@ import { ticketLine } from '../../core/questions.ts'
 import type { Exchange, Todos } from '../sessions.ts'
 import { ticketSummary } from './records.ts'
 
-/** How many tasks the composer dock lists; the rest are counted, and the panel and the canvas show them all. */
+/** How many tasks the composer dock lists; the canvas and the panel show them all. */
 export const DOCK_TASKS = 12
 /** The longest question about a ticket that the task views send, in characters. */
 export const ASK_MAX = 4000
@@ -54,9 +54,7 @@ export interface TasksView {
   /** Open tickets waiting for a worker slot. */
   queued: number
   total: number
-  /** Open tickets beyond the first `DOCK_TASKS`. */
-  omitted: number
-  /** The first `DOCK_TASKS` open tickets, a running worker first, then what waits for a person, then the queue. */
+  /** Every open ticket, a running worker first, then what waits for a person, then the queue, newest first within a rank. */
   tasks: TaskView[]
   /** The main Session's latest exchanges, oldest first: the operator's questions from the task canvas and the replies that ended its turns. */
   conversation: readonly Exchange[]
@@ -103,8 +101,7 @@ export function tasksView(host: TasksHost): TasksView {
     .sort((one, other) => taskRank(one) - taskRank(other) || other.updatedAt.localeCompare(one.updatedAt))
   const count = (rank: number) => tasks.filter(task => taskRank(task) === rank).length
   return { masterId: host.masterId, active: host.active, paused: host.paused, maxWorkers: host.maxWorkers,
-    running: count(0), awaiting: count(1), queued: count(2), total: tasks.length, omitted: Math.max(0, tasks.length - DOCK_TASKS),
-    tasks: tasks.slice(0, DOCK_TASKS), conversation: host.conversation() }
+    running: count(0), awaiting: count(1), queued: count(2), total: tasks.length, tasks, conversation: host.conversation() }
 }
 
 /**

@@ -472,3 +472,5 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-canvas-bar-title { color: var(--dsw-alias-label-primary); font-weight: 600; }
 .dt-canvas-bar-lanes { color: var(--dsw-alias-label-tertiary); }
 .dt-canvas-bar-sum { display: inline-flex; align-items: center; gap: 6px; }
+.dt-dock-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); }
+.dt-canvas[data-collapsed='1'] .dt-dock-hint, .dt-dock[data-collapsed] .dt-dock-hint { display: none; }

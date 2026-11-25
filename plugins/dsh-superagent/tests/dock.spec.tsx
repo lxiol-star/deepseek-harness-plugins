@@ -14,7 +14,7 @@ const task = (id: string, fields: Partial<TaskView> = {}): TaskView => ({ id, ti
   live: false, ...fields })
 const snapshot = (tasks: TaskView[], fields: Partial<TasksView> = {}): TasksView => ({ masterId: 'master', active: false, paused: false,
   maxWorkers: 2, running: tasks.filter(item => item.live).length, awaiting: tasks.filter(item => item.stage === 'person').length,
-  queued: tasks.filter(item => item.action === 'queued').length, total: tasks.length, omitted: 0, tasks, conversation: [], ...fields })
+  queued: tasks.filter(item => item.action === 'queued').length, total: tasks.length, tasks, conversation: [], ...fields })
 const running = (id: string) => task(id, { live: true, summary: '已改两个文件', todos: { done: 1, total: 3, current: '补测试' } })
 const review = (id: string) => task(id, { stage: 'person', action: 'review', note: { text: 'PR #42 待验收', error: false } })
 const queued = (id: string) => task(id, { action: 'queued', sessionId: '' })
@@ -28,7 +28,8 @@ beforeEach(() => {
 })
 beforeEach(() => stored.clear())
 
-interface Mount { sessionId?: string; input?: DockInput; inputActions?: DockInputActions; openSession?: (id: string) => Promise<void>; openPanel?: () => void }
+interface Mount { sessionId?: string; input?: DockInput; inputActions?: DockInputActions; useInput?: () => DockInput | undefined
+  openSession?: (id: string) => Promise<void>; openPanel?: () => void }
 let root: Root | undefined, container: HTMLElement | undefined
 const opened = vi.fn(async (_id: string) => {}), openPanel = vi.fn()
 function unmount() { act(() => { root?.unmount() }); root = undefined; container?.remove() }
@@ -171,7 +172,47 @@ it('writes a question into the composer only where it is safe to', () => {
   expect(setDraft).toHaveBeenCalledWith('hi')
   expect(askThroughComposer(idle, undefined, 'hi')).toBe('unsupported')
   expect(askThroughComposer(idle, { setDraft }, 'hi')).toBe('unsupported')
-  expect(askThroughComposer(undefined, { setDraft, submit }, 'hi')).toBe('sent')
+  // A composer whose state cannot be read may hold a draft: nothing is written into it.
+  const draftsBefore = setDraft.mock.calls.length, submittedBefore = submit.mock.calls.length
+  expect(askThroughComposer(undefined, { setDraft, submit }, 'hi')).toBe('unknown')
+  expect(setDraft.mock.calls.length).toBe(draftsBefore)
+  expect(submit.mock.calls.length).toBe(submittedBefore)
+  // A command the operator typed is being handled: not a submission in flight, but not theirs to write over either.
+  const settled = submit.mock.calls.length
+  expect(askThroughComposer({ ...idle, phase: 'adjudicating' }, { captureInsertion: span, insertText: insert, submit }, 'hi')).toBe('busy')
+  expect(askThroughComposer({ ...idle, phase: 'claimed' }, { captureInsertion: span, insertText: insert, submit }, 'hi')).toBe('busy')
+  expect(askThroughComposer({ ...idle, phase: 'submitting' }, { captureInsertion: span, insertText: insert, submit }, 'hi')).toBe('sending')
+  expect(askThroughComposer({ ...idle, phase: 'sending' }, { captureInsertion: span, insertText: insert, submit }, 'hi')).toBe('sending')
+  expect(submit.mock.calls.length).toBe(settled)
+  expect(insert.mock.calls.length).toBe(1)
+})
+
+it('reads the composer as it is when asking, not as it was when the dock rendered', async () => {
+  server.tasks = snapshot([running('a')])
+  const actions = { captureInsertion: vi.fn(() => 'span'), insertText: vi.fn(() => true), submit: vi.fn() }
+  // The slot's snapshot says the composer is empty; the live hook says the operator is typing.
+  const empty: DockInput = { draft: '', attachmentIds: [], phase: 'plain' }
+  const typing: DockInput = { draft: '写到一半的话', attachmentIds: [], phase: 'plain' }
+  await mount({ input: empty, inputActions: actions, useInput: () => typing })
+  await ask('a', '到哪一步了？')
+  expect(actions.submit).not.toHaveBeenCalled()
+  expect(actions.insertText).not.toHaveBeenCalled()
+  expect(document.querySelector('.dt-dock-notice')?.textContent).toBe(zh['dock.draftBusy'])
+  // The draft is sent: now the live hook agrees with the snapshot, and the question goes.
+  await mount({ input: empty, inputActions: actions, useInput: () => empty })
+  await ask('a', '到哪一步了？')
+  expect(actions.submit).toHaveBeenCalledOnce()
+  expect(document.querySelector('.dt-dock-notice')).toBeNull()
+})
+
+it('says why it did not ask, and confirms when it did', async () => {
+  server.tasks = snapshot([running('a')])
+  const actions = { captureInsertion: vi.fn(() => 'span'), insertText: vi.fn(() => true), submit: vi.fn() }
+  await mount({ inputActions: actions })
+  await ask('a', '到哪一步了？')
+  expect(document.querySelector('.dt-dock-notice')?.textContent).toBe(zh['dock.unknown'])
+  // The hint says what the tick is for before anything is clicked.
+  expect(document.querySelector('.dt-dock-hint')?.textContent).toBe(zh['dock.hint'])
 })
 
 it('summarizes a task list with one dot and names what a task is doing', () => {

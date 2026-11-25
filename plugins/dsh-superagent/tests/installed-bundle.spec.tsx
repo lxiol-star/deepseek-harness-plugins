@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
+import { zh } from '../src/client/locales.ts'
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -35,6 +36,8 @@ const TASK = { id: 'abc123', title: '修复登录跳转', stage: 'working', summ
   createdAt: '2026-11-24T11:00:00.000Z', startedAt: '2026-11-24T11:05:00.000Z', updatedAt: '2026-11-24T11:30:00.000Z', live: true,
   todos: { done: 1, total: 3, current: '补测试' } }
 type Task = typeof TASK
+/** The composer state the dock reads; the shape of rc.5's `InputState` as far as the dock is concerned. */
+interface DockInput { draft: string; attachmentIds: readonly unknown[]; phase: string }
 
 interface Bundle { apply(ctx: unknown): void; inject: string[] }
 interface Entry { options: { name: string; id?: string; key?: string; order?: number }; component: React.ComponentType<Record<string, unknown>> }
@@ -166,6 +169,26 @@ it('ships a task canvas and a composer dock that load from the installed bundle 
   expect(bar.querySelector('.dt-dock-count')?.textContent).toBe('1')
   const other = await mount(slots.get('conversation.input.dock#dsh-superagent')!.component, { ctx, t, sessionId: 'session-somebody-else' })
   expect(other.container.querySelector('.dt-dock')).toBeNull()
+  // The composer's live state wins over the slot's snapshot, through the entry as the app mounts it: a draft the operator is
+  // typing is never written over, and nothing is sent when the composer cannot be read at all.
+  const submits = { count: 0 }
+  const dockActions = { captureInsertion: () => 'span', insertText: () => true, submit: () => { submits.count++ } }
+  const askOn = async (live: (() => DockInput | undefined) | undefined) => {
+    const view = await mount(slots.get('conversation.input.dock#dsh-superagent')!.component, { ctx, t, sessionId: MASTER,
+      input: { draft: '', attachmentIds: [], phase: 'plain' }, inputActions: dockActions, ...live ? { useInput: live } : {} })
+    const bar = view.container
+    await act(async () => { bar.querySelector<HTMLInputElement>('.dt-dock-check')!.click() }); await settle()
+    const field = bar.querySelector<HTMLInputElement>('.dt-dock-question input')!
+    const put = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => { put.call(field, '到哪一步了？'); field.dispatchEvent(new Event('input', { bubbles: true })) }); await settle()
+    await act(async () => { [...bar.querySelectorAll('button')].find(button => button.textContent?.trim() === '提问')!.click() }); await settle()
+    return bar.querySelector('.dt-dock-notice')?.textContent
+  }
+  expect(await askOn(() => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }))).toBe(zh['dock.draftBusy'])
+  expect(await askOn(undefined)).toBe(zh['dock.unknown'])
+  expect(submits.count).toBe(0)
+  expect(await askOn(() => ({ draft: '', attachmentIds: [], phase: 'plain' }))).toBeUndefined()
+  expect(submits.count).toBe(1)
 
   // The stylesheet the bundle injects holds no raw color in the canvas and dock rules.
   const css = [...document.querySelectorAll('style')].map(node => node.textContent).join('\n')

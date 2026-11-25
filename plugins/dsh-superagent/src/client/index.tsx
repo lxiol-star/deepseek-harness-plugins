@@ -72,12 +72,13 @@ function MountedCanvas({ ctx, t }: { ctx: ClientContext; t: T }) {
   return <PanelProvider t={t} openSession={openSession}><CanvasPage /></PanelProvider>
 }
 
-/** The task dock of the main Session; its button opens the task canvas. */
+/** The task dock of the main Session; its button opens the task canvas. Every composer prop the slot passes is handed on. */
 function MountedDock(props: DockSlotProps & { ctx: ClientContext; t: T }) {
-  const { ctx, t, sessionId, input, inputActions } = props
+  const { ctx, t, sessionId, input, inputActions, useInput } = props
   const openSession = useOpenSession(ctx, t)
   const openPanel = useCallback(() => { ctx.get('layout')?.selectPanel(CANVAS_ID) }, [ctx])
-  return <TaskDock t={t} sessionId={sessionId} input={input} inputActions={inputActions} openSession={openSession} openPanel={openPanel} />
+  return <TaskDock t={t} sessionId={sessionId} input={input} inputActions={inputActions} useInput={useInput}
+    openSession={openSession} openPanel={openPanel} />
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']

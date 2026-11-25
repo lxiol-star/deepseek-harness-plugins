@@ -30,10 +30,11 @@ export interface DockInputActions {
 /** The composer state the dock reads before it writes to the draft. */
 export interface DockInput { draft: string; attachmentIds: readonly unknown[]; phase: string }
 /**
- * What the dock slot passes this entry: the Session it sits in, its composer, and the public actions over that composer. These
- * are the members of the slot's runtime props that this entry reads.
+ * What the dock slot passes this entry: the Session it sits in, its composer, and the public actions over that composer. The
+ * slot also provides `useInput`, a selector hook over the live input machine: the snapshot in `input` is fresh on every
+ * keystroke or not as the host decides, so the state is read from the hook when the slot has one.
  */
-export interface DockSlotProps { sessionId: string; input?: DockInput; inputActions?: DockInputActions }
+export interface DockSlotProps { sessionId: string; input?: DockInput; inputActions?: DockInputActions; useInput?: () => DockInput | undefined }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -44,6 +45,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: DockSlotProps }
   }
 }
+
+/**
+ * How many cards the dock lists; the rest are counted. The canvas shows every ticket. Declared here and not imported
+ * from the host's view: that module reads the store, and none of that belongs in the browser bundle.
+ */
+const DOCK_TASKS = 12
 
 /** The storage key and value that remember a collapsed dock across Sessions and reloads. */
 const COLLAPSED = 'dsh-superagent.dock.collapsed'
@@ -62,16 +69,22 @@ export function readCollapsed(storage: Pick<Storage, 'getItem'> | undefined = gl
 /** The message the main Session receives for a question about one ticket: a first line naming the ticket, then the question. */
 export const taskQuestion = (ticketId: string, title: string, question: string): string => `${ticketLine(ticketId, title)}\n${question}`
 
-export type AskOutcome = 'sent' | 'unsupported' | 'draftBusy' | 'sending' | 'changed'
+export type AskOutcome = 'sent' | 'unsupported' | 'unknown' | 'draftBusy' | 'sending' | 'busy' | 'changed'
+/** The composer phases in which the operator's own submission is under way, and a question must wait. */
+const SUBMITTING = new Set(['submitting', 'sending'])
 /**
  * Puts `text` into the composer and submits it, as the Send button does. Nothing is sent while the composer holds a draft of
- * the operator's, or an attachment of theirs, or is still sending: their message is theirs to send.
+ * the operator's, or an attachment of theirs, or is busy with a submission or a command of theirs; and nothing is sent while
+ * its state is unknown, because an unknown composer may hold a draft.
+ * @param input - the composer's state read now, or undefined when it could not be read.
  */
 export function askThroughComposer(input: DockInput | undefined, actions: DockInputActions | undefined, text: string): AskOutcome {
   const insert = actions?.captureInsertion && actions.insertText
   if (!actions?.submit || !(insert || actions.setDraft)) return 'unsupported'
-  if (input && (input.draft.trim() !== '' || input.attachmentIds.length > 0)) return 'draftBusy'
-  if (input && input.phase !== 'plain') return 'sending'
+  if (!input) return 'unknown'
+  if (input.draft.trim() !== '' || input.attachmentIds.length > 0) return 'draftBusy'
+  if (SUBMITTING.has(input.phase)) return 'sending'
+  if (input.phase !== 'plain') return 'busy'
   if (insert) { if (!actions.insertText!(text, actions.captureInsertion!())) return 'changed' } else actions.setDraft!(text)
   actions.submit()
   return 'sent'
@@ -106,9 +119,13 @@ export interface TaskDockProps extends DockSlotProps {
 }
 
 /** The dock of the main Session: nothing in any other Session, and nothing while no ticket is open. */
-export function TaskDock({ t, sessionId, input, inputActions, openSession, openPanel, intervalMs = POLL_MS }: TaskDockProps) {
+export function TaskDock({ t, sessionId, input, inputActions, useInput, openSession, openPanel, intervalMs = POLL_MS }: TaskDockProps) {
   const copy = useRef(t)
   copy.current = t
+  // The composer's state as it is at this moment: the slot's live hook when it provides one, else the snapshot in its props.
+  const live = useRef<(() => DockInput | undefined) | undefined>(useInput)
+  live.current = useInput
+  const composerNow = (): DockInput | undefined => live.current?.() ?? input
   const { data, error } = usePoll<TasksView>(() => caller(() => messages(copy.current))('GET tasks'), [], intervalMs)
   const [collapsed, setCollapsed] = useState(() => readCollapsed())
   const [selected, setSelected] = useState<string>()
@@ -127,13 +144,15 @@ export function TaskDock({ t, sessionId, input, inputActions, openSession, openP
     setCollapsed(next)
     try { globalThis.localStorage?.setItem(COLLAPSED, next ? '1' : '0') } catch { /* a storage that cannot be written keeps the dock as it is for this mount */ }
   }
-  const picked = shown.tasks.find(task => task.id === selected)
+  // The dock lists the first `DOCK_TASKS` and counts the rest; the canvas shows every one.
+  const listed = shown.tasks.slice(0, DOCK_TASKS), omitted = shown.tasks.length - listed.length
+  const picked = listed.find(task => task.id === selected)
   const ask = (event: FormEvent) => {
     event.preventDefault()
     if (!picked) return
     const text = question.trim()
     if (!text) return
-    const outcome = askThroughComposer(input, inputActions, taskQuestion(picked.id, picked.title, text))
+    const outcome = askThroughComposer(composerNow(), inputActions, taskQuestion(picked.id, picked.title, text))
     if (outcome !== 'sent') { setNotice(t(`dock.${outcome}`)); return }
     setQuestion('')
     setSelected(undefined)
@@ -149,18 +168,19 @@ export function TaskDock({ t, sessionId, input, inputActions, openSession, openP
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={14} />
         <span className="dt-dock-title">{t('dock.title')}</span>
         <StateDot state={dockDot(shown.tasks)} />
+        <span className="dt-dock-hint">{t('dock.hint')}</span>
         <span className="dt-dock-count">{shown.total}</span>
       </button>
       {!collapsed && <>
         <span className="dt-dock-summary">{counts.map(([count, key]) => <span key={key}>{t(key, { count: String(count) })}</span>)}
-          {shown.omitted > 0 && <span>{t('dock.omitted', { count: String(shown.omitted) })}</span>}</span>
+          {omitted > 0 && <span>{t('dock.omitted', { count: String(omitted) })}</span>}</span>
         <span className="dt-dock-spacer" />
         {shown.paused && <Tag tone="quiet">{t('dock.paused')}</Tag>}
         <Button variant="ghost" size="sm" onClick={openPanel}>{t('dock.openCanvas')}<Icon name="chevron-right" size={12} /></Button>
       </>}
     </div>
     {!collapsed && <ul className="dt-dock-list">
-      {shown.tasks.map((task, index) => {
+      {listed.map((task, index) => {
         const mark = ticketMark(t, task), on = task.id === selected, progress = taskProgress(t, task), start = started(task)
         return <li key={task.id} className="dt-dock-card" data-tone={mark.tone} data-selected={on ? '1' : undefined}>
           <div className="dt-dock-top">

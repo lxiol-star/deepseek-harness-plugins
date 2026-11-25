@@ -176,7 +176,7 @@ const tasksView = (): TasksView => {
     ...index === 0 && ticket.sessionId ? { todos: { done: 1, total: 3, current: '补测试' } } : {} }))
   return { masterId: 'master', active: false, paused: server.settings.paused, maxWorkers: server.settings.executor.maxWorkers,
     running: tasks.filter(task => task.live).length, awaiting: tasks.filter(task => task.stage === 'person').length,
-    queued: tasks.filter(task => task.action === 'queued').length, total: tasks.length, omitted: 0, tasks, conversation: [] }
+    queued: tasks.filter(task => task.action === 'queued').length, total: tasks.length, tasks, conversation: [] }
 }
 const settingsView = (): ApiResponse<'GET settings'> => ({
   policyVersion: 'abcdef1234567890',

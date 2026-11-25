@@ -8537,6 +8537,13 @@ function decisionList(host, kinds, offset, limit, since = "") {
 const oneLine = (title) => title.replace(/[[\]\r\n]+/g, " ").trim();
 /** The line that names a ticket in a message: its id, which `orchestrator_read` reads as `ticket/<id>`, and its title. */
 const ticketLine = (ticketId, title) => `[ticket ${ticketId} · ${oneLine(title)}]`;
+//#endregion
+//#region src/app/views/tasks.ts
+/**
+* The tasks of the main Session as its views show them: every open ticket with its stage, its worker's latest report and todo
+* list, and whether that worker holds a slot right now, beside the main Session's own state. A read model over the store and
+* the executor's live state: it writes nothing, so the composer dock and the task canvas poll it.
+*/
 /** The longest question about a ticket that the task views send, in characters. */
 const ASK_MAX = 4e3;
 /**
@@ -8579,8 +8586,7 @@ function tasksView(host) {
 		awaiting: count(1),
 		queued: count(2),
 		total: tasks.length,
-		omitted: Math.max(0, tasks.length - 12),
-		tasks: tasks.slice(0, 12),
+		tasks,
 		conversation: host.conversation()
 	};
 }

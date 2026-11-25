@@ -45,7 +45,7 @@ it('lists the open tickets that are not dismissed in that order, each with its w
   const view = tasksView(host(running))
   expect(view.tasks.map(task => task.id)).toEqual(['run', 'answer', 'review', 'queue', 'idle'])
   expect(view).toMatchObject({ masterId: 'master', active: true, paused: false, maxWorkers: 2, running: 1, awaiting: 2, queued: 1,
-    total: 5, omitted: 0, conversation })
+    total: 5, conversation })
   // A worker that runs keeps its start, its latest report and the todo list it last wrote; the panel's own fields stay with the panel.
   expect(view.tasks[0]).toEqual({ id: 'run', title: '修复回归', stage: 'working', summary: 'changed two files', sessionId: 'worker-run',
     createdAt: at(0), startedAt: at(5), updatedAt: at(1), live: true, todos: { done: 1, total: 3, current: '补测试' } })
@@ -56,11 +56,13 @@ it('lists the open tickets that are not dismissed in that order, each with its w
   expect(view.tasks[1]).toMatchObject({ id: 'answer', stage: 'person', action: 'answer', note: { text: '用哪种蓝？', error: false } })
 })
 
-it('counts the tickets beyond the first page, and reads the main Session as idle when it is', () => {
+it('returns every open ticket, however many there are, and reads the main Session as idle when it is', () => {
+  // The canvas shows them all; the composer dock lists the first few and counts the rest.
   const many = Array.from({ length: DOCK_TASKS + 3 }, (_, index) => ticket(`t${index}`, { updatedAt: at(index + 2) }))
   const view = tasksView(host(many, { active: false }))
-  expect(view).toMatchObject({ active: false, total: DOCK_TASKS + 3, omitted: 3 })
-  expect(view.tasks).toHaveLength(DOCK_TASKS)
+  expect(view).toMatchObject({ active: false, total: DOCK_TASKS + 3 })
+  expect(view).not.toHaveProperty('omitted')
+  expect(view.tasks).toHaveLength(DOCK_TASKS + 3)
   // Newest first within a rank.
   expect(view.tasks[0]!.id).toBe(`t${DOCK_TASKS + 2}`)
 })

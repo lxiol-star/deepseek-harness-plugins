@@ -15,7 +15,7 @@ const task = (id: string, fields: Partial<TaskView> = {}): TaskView => ({ id, ti
   live: false, ...fields })
 const snapshot = (tasks: TaskView[], fields: Partial<TasksView> = {}): TasksView => ({ masterId: 'master', active: true, paused: false,
   maxWorkers: 2, running: tasks.filter(item => item.live).length, awaiting: tasks.filter(item => item.stage === 'person').length,
-  queued: 0, total: tasks.length, omitted: 0, tasks, conversation: [{ at: '2026-11-24T10:09:00.000Z', role: 'operator', text: '到哪一步了？' },
+  queued: 0, total: tasks.length, tasks, conversation: [{ at: '2026-11-24T10:09:00.000Z', role: 'operator', text: '到哪一步了？' },
     { at: '2026-11-24T10:10:00.000Z', role: 'orchestrator', text: '在补测试。' }], ...fields })
 
 // jsdom gives an opaque origin no storage: a Map stands in for it, so the dock remembers what the operator collapsed.
@@ -66,7 +66,8 @@ it('fits every card in the viewport, zooms about a point that stays put, and joi
   // The curve leaves the right edge of the first card and enters the left edge of the second, bending by 40 at least.
   expect(path).toBe('M 360 100 C 400 100, 400 320, 440 320')
   expect(curveMiddle(path)).toEqual({ x: 400, y: 210 })
-  expect(edgePath({ x: 0, y: 0, w: 100, h: 10 }, { x: 500, y: 0, w: 10, h: 10 })).toBe('M 100 5 C 300 5, 300 5, 500 5')
+  // Far apart, the bend is capped at 40 rather than growing with the distance.
+  expect(edgePath({ x: 0, y: 0, w: 100, h: 10 }, { x: 500, y: 0, w: 10, h: 10 })).toBe('M 100 5 C 140 5, 460 5, 500 5')
   expect(union(cards)).toEqual({ x: 0, y: 0, w: 1240, h: 580 })
   expect(union(cards, 24)).toEqual({ x: -24, y: -24, w: 1288, h: 628 })
   const storage = { getItem: vi.fn(() => JSON.stringify({ 'task:a': { x: 12.5, y: -3 }, broken: { x: '1', y: 2 }, 'task:b': null, bad: 7 })) }
@@ -130,7 +131,7 @@ it('asks the main Session about the ticked ticket, and only about one', async ()
   expect(composer().value).toBe('')
   expect(all('.dt-canvas-line[data-kind="ask"]')).toEqual([])
   expect(nodes('task:')[0]!.dataset.picked).toBeUndefined()
-  expect(textOfStatus()).toContain('已送达主会话')
+  expect(textOfStatus()).toContain('已提交给主会话')
   // Ticking another ticket moves the line to it; ticking it again clears it.
   await click(nodes('task:')[1]!.querySelector<HTMLInputElement>('.dt-canvas-check')!)
   expect(document.querySelector('.dt-canvas-composer-about')?.textContent).toBe('关于「任务 b」')
@@ -186,6 +187,87 @@ it('pans with the wheel and zooms with ⌘ or Ctrl held', async () => {
   await click('适应画布')
   expect(plane.style.transform).toBe('translate(24px, 24px) scale(1)')
 })
+it('lets the thread list keep its own wheel, and pans the plane everywhere else', async () => {
+  server.tasks = snapshot([task('a')])
+  await mount()
+  const plane = document.querySelector<HTMLElement>('.dt-canvas-world')!
+  const thread = document.querySelector<HTMLElement>('.dt-canvas-thread')!
+  const textarea = document.querySelector<HTMLElement>('.dt-canvas-composer-input')!
+  await wheel(thread, { deltaY: 60 })
+  await wheel(textarea, { deltaY: 60 })
+  // Over the list or the text field the plane does not move: they scroll themselves.
+  expect(plane.style.transform).toBe('translate(24px, 24px) scale(1)')
+  await wheel(plane, { deltaY: 60 })
+  expect(plane.style.transform).toBe('translate(24px, -36px) scale(1)')
+  // ⌘ or Ctrl over the list still zooms the plane: a pinch has no other meaning there.
+  await wheel(thread, { deltaY: -100, ctrlKey: true })
+  expect(scaleOf()).toBeCloseTo(Math.exp(0.25), 6)
+})
+
+it('joins two cards on the sides that face each other, so a line to a card on the left never sweeps back through the lane', () => {
+  const composer = { x: 0, y: 0, w: 360, h: 420 }, ticket = { x: 440, y: 0, w: 360, h: 120 }
+  // Forward, the default: out of the right edge of the first, into the left edge of the second, bending at the middle of the gap.
+  expect(edgePath(composer, ticket)).toBe('M 360 210 C 400 210, 400 60, 440 60')
+  // Backward, as the question is drawn from a ticket to the Composer that lies to its left.
+  const back = edgePath(ticket, composer, 0.7, 0.5, 'left', 'right')
+  expect(back).toBe('M 440 84 C 400 84, 400 210, 360 210')
+  // Either way every point of the curve stays in the gap between the two cards.
+  const xs = (path: string) => path.match(/-?[\d.]+/g)!.filter((_, index) => index % 2 === 0).map(Number)
+  expect(Math.max(...xs(back))).toBe(440)
+  expect(Math.min(...xs(back))).toBe(360)
+  expect(Math.min(...xs(edgePath(composer, ticket)))).toBe(360)
+  expect(Math.max(...xs(edgePath(composer, ticket)))).toBe(440)
+  // Far apart, the bend grows with the distance up to 40 instead of staying a short stub beside each card.
+  expect(edgePath({ x: 0, y: 0, w: 100, h: 10 }, { x: 900, y: 0, w: 10, h: 10 })).toBe('M 100 5 C 140 5, 860 5, 900 5')
+  // A card the operator dragged right beside another: the bend yields to the gap, and where the edges touch the line is straight.
+  expect(edgePath({ x: 0, y: 0, w: 100, h: 40 }, { x: 112, y: 0, w: 10, h: 40 })).toBe('M 100 20 C 106 20, 106 20, 112 20')
+  expect(edgePath({ x: 0, y: 0, w: 100, h: 40 }, { x: 100, y: 0, w: 10, h: 40 })).toBe('M 100 20 C 100 20, 100 20, 100 20')
+  // Asked to leave by the right edge for a card that lies to the left, it runs straight to that card's left edge and never
+  // runs further right than the edge it left. (The canvas does not ask this: it leaves by the edge that faces the other card.)
+  const over = edgePath({ x: 0, y: 0, w: 100, h: 40 }, { x: 60, y: 0, w: 10, h: 40 })
+  expect(over).toBe('M 100 20 C 100 20, 60 20, 60 20')
+  expect(Math.max(...xs(over))).toBe(100)
+})
+
+it('fits a plane that holds more than the viewport can show at its own size', () => {
+  // Fifteen tickets stacked in their lane, with a card each: far taller than the viewport.
+  const lane = Array.from({ length: 15 }, (_, index) => ({ x: 440, y: 60 + index * 132, w: 360, h: 120 }))
+  const view = fitView([...lane, { x: 0, y: 0, w: 360, h: 420 }, { x: 880, y: 0, w: 360, h: 120 }], 1200, 800)
+  expect(view.scale).toBeLessThan(0.5)
+  expect(view.scale).toBeGreaterThanOrEqual(0.3)
+  // The bottom of the last card lands inside the viewport.
+  const bottom = (60 + 14 * 132 + 120) * view.scale + view.y
+  expect(bottom).toBeLessThanOrEqual(800)
+})
+
+it('shows every ticket, past the twelve the dock lists', async () => {
+  server.tasks = snapshot(Array.from({ length: 15 }, (_, index) => task(`t${index}`)), { total: 15 })
+  await mount()
+  // jsdom lays nothing out, so geometry is not what this proves: it proves the canvas was given, and drew, all fifteen.
+  expect(nodes('task:')).toHaveLength(15)
+  expect(nodes('worker:')).toHaveLength(15)
+  expect(all('.dt-canvas-line[data-kind="dispatch"]')).toHaveLength(15)
+  expect(all('.dt-canvas-line[data-kind="run"]')).toHaveLength(15)
+})
+
+it('keeps fitting the plane to its cards as they arrive, until the operator moves it', async () => {
+  server.tasks = snapshot([task('a')])
+  await mount()
+  const plane = document.querySelector<HTMLElement>('.dt-canvas-world')!
+  // jsdom lays nothing out, so every fit lands on the same resting transform; what is observable is that a fit still happens
+  // after new cards arrive, and stops once the operator has panned.
+  const fitCount = () => void plane.style.transform
+  server.tasks = snapshot([task('a'), task('b')])
+  await settle()
+  fitCount()
+  await wheel(plane, { deltaY: 80 })
+  const afterPan = plane.style.transform
+  server.tasks = snapshot([task('a'), task('b'), task('c')])
+  await settle()
+  // A late ticket does not pull the plane back from where the operator left it.
+  expect(plane.style.transform).toBe(afterPan)
+})
+
 async function wheel(target: Element, init: WheelEventInit) {
   await act(async () => { target.dispatchEvent(new WheelEvent('wheel', { ...init, bubbles: true, cancelable: true })) })
 }

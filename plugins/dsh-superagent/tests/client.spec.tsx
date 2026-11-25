@@ -40,13 +40,19 @@ const openMaster = async (container: HTMLElement) => {
   await act(async () => { button.click() })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
-const serve = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+/** Serve the panel's routes from a fake host; `tasks` is the task dock's list, which a test may set. */
+function serve() {
+  const tasks: { current: Record<string, unknown> | undefined } = { current: undefined }
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
   const path = new URL(url, 'http://127.0.0.1').pathname.replace('/orchestrator/api/', '')
   if (path === 'overview') return Response.json({ problems: [], person: [], executor: { running: 0, queued: 0, maxWorkers: 3, idle: 0 }, flow: { triggers: 0, filtered: 0, judged: 0, accepted: 0, evaluating: 0 }, policyVersion: 'v' })
+  if (path === 'tasks') return Response.json(tasks.current ?? { masterId: 'master', active: false, paused: false, maxWorkers: 3, running: 0, awaiting: 0, queued: 0, total: 0, tasks: [], conversation: [] })
   if (path === 'state') return Response.json({ masterId: 'master', settings: SettingsSchema.parse({}), revisions: { policy: 0, eval: 0, executor: 0 }, sources: [], policy_version: 'v', health: {}, outgoing: [], load: { running: 0, queued: 0 },
     setup: { machine: { stateDir: '/srv/state', worktreeRoot: '/srv/state/worktrees', blockedCommands: [], promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 }, problem: null, feishuProblem: null, accounts: null } })
   return Response.json({ error: 'unavailable' }, { status: 503 })
-}))
+  }))
+  return tasks
+}
 afterEach(() => { vi.unstubAllGlobals() })
 
 it('registers a localized main panel, sidebar entry and Plugin Manager row page, and no settings section', () => {
@@ -75,6 +81,30 @@ it('registers the task canvas as a main panel of its own beside the panel, and t
   const bar = await render(dock, { t, sessionId: 'some-other-session' })
   expect(bar.container.textContent).toBe('')
   bar.dispose()
+})
+
+it('hands the dock entry every composer prop the slot passes, so a live draft is never written over', async () => {
+  // The slot entry is `MountedDock`: a prop it forgets to hand on never reaches the dock, however well the dock handles it.
+  const open = serve()
+  open.current = { masterId: 'master', active: false, paused: false, maxWorkers: 3, running: 1, awaiting: 0, queued: 0, total: 1, conversation: [],
+    tasks: [{ id: 'abc', title: '修复登录', stage: 'working', summary: '', sessionId: 'worker-abc', createdAt: '2026-11-24T10:00:00.000Z',
+      updatedAt: '2026-11-24T10:00:00.000Z', live: true }] }
+  const made = fixture([]), { entries } = made
+  const ctx = { ...made.ctx, get: (name: string) => name === 'layout' ? { selectPanel: vi.fn() } : undefined }
+  const submit = vi.fn(), insertText = vi.fn(() => true)
+  // The slot's snapshot says the composer is empty; the live hook says the operator is typing.
+  const view = await render(entries[4]!, { t, ctx, sessionId: 'master', input: { draft: '', attachmentIds: [], phase: 'plain' },
+    inputActions: { captureInsertion: () => 'span', insertText, submit }, useInput: () => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })
+  await act(async () => { view.container.querySelector<HTMLInputElement>('.dt-dock-check')!.click() })
+  const field = view.container.querySelector<HTMLInputElement>('.dt-dock-question input')!
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  await act(async () => { set.call(field, '到哪一步了？'); field.dispatchEvent(new Event('input', { bubbles: true })) })
+  for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  await act(async () => { [...view.container.querySelectorAll('button')].find(button => button.textContent === '提问')!.click() })
+  expect(submit).not.toHaveBeenCalled()
+  expect(insertText).not.toHaveBeenCalled()
+  expect(view.container.textContent).toContain(zh['dock.draftBusy'])
+  view.dispose()
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {
