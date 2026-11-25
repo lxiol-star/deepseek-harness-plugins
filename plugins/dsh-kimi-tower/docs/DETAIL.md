@@ -1,8 +1,10 @@
 # Kimi tower mode for DeepSeek Harness
 
-This bundle ports Kimi Code's **tower mode** to DSH. It is a Host-only plugin:
-no Client UI, no extra windows. Its surface is the `/tower` command, 13
-model-facing tools, a prompt section, and per-agent guards.
+This bundle ports Kimi Code's **tower mode** to DSH. Its Host surface is the
+`/tower` command, 13 model-facing tools, a prompt section, and per-agent
+guards; its browser half is a progress dock above the composer and a
+fullscreen, read-only fleet canvas. It adds no windows of its own beyond that
+canvas.
 
 ## The model
 
@@ -67,12 +69,96 @@ Surveys are the only zero-diff no-op close.
   and polls the Host's read-only `/tower/state` route once a second. Cards show
   mission, worktree, live worker model/effort, task count, status, and elapsed
   time; clicking one opens the worker session, and a running card can send
-  `/tower stop <mission>` through the authenticated command plane. The route requires the
-  Host's peer authentication, is same-origin, and carries no message content; departing cards linger for four
+  `/tower stop <mission>` through the authenticated command plane. The route is
+  same-origin and carries no message content; departing cards linger for four
   seconds and fade.
+- **Canvas**: the browser half also registers a toggle in
+  `conversation.session.header.actions` and the fullscreen canvas on the
+  `shell.overlay` seat (see [The canvas](#the-canvas)). Both entries and the
+  canvas are read-only; the only request either sends is the snapshot GET.
 - **Mutual exclusion**: entering plan mode leaves tower mode; while tower mode
   is active `todo_write`, `subagent`, `subagent_fork`, `workflow`, `ralph`,
   `wait_agent`, and `create_goal` are refused by a monotonic guard.
+
+## The canvas
+
+A fullscreen, strictly read-only picture of the tower. It is mounted on the
+shell's additive `shell.overlay` seat and portalled into `document.body`, so it
+never sits inside the desktop window's drag region.
+
+### Entries
+
+- the `画布` button in the progress dock's header, and
+- the tower icon in the session header (`conversation.session.header.actions`),
+  which is the way in when the tower has no mission at all. The toggle learns
+  the mode is on from the dock's polling, or probes the snapshot once after a
+  short wait if no dock reported for the session.
+
+### Snapshot
+
+`GET /tower/state?sessionId=…` is the dock snapshot (open missions only);
+`&detail=1` is the canvas superset: every mission including merged and
+abandoned ones with dependencies, scope, tasks, blockers, notes, user context,
+key artifacts and the latest review; the full roster with liveness, death
+facts, model and effort; inbox message metadata with per-recipient read state;
+filed findings; and the tail of the activity log. Every string is single-lined
+and hard-capped by `CANVAS_LIMITS` (200 messages, 50 activity lines, 100 tasks,
+20 notes/blockers, 40 scope entries, 2,000-character context, 160-character
+labels; see `src/canvas-snapshot.ts`). Inbox files are read through the store's
+frontmatter reader only — no message body enters the snapshot. Building it
+takes no lock and writes nothing.
+
+The route is served on the Host's loopback HTTP listener. Its definition
+declares `auth: 'required'`, but the shipped `dsh web` webserver does not apply
+that field to plugin routes, so a tokenless local request receives the
+read-only metadata while the app shell itself still answers 401 (filed as a
+finding during the 0.1.2 verification). There are no CORS headers and no
+message bodies, so this is same-machine metadata rather than a remote surface;
+do not rely on the declaration as a security boundary.
+
+### Layout
+
+`layoutCanvas(snapshot, { density, filter })` (`src/canvas/layout.js`) is a
+pure function: it reads nothing but its arguments and sorts what it is handed,
+so the same snapshot always yields the same coordinates (which is what lets the
+node tests pin the geometry). The tower sits at the origin, missions form two
+columns — dependency components share a column and stack in dependency order —
+and each mission's workers and reviewers are cards in the outer column of its
+row. Nodes are the tower, mission groups (a dashed frame that holds the
+task-list and scope cards in the detail density), and agent cards. Wires are
+`派发` from the tower, `拥有` / `曾负责` / `评审` from an agent to its mission,
+`依赖` between missions, and dashed `消息` wires aggregated per unordered pair
+of endpoints (with the count, latest subject and unread flag). Structural wires
+stay inside the diagram; message wires use reserved corridors, and no wire or
+wire label passes through a card.
+
+### Interaction
+
+- `摘要` / `详情` densities; `全部` / `未完成` / `被阻塞` filters (an agent whose
+  mission is filtered out is hidden with it).
+- drag or arrow keys to pan, wheel or `+`/`−` to zoom, the percentage button
+  for 100%, `0` or the toolbar button for "fit to window"; a minimap (click or
+  drag) and a legend.
+- the side panel follows the selection: a mission (checklist, scope,
+  dependencies, blockers, notes, latest review, the user's own words, related
+  agents), an agent (liveness, mission, `model · effort`, death facts when
+  gone, its session), a wire (the pair's messages) or nothing (overview,
+  findings). Three tabs — message stream, review history, activity log — are
+  read-only lists of the snapshot.
+- `打开会话` on an agent card, or a double click on the card, switches the main
+  view to that agent's session and closes the canvas.
+- accessibility: the canvas owns focus on open, traps Tab inside its own
+  controls, marks the rest of the page `inert`, closes on Escape only while it
+  is the topmost layer, and restores focus to the opener on close.
+- polling: one fetch immediately on open, then every 3 seconds; paused while
+  the document is hidden and while a pan/zoom/minimap gesture runs, with
+  exponential backoff on failure, and stopped when the canvas closes.
+
+The API between the two halves is pinned by
+`test/canvas-contract.test.mjs`: a synthetic tower repository is run through the
+real `detail=1` route and then through the real `layoutCanvas`, with the fields
+the browser reads asserted by value (mission detail, roster model/effort,
+message pairs, dependencies). Renaming a field on either side fails the test.
 
 ## Limits
 

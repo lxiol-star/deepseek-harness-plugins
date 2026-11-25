@@ -1,6 +1,8 @@
 # dsh-kimi-tower
 
-Kimi Code's **tower mode**, ported to DeepSeek Harness as a Host-only bundle.
+Kimi Code's **tower mode**, ported to DeepSeek Harness as a Host bundle with a
+small browser half: a progress dock above the composer and a fullscreen,
+read-only canvas of the whole fleet.
 
 Tower turns the main agent into a control tower for one repository: it splits
 the objective into missions, runs each worker in its own git worktree and
@@ -28,6 +30,16 @@ sync through a file-backed inbox under `.tower/comms/`.
   `git clean -fdx`.
 - **Durable mode** — tower mode is folded from the session log
   (`command/run`/`command/done` for `/tower`), so resume and fork recover it.
+- **Progress dock** — above the composer: one card per open mission with the
+  worktree, live worker `model · effort`, task progress, status, elapsed time,
+  a stop button, and click-through to the worker session.
+- **Tower canvas** — a fullscreen read-only picture of the fleet, opened from
+  the dock's `画布` button or from the tower icon in the session header. Mission
+  groups, agent cards, and 派发 / 拥有 / 评审 / 依赖 / 消息 wires; summary and
+  detail densities; all / open / blocked filters; pan, zoom, fit, minimap and
+  legend; a side panel with the selected mission or agent, the message stream,
+  review history, and the activity log. Clicking an agent's `打开会话` (or
+  double-clicking its card) switches to that session; Escape closes.
 
 ## Install
 
@@ -58,8 +70,10 @@ trail. Never edit it by hand.
 ## Compatibility and limits
 
 - DSH `0.2.2-rc.5` (developed and smoke-tested against the installed Desktop
-  build). The plugin uses only the public Host surface; it imports no DSH
-  package at runtime.
+  build and a clean `dsh web` profile). It imports no DSH package at runtime;
+  the browser half uses only the documented client slots
+  (`conversation.input.dock`, `conversation.session.header.actions`,
+  `shell.overlay`) and the shell's frozen `react` / `react-dom` module table.
 - Per-spawn model selection from Kimi is not exposed; children inherit the
   tower session's provider/model.
 - The Kimi bash parser guard is reduced to the state-protecting subset
@@ -72,12 +86,24 @@ trail. Never edit it by hand.
 
 Run on macOS with the installed DSH `0.2.2-rc.5`:
 
-- `npm test` — 12 tests pass: the vendored protocol against real git
-  repositories (init, plan, scope deps, worktree commit, completion,
-  independent review, merge, out-of-scope refusal, stale-base rebase, teardown,
-  state loss), the
-  DSH tool surface against a fake Host (command activation, plan → spawn →
-  complete → review → merge, guards, exit), and packaging.
+- `npm run check` — 120 tests pass (`tsc --noEmit` clean): the vendored
+  protocol against real git repositories (init, plan, scope deps, worktree
+  commit, completion, independent review, merge, out-of-scope refusal,
+  stale-base rebase, teardown, state loss), the DSH tool surface against a fake
+  Host (command activation, plan → spawn → complete → review → merge, guards,
+  exit), the dock and canvas snapshots, the canvas layout and client machinery,
+  the Host → client contract test (`test/canvas-contract.test.mjs`: synthetic
+  tower repository → real `detail=1` route → real `layoutCanvas`, with the
+  fields the browser reads asserted by value), and packaging.
+- 0.1.2 real-instance check: a separate `dsh web` 0.2.2-rc.5 instance on a
+  temporary DSH home, a temporary git repository, and a synthetic fleet
+  (running / offline / blocked / paused / merged / abandoned, dependencies, a
+  dead worker, review history, inbox traffic, a finding, and a real live Host
+  agent with `model · effort`) confirmed the dock, both canvas entries, the
+  node/wire counts against `layoutCanvas`, filters, densities, pan/zoom/fit,
+  minimap, legend, detail panel, the three lists, session jump (button and
+  double click), Escape/focus/inert, and the 3-second polling that stops on
+  close. Light and dark screenshots were taken; neither is committed.
 - Real headless E2E with a local model route: `/tower` mode hydrated from the
   session log; `tower_status`, `tower_plan`, and `tower_spawn` executed in the
   real Host; the spawned worker ran in `.tower/worktrees/wt-1` with the
@@ -169,10 +195,18 @@ tower mode is active and missions are open, it shows one card per mission:
   linger for four seconds and fade out instead of disappearing abruptly.
 
 The Host serves the read-only snapshot at `GET /tower/state?sessionId=…`; the
-browser polls it once a second. The route requires the Host's normal peer
-authentication, returns no message content, and disappears with the plugin. The client uses a
-relative URL, so it works both in the Electron `dsh-app://` shell and in a
-browser tab served by the same Host.
+browser polls it once a second, but only while a dock is mounted. The route is
+read-only, returns no message content, and disappears with the plugin. The
+client uses a relative URL, so it works both in the Electron `dsh-app://`
+shell and in a browser tab served by the same Host.
+
+> The route definition carries `auth: 'required'`, but the shipped `dsh web`
+> webserver does not apply that field to plugin routes: on the loopback listener
+> the route answers without the page token (the app shell itself still returns
+> 401 without it). The payload is read-only metadata with no message bodies and
+> no CORS headers, so it is same-machine information rather than a remote
+> surface — do not treat the flag as a security boundary. The 0.1.2
+> verification filed this as a finding.
 
 Verified in the Dev2 desktop app: two real survey workers rendered as
 `Progress alpha` / `Progress beta` with `gpt-6-luna · max`, `0/1` and `1/1`
@@ -184,6 +218,46 @@ clicks. The running card's stop button sent `/tower stop M1`, the worker died
 with `aborted`, the mission moved to `paused`, and the card changed to
 `已离线`; abandoning it produced a `data-fading` card that was gone after the
 four-second linger. No window was brought to the foreground during the checks.
+
+## Tower canvas
+
+The canvas is the second client contribution. It is a fullscreen, strictly
+read-only view of the tower, mounted on the shell's additive `shell.overlay`
+seat and rendered into `document.body` (so it does not swallow the desktop
+window's drag region).
+
+Two entries open it:
+
+- the `画布` button in the progress dock's header, and
+- the tower icon in the session header (`conversation.session.header.actions`),
+  which exists even when the tower has no mission at all — just turned on.
+
+What it draws, from the `detail=1` snapshot:
+
+- a tower card in the middle, mission groups in two columns (each a dashed
+  frame holding a task-list card and a scope card in the detail density), and
+  the mission's workers/reviewers as agent cards in the outer column;
+- wires: `派发` from the tower, `拥有` / `曾负责` / `评审` from an agent, `依赖`
+  between missions of one column, and dashed `消息` wires aggregated per pair
+  of endpoints with an unread tone;
+- `摘要` / `详情` densities, and `全部` / `未完成` / `被阻塞` filters;
+- drag-to-pan (plus arrow keys), wheel or `+`/`−` zoom, the zoom percentage
+  button, `0`/the fit button for "fit to window", a minimap, and a legend;
+- a side panel for the selected mission, agent, or wire: checklist, scope,
+  dependencies, blockers, notes, latest review, the user's own words, and the
+  three read-only lists (message stream, review history, activity log);
+- the agent's `model · effort` from the Host's live `AgentModel`, on the card,
+  in the panel, in the detail-density mission header, and on the dock card;
+- `打开会话` on an agent card (or a double click) opens that agent's session and
+  closes the canvas.
+
+Accessibility: the canvas owns focus while open, keeps Tab inside its own
+controls, marks the rest of the page `inert`, closes on Escape only while it is
+the topmost layer, and restores focus to the opener. Its poller fetches once
+immediately, then every 3 seconds; it pauses while the document is hidden or a
+pan/zoom gesture is in progress, backs off on failure, and stops when the
+canvas closes. The layout itself (`src/canvas/layout.js`) is a pure function of
+the snapshot, so the same snapshot always yields the same coordinates.
 
 ## Development
 

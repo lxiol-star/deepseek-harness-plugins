@@ -1,6 +1,6 @@
 {
   "name": "dsh-kimi-tower",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Kimi Code tower mode for DeepSeek Harness: a control-tower agent splits work into missions, runs each worker in its own git worktree, gates merges on independent review, and routes the whole fleet through a file-backed inbox.",
   "type": "module",
   "main": "lib/index.js",
