@@ -22,6 +22,33 @@ function agent(id, cwd, extra = {}) {
   return { id, status: 'idle', session: { header: { cwd } }, ...extra }
 }
 
+/**
+ * A Host model the way the real one is built: `current` is a prototype method
+ * that reads `this`. An arrow function would never notice a lookup that
+ * detaches the method from its object, so the dock fixtures use this class.
+ */
+class FakeModel {
+  constructor(selection) {
+    this.selection = selection
+  }
+
+  current() {
+    return this.selection
+  }
+}
+
+/** A Host logger that records each level separately, as the route sees it. */
+function makeLogger() {
+  const log = { debug: [], warn: [] }
+  return {
+    log,
+    logger: {
+      debug: (...args) => log.debug.push(args),
+      warn: (...args) => log.warn.push(args),
+    },
+  }
+}
+
 test('tower snapshot lists open missions with worker model, progress, and liveness', async () => {
   const dir = await makeRepo()
   try {
@@ -45,7 +72,7 @@ test('tower snapshot lists open missions with worker model, progress, and livene
     const main = agent('session-main', dir)
     const worker = agent('session-w1', join(dir, '.tower/worktrees/wt-1'), {
       status: 'running',
-      model: { current: () => ({ provider: 'test', model: 'gpt-test', reasoningEffort: 'max' }) },
+      model: new FakeModel({ provider: 'test', model: 'gpt-test', reasoningEffort: 'max' }),
     })
     const agents = new Map([['session-main', main], ['session-w1', worker]])
     const ctx = { agents: { get: (id) => agents.get(id) } }
@@ -122,7 +149,7 @@ async function makeTower() {
     ['session-main', agent('session-main', dir)],
     ['session-w1', agent('session-w1', dir, {
       status: 'running',
-      model: { current: () => ({ provider: 'test', model: 'gpt-test', reasoningEffort: 'max' }) },
+      model: new FakeModel({ provider: 'test', model: 'gpt-test', reasoningEffort: 'max' }),
     })],
   ])
   const warnings = []
@@ -421,6 +448,142 @@ test('a worker whose Host model current is present but unusable costs its own mo
     }
     // A broken model on one agent is not an error worth a warning either.
     assert.deepEqual(warnings, [])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/** A tower with one worker, whose Host object is set by the test. */
+async function makeWorkerTower(title, agentId = 'session-w1') {
+  const dir = await makeRepo()
+  const store = new TowerStore(dir)
+  await store.init('session-main')
+  const [mission] = await store.plan([{ title, scope: ['src/receiver/**'], tasks: ['do it'] }])
+  await store.registerSpawnedAgent(
+    {
+      name: 'worker-1',
+      agentId,
+      sessionId: 'session-main',
+      kind: 'worker',
+      missionId: mission.id,
+      worktree: mission.worktree,
+      branch: mission.branch,
+      spawnedAt: new Date().toISOString(),
+    },
+    { id: mission.id, owner: 'worker-1' },
+  )
+  const agents = new Map([['session-main', agent('session-main', dir)]])
+  return {
+    dir,
+    agentId,
+    agents,
+    setWorker(model) {
+      agents.set(agentId, agent(agentId, dir, { status: 'running', model }))
+    },
+  }
+}
+
+test('current is called as a method of its model, so a model whose current reads this still reports its selection', async () => {
+  // The real Host model is a class whose `current` is a prototype method that
+  // reads `this`. Looking it up and calling it bare throws, and the snapshot
+  // then silently lost every model name and effort. This fails against 71bcbef.
+  class HostModel {
+    constructor(selection) {
+      this.selection = selection
+    }
+
+    current() {
+      if (this === undefined) throw new TypeError("Cannot read properties of undefined (reading 'selection')")
+      return this.selection
+    }
+  }
+  const { dir, agents, setWorker } = await makeWorkerTower('M1 receiver')
+  try {
+    setWorker(new HostModel({ provider: 'test', model: 'host-model', reasoningEffort: 'max' }))
+
+    const dock = await get({ agents: { get: (id) => agents.get(id) } }, '/tower/state?sessionId=session-main')
+    assert.equal(dock.status, 200)
+    assert.deepEqual(Object.keys(dock.json.missions[0]), CARD_KEYS)
+    assert.equal(dock.json.missions[0].model, 'host-model')
+    assert.equal(dock.json.missions[0].effort, 'max')
+    assert.equal(dock.json.missions[0].live, true)
+
+    const canvas = await get({ agents: { get: (id) => agents.get(id) } }, '/tower/state?sessionId=session-main&detail=1')
+    assert.equal(canvas.status, 200)
+    assert.equal(canvas.json.missions[0].model, 'host-model')
+    assert.equal(canvas.json.missions[0].effort, 'max')
+    // The roster entry goes through the same lookup.
+    assert.equal(canvas.json.agents[0].model, 'host-model')
+    assert.equal(canvas.json.agents[0].effort, 'max')
+
+    // A class-built model still takes every unusable shape gracefully.
+    class Unusable {
+      constructor(current) {
+        this.current = current
+      }
+    }
+    for (const [label, current] of [['a string', 'glm-test'], ['undefined', undefined]]) {
+      setWorker(new Unusable(current))
+      const unusable = await get({ agents: { get: (id) => agents.get(id) } }, '/tower/state?sessionId=session-main')
+      assert.equal(unusable.status, 200, label)
+      assert.equal('model' in unusable.json.missions[0], false, label)
+      assert.equal(unusable.json.missions[0].live, true, label)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a model lookup that throws is reported once per agent and message at debug level, never as a warning', async () => {
+  // Throttling is kept per agent across requests, so this test uses an agent
+  // id and messages of its own and cannot be confused with another test.
+  const { dir, agents, agentId, setWorker } = await makeWorkerTower('M1 logged lookup', 'session-w1-logged-lookup')
+  const { log, logger } = makeLogger()
+  const ctx = { agents: { get: (id) => agents.get(id) }, logger }
+  try {
+    let message = 'selection backend unreachable'
+    class Failing {
+      current() {
+        throw new Error(message)
+      }
+    }
+    setWorker(new Failing())
+
+    // The dock polls and the canvas looks a card and a roster entry up: all of
+    // that is one line, carrying the agent and the reason.
+    await get(ctx, '/tower/state?sessionId=session-main')
+    await get(ctx, '/tower/state?sessionId=session-main')
+    await get(ctx, '/tower/state?sessionId=session-main&detail=1')
+    await get(ctx, '/tower/state?sessionId=session-main&detail=1')
+    assert.equal(log.debug.length, 1)
+    assert.match(log.debug[0].join(' '), /model selection unavailable/)
+    assert.ok(log.debug[0].includes(agentId), 'the agent id is in the line')
+    assert.ok(log.debug[0].includes(message), 'the error message is in the line')
+    assert.deepEqual(log.warn, [])
+
+    // A different failure for the same agent is a new fact and is reported.
+    message = 'selection backend returned garbage'
+    setWorker(new Failing())
+    await get(ctx, '/tower/state?sessionId=session-main')
+    await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(log.debug.length, 2)
+    assert.ok(log.debug[1].includes(message))
+    assert.deepEqual(log.warn, [])
+
+    // Once the model works again nothing else is logged.
+    setWorker(new FakeModel({ model: 'recovered' }))
+    const recovered = await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(recovered.json.missions[0].model, 'recovered')
+    assert.equal(log.debug.length, 2)
+
+    // A logger that cannot take the line must not take the snapshot down.
+    setWorker(new Failing())
+    for (const broken of [undefined, {}, { debug: 'not a function' }, { debug() { throw new Error('sink closed') } }]) {
+      const status = await get({ agents: ctx.agents, logger: broken }, '/tower/state?sessionId=session-main')
+      assert.equal(status.status, 200, `logger ${JSON.stringify(broken)}`)
+      assert.equal(status.json.active, true)
+      assert.equal('model' in status.json.missions[0], false)
+    }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

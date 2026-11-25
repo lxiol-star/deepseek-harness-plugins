@@ -61,8 +61,23 @@ function agent(id, cwd, extra = {}) {
   return { id, status: 'idle', session: { header: { cwd } }, ...extra }
 }
 
+/**
+ * A Host model the way the real one is built: `current` is a prototype method
+ * that reads `this`. An arrow function would never notice a lookup that
+ * detaches the method from its object, so the canvas fixtures use this class.
+ */
+class FakeModel {
+  constructor(selection) {
+    this.selection = selection
+  }
+
+  current() {
+    return this.selection
+  }
+}
+
 function selection(model, reasoningEffort) {
-  return { current: () => ({ provider: 'test', model, reasoningEffort }) }
+  return new FakeModel({ provider: 'test', model, reasoningEffort })
 }
 
 async function spawnWorker(store, mission, name, agentId, spawnedAt = new Date().toISOString()) {

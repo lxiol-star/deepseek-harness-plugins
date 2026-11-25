@@ -50,6 +50,8 @@ export const INACTIVE_SNAPSHOT: TowerSnapshot = { active: false, running: 0, mis
 /** The Host surface a snapshot reads: live agents by session id. */
 export interface SnapshotContext {
   readonly agents: { get(id: string): Agent | undefined }
+  /** Where a failed model lookup is reported; absent in tests that do not care. */
+  readonly logger?: { debug?(...args: unknown[]): void }
 }
 
 /** A tower state bound to one session, ready to be projected without writing. */
@@ -87,20 +89,50 @@ export interface ModelSelection {
 }
 
 /**
+ * The last failure logged for an agent, by agent id. The dock polls once a
+ * second and the canvas every few, so one broken model would otherwise write
+ * the same line on every request; a failure is logged again only when its
+ * message changes, so a new problem is never hidden by an old one.
+ */
+const reportedModelFailures = new Map<string, string>()
+
+/**
  * The model selection a Host agent reports, or undefined when it reports none.
  *
  * The selection is a nicety on a card, so nothing about it may take the whole
  * snapshot down: the agent may be gone, carry no `model`, carry a `current`
  * that is missing or not a function, or `current()` may itself fail. Each of
  * those costs this one agent its model name and nothing else.
+ *
+ * `current` is called as a method of its `model`. The real Host model is a
+ * class whose `current` reads `this`; detaching the method and calling it bare
+ * throws, and that is how every model name once vanished from the dock.
  */
 export function modelSelection(ctx: SnapshotContext, agentId: string): ModelSelection | undefined {
-  const current = ctx.agents.get(agentId)?.model?.current
+  const model = ctx.agents.get(agentId)?.model
+  const current = model?.current
   if (typeof current !== 'function') return undefined
   try {
-    return current() ?? undefined
-  } catch {
+    return current.call(model) ?? undefined
+  } catch (error) {
+    reportModelFailure(ctx, agentId, error)
     return undefined
+  }
+}
+
+/** Log a failed model lookup once per agent and message, at debug level. */
+function reportModelFailure(ctx: SnapshotContext, agentId: string, error: unknown): void {
+  const logger = ctx.logger
+  if (logger === undefined) return
+  const message = error instanceof Error ? error.message : String(error)
+  if (reportedModelFailures.get(agentId) === message) return
+  reportedModelFailures.set(agentId, message)
+  const debug = logger.debug
+  if (typeof debug !== 'function') return
+  try {
+    debug.call(logger, 'dsh-kimi-tower: model selection unavailable', agentId, message)
+  } catch {
+    // Reporting must never be the thing that fails the snapshot.
   }
 }
 

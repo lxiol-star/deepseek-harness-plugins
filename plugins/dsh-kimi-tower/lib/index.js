@@ -6997,13 +6997,29 @@ function isAgentLive(ctx, entry) {
   if (entry.diedAt !== void 0) return false;
   return ctx.agents.get(entry.agentId)?.status === "running";
 }
+var reportedModelFailures = /* @__PURE__ */ new Map();
 function modelSelection(ctx, agentId) {
-  const current = ctx.agents.get(agentId)?.model?.current;
+  const model = ctx.agents.get(agentId)?.model;
+  const current = model?.current;
   if (typeof current !== "function") return void 0;
   try {
-    return current() ?? void 0;
-  } catch {
+    return current.call(model) ?? void 0;
+  } catch (error) {
+    reportModelFailure(ctx, agentId, error);
     return void 0;
+  }
+}
+function reportModelFailure(ctx, agentId, error) {
+  const logger = ctx.logger;
+  if (logger === void 0) return;
+  const message = error instanceof Error ? error.message : String(error);
+  if (reportedModelFailures.get(agentId) === message) return;
+  reportedModelFailures.set(agentId, message);
+  const debug = logger.debug;
+  if (typeof debug !== "function") return;
+  try {
+    debug.call(logger, "dsh-kimi-tower: model selection unavailable", agentId, message);
+  } catch {
   }
 }
 function towerCard(mission, roster, ctx, repoRoot, now) {
