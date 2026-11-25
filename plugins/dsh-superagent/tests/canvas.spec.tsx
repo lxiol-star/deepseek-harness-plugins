@@ -142,17 +142,24 @@ it('follows the newest answer in the thread, unless the operator has scrolled up
 it('asks the main Session about the ticked ticket, and only about one', async () => {
   server.tasks = snapshot([task('a'), task('b')])
   await mount()
-  // Nothing is ticked: the Composer says so and sends nothing, by the button or by Enter.
+  // Nothing is ticked: the Composer says so, and what it sends is a message to the main Session, not a question about a ticket.
   expect(document.querySelector('.dt-canvas-composer-about')?.textContent).toBe(zh['canvas.composerNone'])
   expect(send().disabled).toBe(true)
-  await typeInto(composer(), '到哪一步了？')
-  expect(send().disabled).toBe(true)
+  await typeInto(composer(), '在当前工作区补一段 README')
+  expect(send().disabled).toBe(false)
   await pressEnter()
   expect(asks()).toEqual([])
+  expect(says()).toEqual([{ path: 'session/say', body: { text: '在当前工作区补一段 README' } }])
+  // Said: the Composer is empty again and says the message reached the Session.
+  expect(composer().value).toBe('')
+  expect(textOfStatus()).toContain('已提交给主会话')
   await click(nodes('task:')[0]!.querySelector<HTMLInputElement>('.dt-canvas-check')!)
   expect(document.querySelector('.dt-canvas-composer-about')?.textContent).toBe('关于「任务 a」')
   expect(all('.dt-canvas-line[data-kind="ask"]')).toHaveLength(1)
   expect(nodes('task:')[0]!.dataset.picked).toBe('1')
+  // The tick alone sends nothing: the Composer still holds no words.
+  expect(send().disabled).toBe(true)
+  await typeInto(composer(), '到哪一步了？')
   expect(send().disabled).toBe(false)
   await pressEnter()
   expect(asks()).toEqual([{ path: 'tasks/a/ask', body: { question: '到哪一步了？' } }])
@@ -166,6 +173,71 @@ it('asks the main Session about the ticked ticket, and only about one', async ()
   expect(document.querySelector('.dt-canvas-composer-about')?.textContent).toBe('关于「任务 b」')
   await click(nodes('task:')[1]!.querySelector<HTMLInputElement>('.dt-canvas-check')!)
   expect(all('.dt-canvas-line[data-kind="ask"]')).toEqual([])
+})
+
+it('uploads the files the operator attaches and names them in the message it sends', async () => {
+  server.tasks = snapshot([task('a')])
+  await mount()
+  const picker = document.querySelector<HTMLInputElement>('.dt-canvas-picker')!
+  const png = new File([new Uint8Array([1, 2, 3])], '截图.png', { type: 'image/png' })
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [png] })
+    picker.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let index = 0; index < 12; index++) await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  // The file went up whole, as a data URL the Host accepts, and the panel shows it by name and size.
+  const upload = server.requests.find(request => request.method === 'POST' && request.path === 'uploads')!
+  expect(upload.body).toMatchObject({ name: '截图.png' })
+  expect(String((upload.body as { data: string }).data)).toMatch(/^data:image\/png;base64,/)
+  expect(server.uploads).toHaveLength(1)
+  expect(all('.dt-canvas-file-name')[0]!.textContent).toBe('截图.png')
+  expect(document.querySelector('.dt-canvas-file-preview')).not.toBeNull()
+  // A ticket is not needed: the message carries the files and no ticket line.
+  await typeInto(composer(), '看看这张图')
+  expect(send().disabled).toBe(false)
+  await pressEnter()
+  expect(says()).toEqual([{ path: 'session/say', body: { text: '看看这张图', files: [server.uploads[0]!.path] } }])
+  expect(all('.dt-canvas-file')).toEqual([])
+  // Ticking a ticket and attaching a file asks about that ticket, naming the file.
+  await click(nodes('task:')[0]!.querySelector<HTMLInputElement>('.dt-canvas-check')!)
+  const pasted = new File([new Uint8Array([9])], 'pasted.png', { type: 'image/png' })
+  await act(async () => {
+    const event = new Event('paste', { bubbles: true })
+    Object.defineProperty(event, 'clipboardData', { value: { files: [pasted] } })
+    composer().dispatchEvent(event)
+    for (let index = 0; index < 12; index++) await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  expect(server.uploads).toHaveLength(2)
+  await typeInto(composer(), '这张图里是什么？')
+  await pressEnter()
+  expect(asks().at(-1)).toEqual({ path: 'tasks/a/ask', body: { question: '这张图里是什么？', files: [server.uploads[1]!.path] } })
+})
+
+it('drops an attachment without sending it, and refuses one over the cap before uploading it', async () => {
+  server.tasks = snapshot([task('a')])
+  await mount()
+  const picker = document.querySelector<HTMLInputElement>('.dt-canvas-picker')!
+  const small = new File([new Uint8Array([1])], 'a.txt', { type: 'text/plain' })
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [small] })
+    picker.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let index = 0; index < 12; index++) await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  expect(all('.dt-canvas-file')).toHaveLength(1)
+  // Remove: the file is still on disk, but the message will not name it.
+  await act(async () => { all('.dt-canvas-file button')[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  expect(all('.dt-canvas-file')).toEqual([])
+  expect(server.uploads).toHaveLength(1)
+  // Over the cap: refused by the panel, and nothing is sent to the Host.
+  const huge = new File([new Uint8Array(1)], 'huge.bin', { type: 'application/octet-stream' })
+  Object.defineProperty(huge, 'size', { configurable: true, value: 13 * 1024 * 1024 })
+  await act(async () => {
+    Object.defineProperty(picker, 'files', { configurable: true, value: [huge] })
+    picker.dispatchEvent(new Event('change', { bubbles: true }))
+    for (let index = 0; index < 8; index++) await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  expect(server.uploads).toHaveLength(1)
+  expect(textOfStatus()).toContain('超过')
 })
 
 it('shows why it did not ask, says so when no ticket is open, and opens the conversations', async () => {
@@ -319,7 +391,9 @@ async function wheel(target: Element, init: WheelEventInit) {
 const scaleOf = () => Number(/scale\(([\d.]+)\)/.exec(document.querySelector<HTMLElement>('.dt-canvas-world')!.style.transform)![1])
 
 const asks = () => server.requests.filter(request => request.method === 'POST' && request.path.endsWith('/ask'))
-  .map(request => ({ path: request.path, body: request.body as { question: string } }))
+  .map(request => ({ path: request.path, body: request.body as { question: string; files?: string[] } }))
+const says = () => server.requests.filter(request => request.method === 'POST' && request.path === 'session/say')
+  .map(request => ({ path: request.path, body: request.body as { text: string; files?: string[] } }))
 async function pressEnter() {
   await act(async () => { composer().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
   await settle()

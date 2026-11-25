@@ -89,14 +89,17 @@ it('leaves a delivered follow-up to its ticket\'s worker: the main Session may s
 })
 
 /**
- * Count main-session model turns triggered by steers: each steer while idle starts a new turn,
- * whereas all steers arriving while running batch into the next step.
+ * Count main-session model turns a relay costs: one per message that arrives while the Session is idle, and one for every
+ * message that arrives while it runs, since those batch into the next step. Both channels are watched, because the plugin
+ * picks the one the Session's state calls for: `steer` reaches a running turn, `followup` starts an idle one.
  */
 function modelCalls(host: Host) {
   const master = host.agents.get(host.runtime.masterId)!
   const seen: string[] = []
-  const steer = master.steer.getMockImplementation() as (message: unknown) => void
-  master.steer.mockImplementation((message: unknown) => { seen.push(master.status); steer(message) })
+  for (const channel of ['steer', 'followup'] as const) {
+    const original = master[channel].getMockImplementation() as ((message: unknown) => void) | undefined
+    master[channel].mockImplementation((message: unknown) => { seen.push(master.status); original?.(message) })
+  }
   return () => seen.filter(status => status === 'idle').length + (seen.includes('running') ? 1 : 0)
 }
 
@@ -119,7 +122,10 @@ it('keeps a follow-up\'s notice in the effect queue until the main Session takes
   h = await startRuntime()
   await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
   h.deliveries.mockClear()
-  h.agents.get(h.runtime.masterId)!.steer.mockImplementationOnce(() => { throw new Error('session gone') })
+  // Whichever channel the Session's state selects, the delivery fails once and the relay must stay queued.
+  for (const channel of ['steer', 'followup'] as const) {
+    h.agents.get(h.runtime.masterId)![channel].mockImplementationOnce(() => { throw new Error('session gone') })
+  }
   const message = followup('2', '补充一点')
   h.runtime.receive(message)
   await h.runtime.idle()

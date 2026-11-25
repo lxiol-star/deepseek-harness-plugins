@@ -23,7 +23,11 @@ export interface Api {
   /** The task dock above the main Session's composer: the open tickets with their progress. */
   'GET tasks': { response: TasksView }
   /** Asks the main Session a question about one ticket from the task canvas; the answer arrives in that Session. */
-  'POST tasks/:id/ask': { body: { question: string }; response: { delivered: 'queued' } }
+  'POST tasks/:id/ask': { body: { question: string; files?: string[] }; response: { delivered: 'queued' } }
+  /** Says something to the main Session with no ticket behind it, such as a task the operator states from the canvas. */
+  'POST session/say': { body: { text: string; files?: string[] }; response: { delivered: 'queued' } }
+  /** Writes one file the operator attached in a task view under the state directory, and reports where it went. */
+  'POST uploads': { body: { name: string; data: string }; response: { path: string; name: string; bytes: number } }
   'GET overview': { response: OverviewView }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }

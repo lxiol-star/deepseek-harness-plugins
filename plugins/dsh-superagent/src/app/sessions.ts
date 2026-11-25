@@ -20,6 +20,12 @@ import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import type { RegisterTool, Tool } from './tools/tool.ts'
 
+/**
+ * The mode a relay takes. `steer` reaches the turn that is running; it is not a wake-up call, so a message relayed to an idle
+ * Session would wait for a turn that never starts. `queue` is the follow-up that starts one.
+ */
+const relayMode = (running: boolean): 'steer' | 'queue' => running ? 'steer' : 'queue'
+
 /** Host dependencies used by `Sessions`. */
 export interface SessionsHost {
   /** DSH Cordis context: sessions, agents, persistence, and their events. */
@@ -56,7 +62,7 @@ export function todosOf(data: unknown): Todos | undefined {
     current: typeof inHand?.content === 'string' ? inHand.content : '' }
 }
 /** One entry of the main Session's conversation as the task canvas shows it: a question the operator asked, or the reply that ended a turn. */
-export interface Exchange { at: string; role: 'operator' | 'orchestrator'; text: string }
+export interface Exchange { at: string; role: 'operator' | 'orchestrator'; text: string; /** The files the operator attached, by absolute path. */ files?: string[] }
 /** How many of the main Session's latest exchanges the task canvas keeps. */
 export const EXCHANGES = 12
 /**
@@ -143,7 +149,8 @@ export class Sessions {
     this.ctx = host.context
     this.agentDelivery = new AgentDelivery(host.context)
     // Deliver relays and notices to the main Session in the order they were queued.
-    host.effects.handle('relay', ({ text }, requestId) => this.prompt(host.masterId, requestId, text, 'steer'), { ordered: true })
+    host.effects.handle('relay', ({ text }, requestId) =>
+      this.prompt(host.masterId, requestId, text, relayMode(this.active(host.masterId))), { ordered: true })
     host.effects.handle('notice', ({ value, summary }, name) => this.inject(name, value, summary), { ordered: true })
   }
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
@@ -283,8 +290,16 @@ export class Sessions {
    * Carries the operator's question about a ticket to the main Session as a relay, which `Effects` orders and retries until
    * delivered at most once under `requestId`, and shows the question in the conversation the task canvas keeps.
    */
-  ask(requestId: string, text: string, question: string): void {
-    this.record({ at: new Date().toISOString(), role: 'operator', text: question })
+  ask(requestId: string, text: string, question: string, files: readonly string[] = []): void {
+    this.record({ at: new Date().toISOString(), role: 'operator', text: question, files: [...files] })
+    this.relay(requestId, text)
+  }
+  /**
+   * Says something to the main Session with no ticket behind it, as the operator would in that Session's own composer: it is a
+   * message like any other, so the main Session decides whether it opens a ticket.
+   */
+  say(requestId: string, text: string, said: string, files: readonly string[] = []): void {
+    this.record({ at: new Date().toISOString(), role: 'operator', text: said, files: [...files] })
     this.relay(requestId, text)
   }
   /** The main Session's latest exchanges, oldest first, as far back as this process remembers. */

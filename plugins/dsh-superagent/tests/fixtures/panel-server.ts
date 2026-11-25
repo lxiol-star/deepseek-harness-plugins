@@ -92,6 +92,12 @@ export interface PanelServer {
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** The task dock's answer; unset means the host derives it from the open and person tickets. */
   tasks?: TasksView | undefined
+  /** Questions the canvas asked about a ticket, in the order they arrived. */
+  asks: { id: string; question: string; files?: string[] }[]
+  /** Messages said to the main Session with no ticket behind them. */
+  says: { text: string; files?: string[] }[]
+  /** Files written by `POST uploads`. */
+  uploads: { name: string; path: string; bytes: number }[]
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
@@ -263,6 +269,12 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    /** Questions asked about a ticket, as the canvas asks them. */
+    asks: [] as { id: string; question: string; files?: string[] }[],
+    /** Messages said to the main Session with no ticket behind them. */
+    says: [] as { text: string; files?: string[] }[],
+    /** Files written by {@link POST uploads}, under a state directory that no test reads. */
+    uploads: [] as { name: string; path: string; bytes: number }[],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -349,9 +361,30 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     // A test that supplies its own task list asks about one of its tasks; the default list asks about one of its tickets.
     const known = server.tasks?.tasks.some(task => task.id === params.id) || openTickets().some(item => item.id === params.id)
     if (!known) return refuse(404, 'Ticket not found')
-    const { question } = body as { question: string }
+    const { question, files } = body as { question: string; files?: string[] }
     if (typeof question !== 'string' || !question.trim()) return refuse(400, 'A question is required')
+    server.asks.push({ id: params.id, question, ...files ? { files } : {} })
     return { delivered: 'queued' }
+  } },
+  'POST session/say': { body: true, answer: ({ body }) => {
+    const { text, files } = body as { text: string; files?: string[] }
+    if (typeof text !== 'string' || !text.trim()) return refuse(400, 'A message is required')
+    server.says.push({ text, ...files ? { files } : {} })
+    return { delivered: 'queued' }
+  } },
+  // The real Host writes the bytes under its state directory and refuses a path it did not write; the fake keeps the name and size.
+  'POST uploads': { body: true, answer: ({ body }) => {
+    const { name, data } = body as { name: string; data: string }
+    if (typeof name !== 'string' || !name.trim()) return refuse(400, 'A name is required')
+    // As the Host does, a data URL is accepted for the plain base64 it carries.
+    const raw = typeof data === 'string' ? data.replace(/^data:[^,]*,/, '') : ''
+    if (typeof data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(raw)) return refuse(400, 'The file body is not base64')
+    const bytes = Buffer.from(raw, 'base64').length
+    if (bytes === 0) return refuse(400, 'The file is empty')
+    const safe = name.replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^[-.]+/, '') || 'file'
+    const path = `${MACHINE.stateDir}/asks/2026-11-25/${bytes.toString(16)}-${safe}`
+    server.uploads.push({ name: safe, path, bytes })
+    return { path, name: safe, bytes }
   } },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)

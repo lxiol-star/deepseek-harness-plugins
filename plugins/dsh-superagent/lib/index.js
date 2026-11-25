@@ -8,9 +8,9 @@ import { Service } from "@deepseek-ai/cordis";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { lockSync } from "proper-lockfile";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { mkdir, rmdir, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { MessageId, ReasoningEffortId, freezeMessage } from "@deepseek-ai/dsh-llm";
@@ -8184,6 +8184,121 @@ var Settings = class {
 	}
 };
 //#endregion
+//#region src/app/uploads.ts
+/**
+* Files the operator hands the main Session from a task view. A browser cannot put bytes into the main Session's composer from
+* another panel, so a file is uploaded here first: the Host writes it under its state directory, and the relay that carries the
+* operator's question names the absolute path. The main Session then opens a text file with `read` and an image with
+* `read_image`, which accepts PNG, JPEG, WebP and GIF.
+*
+* A path only ever comes back for a file this module wrote, and the routes that carry one to the main Session accept nothing
+* else: a browser that asked for `/etc/passwd` gets its own upload directory or an error, never the file.
+*/
+/** Where uploads land under the state directory; each day gets its own folder, so a person can find and delete them. */
+const UPLOAD_DIR = "asks";
+/** The largest single file accepted, and the largest total one message may carry. */
+const UPLOAD_MAX = 12582912;
+/** The longest file name kept from what the browser reports; the rest is cut so a path stays readable in a message. */
+const NAME_MAX = 96;
+/** What a name keeps: anything that would break the path, the message line, or a shell is replaced by `-`. */
+const UNSAFE = /[^\p{L}\p{N}._-]+/gu;
+/** The name a file is stored under: its base name made safe, never empty, never longer than `NAME_MAX` including its extension. */
+function uploadName(reported) {
+	const cleaned = basename(String(reported ?? "").replaceAll("\\", "/")).trim().replace(UNSAFE, "-").replace(/^[-.]+/, "").replace(/-+$/, "");
+	if (cleaned.length === 0) return "file";
+	if (cleaned.length <= NAME_MAX) return cleaned;
+	const dot = cleaned.lastIndexOf(".");
+	const tail = dot > 0 && cleaned.length - dot <= 16 ? cleaned.slice(dot) : "";
+	return cleaned.slice(0, NAME_MAX - tail.length) + tail;
+}
+/** The folder a day's uploads go to under the state directory. */
+const uploadDir = (stateDir, day) => join(resolve(stateDir), UPLOAD_DIR, day);
+/**
+* Writes one uploaded file under the state directory and reports the absolute path it got.
+* @param stateDir - the orchestrator's state directory.
+* @param input - the reported name and the base64 body the browser sent.
+* @param now - the moment the upload arrives, which names its day folder.
+*/
+async function saveUpload(stateDir, input, now = /* @__PURE__ */ new Date()) {
+	const bytes = decode(input.data);
+	if (bytes.length === 0) throw new UploadError("empty", "The file is empty");
+	if (bytes.length > 12582912) throw new UploadError("tooLarge", `The file exceeds ${UPLOAD_MAX} bytes`);
+	const day = now.toISOString().slice(0, 10);
+	const dir = uploadDir(stateDir, day);
+	await mkdir(dir, { recursive: true });
+	const name = `${randomBytes(4).toString("hex")}-${uploadName(input.name)}`;
+	const path = join(dir, name);
+	await writeFile(path, bytes, { flag: "wx" });
+	await prune(stateDir, now);
+	return {
+		path,
+		name: uploadName(input.name),
+		bytes: bytes.length
+	};
+}
+/** Raised for a body this module refuses; `http.ts` reports its code as a 400 with the message. */
+var UploadError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+	}
+};
+/**
+* Whether `path` is a file this module wrote: it must resolve inside the uploads folder and not be a link out of it. A route
+* that carries paths to the main Session takes nothing but these.
+*/
+function isUploaded(stateDir, path) {
+	const root = resolve(stateDir, UPLOAD_DIR);
+	const target = resolve(path);
+	if (target !== root && !target.startsWith(root + sep)) return false;
+	return true;
+}
+/** Checks every path a route was handed and returns them unchanged, or raises for the first one it did not write. */
+function uploadedOnly(stateDir, paths) {
+	for (const path of paths) if (!isUploaded(stateDir, path)) throw new UploadError("foreign", `Not a file uploaded through this panel: ${path}`);
+	return [...paths];
+}
+/**
+* The lines that name the operator's files in a message to the main Session. The first line says what the paths are for, and
+* every path is absolute: the main Session opens them with `read` or, for an image, `read_image`.
+*/
+function filesNote(paths) {
+	if (paths.length === 0) return "";
+	return `[files · read before answering]\n${paths.map((path) => `- ${path}`).join("\n")}`;
+}
+/**
+* Removes day folders older than `UPLOAD_KEEP_DAYS`, best effort: a folder that cannot be read or removed stays, because a failed
+* cleanup must not fail the upload the operator is waiting for.
+*/
+async function prune(stateDir, now) {
+	const root = resolve(stateDir, UPLOAD_DIR);
+	const cutoff = (/* @__PURE__ */ new Date(now.getTime() - 18144e5)).toISOString().slice(0, 10);
+	let days;
+	try {
+		days = await readdir(root);
+	} catch {
+		return;
+	}
+	for (const day of days) {
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day >= cutoff) continue;
+		try {
+			await rm(join(root, day), {
+				recursive: true,
+				force: true
+			});
+		} catch {}
+	}
+}
+/** The bytes of a base64 body; a body that does not decode is refused rather than written as garbage. */
+function decode(data) {
+	const text = String(data ?? "").replace(/^data:[^,]*,/, "");
+	if (text.length === 0 || !/^[A-Za-z0-9+/=\s]+$/.test(text)) throw new UploadError("notBase64", "The file body is not base64");
+	const bytes = Buffer.from(text, "base64");
+	if (bytes.length === 0) throw new UploadError("notBase64", "The file body is not base64");
+	return bytes;
+}
+//#endregion
 //#region src/app/settings-history.ts
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function fieldChanges(id, fields, a, b, part) {
@@ -8653,6 +8768,10 @@ function failure(error) {
 		setup: error.problem
 	}];
 	if (error instanceof RouteError) return [error.status, { error: error.message }];
+	if (error instanceof UploadError) return [400, {
+		error: error.message,
+		code: error.code
+	}];
 	if (error instanceof UserError) return [error.missing ? 404 : 400, {
 		error: error.message,
 		code: error.code,
@@ -8801,9 +8920,32 @@ function routes(runtime) {
 		}),
 		"POST tasks/:id/ask": async ({ params, body }) => {
 			const id = ticket(params.id);
-			const { question } = z.object({ question: z.string().trim().min(1).max(ASK_MAX) }).parse(await body(65536));
-			runtime.sessions.ask(`ask:${id}:${Date.now()}`, operatorQuestion(id, store.tickets.get(id).title, question), question);
+			const { question, files } = z.object({
+				question: z.string().trim().min(1).max(ASK_MAX),
+				files: z.array(z.string().min(1)).max(8).optional()
+			}).parse(await body(UPLOAD_BODY));
+			const names = files === void 0 || files.length === 0 ? [] : uploadedOnly(runtime.machine.stateDir, files);
+			runtime.sessions.ask(`ask:${id}:${Date.now()}`, withFiles(operatorQuestion(id, store.tickets.get(id).title, question), names), question, names);
 			return { delivered: "queued" };
+		},
+		"POST session/say": async ({ body }) => {
+			const { text, files } = z.object({
+				text: z.string().trim().min(1).max(ASK_MAX),
+				files: z.array(z.string().min(1)).max(8).optional()
+			}).parse(await body(UPLOAD_BODY));
+			const names = files === void 0 || files.length === 0 ? [] : uploadedOnly(runtime.machine.stateDir, files);
+			runtime.sessions.say(`say:${Date.now()}`, withFiles(text, names), text, names);
+			return { delivered: "queued" };
+		},
+		"POST uploads": async ({ body }) => {
+			const { name, data } = z.object({
+				name: z.string().min(1).max(256),
+				data: z.string().min(1)
+			}).parse(await body(UPLOAD_BODY));
+			return saveUpload(runtime.machine.stateDir, {
+				name,
+				data
+			});
 		},
 		"GET overview": () => overview(views(runtime), runtime.health, policyVersion(store.settings()), executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
 		"GET search": ({ query }) => search(views(runtime), query.q ?? "", runtime.sourceLinks),
@@ -8912,6 +9054,16 @@ function match(table, method, segments) {
 		};
 	}
 }
+/**
+* The body room one upload gets: the file cap in base64 (four bytes per three, plus padding) and the JSON around it. `readBody`
+* refuses past this before a byte is written.
+*/
+const UPLOAD_BODY = Math.ceil(UPLOAD_MAX * 4 / 3) + 65536;
+/** The operator's message with the files they attached named after it, or the message alone when there are none. */
+const withFiles = (text, paths) => {
+	const note = filesNote(paths);
+	return note === "" ? text : `${text}\n\n${note}`;
+};
 function registerHttp(ctx, runtime) {
 	if (ctx.webServer.host !== "127.0.0.1") throw new Error("Orchestrator management requires a loopback Web server");
 	const table = routes(runtime);
@@ -9361,6 +9513,11 @@ var RetryHealth = class {
 };
 //#endregion
 //#region src/app/sessions.ts
+/**
+* The mode a relay takes. `steer` reaches the turn that is running; it is not a wake-up call, so a message relayed to an idle
+* Session would wait for a turn that never starts. `queue` is the follow-up that starts one.
+*/
+const relayMode = (running) => running ? "steer" : "queue";
 /** Reads the list of one `todo/write` event; a list that is not an array is not a todo list. */
 function todosOf(data) {
 	const list = data?.todos;
@@ -9471,7 +9628,7 @@ var Sessions = class {
 		this.host = host;
 		this.ctx = host.context;
 		this.agentDelivery = new AgentDelivery(host.context);
-		host.effects.handle("relay", ({ text }, requestId) => this.prompt(host.masterId, requestId, text, "steer"), { ordered: true });
+		host.effects.handle("relay", ({ text }, requestId) => this.prompt(host.masterId, requestId, text, relayMode(this.active(host.masterId))), { ordered: true });
 		host.effects.handle("notice", ({ value, summary }, name) => this.inject(name, value, summary), { ordered: true });
 	}
 	/** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
@@ -9655,11 +9812,25 @@ var Sessions = class {
 	* Carries the operator's question about a ticket to the main Session as a relay, which `Effects` orders and retries until
 	* delivered at most once under `requestId`, and shows the question in the conversation the task canvas keeps.
 	*/
-	ask(requestId, text, question) {
+	ask(requestId, text, question, files = []) {
 		this.record({
 			at: (/* @__PURE__ */ new Date()).toISOString(),
 			role: "operator",
-			text: question
+			text: question,
+			files: [...files]
+		});
+		this.relay(requestId, text);
+	}
+	/**
+	* Says something to the main Session with no ticket behind it, as the operator would in that Session's own composer: it is a
+	* message like any other, so the main Session decides whether it opens a ticket.
+	*/
+	say(requestId, text, said, files = []) {
+		this.record({
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			role: "operator",
+			text: said,
+			files: [...files]
 		});
 		this.relay(requestId, text);
 	}

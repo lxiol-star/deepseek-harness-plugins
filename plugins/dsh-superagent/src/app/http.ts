@@ -11,6 +11,7 @@ import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, b
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
+import { UploadError, UPLOAD_MAX, filesNote, saveUpload, uploadedOnly } from './uploads.ts'
 import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
@@ -35,7 +36,7 @@ export interface HttpHost {
   readonly sourceLinks: Pick<TextCache, 'entries'>
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
-  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'todoList' | 'ask' | 'conversation' | 'active'>
+  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'todoList' | 'ask' | 'say' | 'conversation' | 'active'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount' | 'running'>
@@ -86,6 +87,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
+  if (error instanceof UploadError) return [400, { error: error.message, code: error.code }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
@@ -159,12 +161,31 @@ function routes(runtime: HttpHost): Routes {
       paused: runtime.store.settings().paused, maxWorkers: runtime.store.settings().executor.maxWorkers,
       openTickets: () => runtime.store.tickets.open(), live: ticket => runtime.executor.running(ticket),
       todos: sessionId => runtime.sessions.todoList(sessionId), conversation: () => runtime.sessions.conversation() }),
-    // The question reaches the main Session as a relay, which is ordered and retried until delivered.
+    // The question reaches the main Session as a relay, which is ordered and retried until delivered. A file it attached first
+    // went through `POST uploads`: only a path this Host wrote may be named, so a browser cannot point the main Session at a file
+    // of its choosing.
     'POST tasks/:id/ask': async ({ params, body }) => {
       const id = ticket(params.id)
-      const { question } = z.object({ question: z.string().trim().min(1).max(ASK_MAX) }).parse(await body(64 * 1024))
-      runtime.sessions.ask(`ask:${id}:${Date.now()}`, operatorQuestion(id, store.tickets.get(id)!.title, question), question)
+      const { question, files } = z.object({ question: z.string().trim().min(1).max(ASK_MAX),
+        files: z.array(z.string().min(1)).max(UPLOAD_PER_MESSAGE).optional() }).parse(await body(UPLOAD_BODY))
+      // A message with no file never looks at the state directory: only a path that was handed on is checked.
+      const names = files === undefined || files.length === 0 ? [] : uploadedOnly(runtime.machine.stateDir, files)
+      runtime.sessions.ask(`ask:${id}:${Date.now()}`, withFiles(operatorQuestion(id, store.tickets.get(id)!.title, question), names), question, names)
       return { delivered: 'queued' }
+    },
+    // No ticket behind it: the operator is stating something, and the main Session decides what to open.
+    'POST session/say': async ({ body }) => {
+      const { text, files } = z.object({ text: z.string().trim().min(1).max(ASK_MAX),
+        files: z.array(z.string().min(1)).max(UPLOAD_PER_MESSAGE).optional() }).parse(await body(UPLOAD_BODY))
+      // A message with no file never looks at the state directory: only a path that was handed on is checked.
+      const names = files === undefined || files.length === 0 ? [] : uploadedOnly(runtime.machine.stateDir, files)
+      runtime.sessions.say(`say:${Date.now()}`, withFiles(text, names), text, names)
+      return { delivered: 'queued' }
+    },
+    // The bytes arrive as base64 JSON: a body large enough for one capped file, refused beyond that by `readBody`.
+    'POST uploads': async ({ body }) => {
+      const { name, data } = z.object({ name: z.string().min(1).max(256), data: z.string().min(1) }).parse(await body(UPLOAD_BODY))
+      return saveUpload(runtime.machine.stateDir, { name, data })
     },
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
@@ -240,6 +261,20 @@ function match(table: Routes, method: string, segments: string[]) {
   }
   return undefined
 }
+/** How many files one message may carry; a browser that sends more is refused rather than silently cut. */
+export const UPLOAD_PER_MESSAGE = 8
+/**
+ * The body room one upload gets: the file cap in base64 (four bytes per three, plus padding) and the JSON around it. `readBody`
+ * refuses past this before a byte is written.
+ */
+export const UPLOAD_BODY = Math.ceil(UPLOAD_MAX * 4 / 3) + 64 * 1024
+
+/** The operator's message with the files they attached named after it, or the message alone when there are none. */
+export const withFiles = (text: string, paths: readonly string[]): string => {
+  const note = filesNote(paths)
+  return note === '' ? text : `${text}\n\n${note}`
+}
+
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
   const table = routes(runtime)

@@ -15,6 +15,20 @@ import { StageMark } from './widgets.tsx'
 
 /** A card's place on the plane, in the plane's own pixels. */
 export interface Rect { x: number; y: number; w: number; h: number }
+/** A file the operator attached, as the Host stored it; `preview` is a blob URL for an image, revoked when the file is dropped. */
+export interface Attached { path: string; name: string; bytes: number; preview?: string }
+/** The largest file the canvas offers to upload; the Host refuses more, and the panel says so before spending the upload. */
+const ATTACH_MAX = 12 * 1024 * 1024
+/** Reads a file as a data URL, which the Host accepts in place of plain base64. */
+const dataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result ?? ''))
+  reader.onerror = () => reject(reader.error ?? new Error('The file could not be read'))
+  reader.readAsDataURL(file)
+})
+/** A byte count as a person reads it. */
+export const fileSize = (bytes: number): string => bytes < 1024 ? `${bytes} B`
+  : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 /** The key the lanes are measured under; a card's key never starts with it. */
 const LANE = 'lane:'
 /** What fitting the plane has to hold: the lanes when they are laid out, else the cards alone. */
@@ -98,6 +112,14 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const [selected, setSelected] = useState<string>()
   const [question, setQuestion] = useState('')
   const [sent, setSent] = useState(false)
+  // The operator's files stay here until the message goes: each is already on disk, so a failed send loses no upload.
+  const [files, setFiles] = useState<Attached[]>([])
+  const [uploading, setUploading] = useState(0)
+  const [fileNote, setFileNote] = useState<string>()
+  // Set while a file is dragged over the Composer, so it shows where the file will land.
+  const [dropping, setDropping] = useState(false)
+  const picking = useRef<HTMLInputElement>(null)
+  const previews = useRef<string[]>([])
   const [moved, setMoved] = useState(readLayout)
   const [view, setView] = useState<View>({ x: 24, y: 24, scale: 1 })
   const [rects, setRects] = useState<Record<string, Rect>>({})
@@ -196,14 +218,49 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     if (list && following.current) list.scrollTop = list.scrollHeight
   }, [all.length, all[all.length - 1]?.at])
   const picked = tasks.find(task => task.id === selected)
-  const ask = useAction(async (task: TaskView, text: string) => {
-    await call('POST tasks/:id/ask', { id: task.id, body: { question: text } })
+  // With a ticket ticked the message is a question about it; with none it is what the operator states, which the main Session
+  // may open a ticket from. Either way the files it names were written by this Host first.
+  const ask = useAction(async (task: TaskView, text: string, paths: string[]) => {
+    await call('POST tasks/:id/ask', { id: task.id, body: { question: text, ...paths.length ? { files: paths } : {} } })
   }, { reload })
+  const say = useAction(async (text: string, paths: string[]) => {
+    await call('POST session/say', { body: { text, ...paths.length ? { files: paths } : {} } })
+  }, { reload })
+  const dropFiles = () => setFiles(current => { for (const file of current) if (file.preview) URL.revokeObjectURL(file.preview); return [] })
+  // A file is uploaded as it is picked, so the message that names it is written before it is sent and a slow upload never
+  // holds the operator's text back.
+  const attach = async (chosen: readonly File[]) => {
+    if (chosen.length === 0) return
+    setUploading(count => count + chosen.length)
+    for (const file of chosen) {
+      try {
+        if (file.size > ATTACH_MAX) { setFileNote(t('canvas.fileTooLarge', { name: file.name, max: fileSize(ATTACH_MAX) })); continue }
+        const uploaded = await call('POST uploads', { body: { name: file.name, data: await dataUrl(file) } })
+        const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
+        if (preview) previews.current.push(preview)
+        setFiles(current => [...current, { ...uploaded, ...preview ? { preview } : {} }])
+        setFileNote(undefined); setSent(false)
+      } catch (failure) {
+        setFileNote(t('canvas.attachFailed', { reason: failure instanceof Error ? failure.message : String(failure) }))
+      } finally { setUploading(count => count - 1) }
+    }
+  }
+  const drop = (path: string) => {
+    setFiles(current => {
+      const gone = current.find(file => file.path === path)
+      if (gone?.preview) URL.revokeObjectURL(gone.preview)
+      return current.filter(file => file.path !== path)
+    })
+  }
+  // The blob URLs the previews use are released when the plane goes away.
+  useEffect(() => () => { for (const url of previews.current) URL.revokeObjectURL(url) }, [])
   const send = async () => {
     const text = question.trim()
-    if (!picked) { if (text) notify(t('canvas.pickFirst')); return }
-    if (!text || !(await ask.run(picked, text))) return
-    setQuestion(''); setSelected(undefined); setSent(true)
+    if (!text || ask.busy || say.busy || uploading > 0) return
+    const paths = files.map(file => file.path)
+    const ok = picked ? await ask.run(picked, text, paths) : await say.run(text, paths)
+    if (!ok) return
+    setQuestion(''); setSelected(undefined); setSent(true); setFileNote(undefined); dropFiles()
     notify(t('canvas.sent'))
   }
   const submit = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -300,6 +357,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
                 <span className="dt-canvas-speaker">{t(entry.role === 'operator' ? 'canvas.operator' : 'canvas.master')}
                   <time dateTime={entry.at} title={fullTime(entry.at, t('lang'))}>{when(entry.at, t('lang'))}</time></span>
                 <span className="dt-canvas-clamp">{entry.text}</span>
+                {entry.files?.length ? <span className="dt-canvas-files-line">{t('canvas.filesLine', { count: String(entry.files.length) })}</span> : undefined}
               </li>)}
               {!data?.conversation.length && <li className="dt-canvas-quiet">{t('canvas.noReply')}</li>}
             </ol>
@@ -309,19 +367,43 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
                 {t('canvas.openConversation')}</Button>
             </footer>
           </article>
-          <article className="dt-canvas-card" data-node={COMPOSER} style={place(COMPOSER)} onPointerDown={stop} data-picked={picked ? '1' : undefined}>
+          <article className="dt-canvas-card" data-node={COMPOSER} style={place(COMPOSER)} onPointerDown={stop}
+            data-picked={picked || files.length > 0 || question.trim() ? '1' : undefined}
+            data-drop={dropping ? '1' : undefined}
+            onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDropping(true) } }}
+            onDragLeave={() => setDropping(false)}
+            onDrop={event => { event.preventDefault(); setDropping(false); void attach([...event.dataTransfer.files]) }}>
             <header className="dt-canvas-card-head">
               <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(COMPOSER)}><Icon name="message" size={14} />{t('canvas.composer')}</h3>
             </header>
             <p className="dt-canvas-composer-about" data-none={picked ? undefined : '1'} title={picked?.title}>
               {picked ? t('canvas.composerAbout', { title: picked.title }) : t('canvas.composerNone')}</p>
+            <div className="dt-canvas-composer-row">
+              <Button variant="ghost" size="sm" icon={<Icon name="plus" size={14} />} aria-label={t('canvas.attach')} title={t('canvas.attach')}
+                disabled={!data || uploading > 0} onClick={() => picking.current?.click()}>{t('canvas.attach')}</Button>
+              <input ref={picking} type="file" multiple className="dt-canvas-picker" aria-label={t('canvas.attach')}
+                onChange={event => { const chosen = [...event.target.files ?? []]; event.target.value = ''; void attach(chosen) }} />
+            </div>
             <textarea className="dt-canvas-composer-input" rows={4} value={question} placeholder={t('canvas.placeholder')} aria-label={t('canvas.composer')}
-              onChange={event => { setQuestion(event.target.value); setSent(false) }} onKeyDown={submit} />
-            <p className="dt-canvas-quiet" role="status">{sent ? t('canvas.sent') : t('canvas.composerNote')}</p>
+              onChange={event => { setQuestion(event.target.value); setSent(false) }} onKeyDown={submit}
+              onPaste={event => { const pasted = [...event.clipboardData?.files ?? []]; if (pasted.length > 0) void attach(pasted) }} />
+            {files.length > 0 && <ul className="dt-canvas-files">
+              {files.map(file => <li key={file.path} className="dt-canvas-file">
+                {file.preview ? <img className="dt-canvas-file-preview" src={file.preview} alt="" /> : undefined}
+                <span className="dt-canvas-file-name" title={file.name}>{file.name}</span>
+                <span className="dt-canvas-quiet">{fileSize(file.bytes)}</span>
+                <Button variant="ghost" size="sm" aria-label={t('canvas.removeFile', { name: file.name })} title={t('canvas.removeFile', { name: file.name })}
+                  onClick={() => { drop(file.path); setSent(false) }}><Icon name="close" size={12} /></Button>
+              </li>)}
+            </ul>}
+            {uploading > 0 && <p className="dt-canvas-quiet" role="status">{t('canvas.uploading', { count: String(uploading) })}</p>}
+            {fileNote && <p className="dt-canvas-quiet" role="status">{fileNote}</p>}
+            <p className="dt-canvas-quiet" role="status">{sent ? t('canvas.sent') : picked ? t('canvas.composerNote') : t('canvas.composerNoteBare')}</p>
             <footer className="dt-canvas-card-foot">
               <Button variant="ghost" size="sm" disabled={!data} onClick={openMaster}>
                 {t('canvas.openConversation')}</Button>
-              <Button variant="primary" size="sm" disabled={!picked || !question.trim() || ask.busy} onClick={() => { void send() }}>{t('canvas.send')}</Button>
+              <Button variant="primary" size="sm" disabled={!question.trim() || ask.busy || say.busy || uploading > 0}
+                onClick={() => { void send() }}>{t('canvas.send')}</Button>
             </footer>
           </article>
         </div>
