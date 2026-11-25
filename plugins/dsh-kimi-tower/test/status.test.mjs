@@ -466,31 +466,50 @@ test('a worker whose Host model current is present but unusable costs its own mo
   }
 })
 
-/** A tower with one mission, whose workers are added by the test. */
+/** A tower with one mission and one worker on it; the test adds more. */
 async function makeWorkerTower(title, agentId = 'session-w1') {
   const dir = await makeRepo()
   const store = new TowerStore(dir)
   await store.init('session-main')
   const [mission] = await store.plan([{ title, scope: ['src/receiver/**'], tasks: ['do it'] }])
   const agents = new Map([['session-main', agent('session-main', dir)]])
-  /** Register one more worker for the mission and give it a Host object. */
+  let added = 0
+  /**
+   * Plan one more mission and register a worker as its owner, so the worker
+   * has a card of its own on the dock.
+   */
   const addWorker = async (name, workerAgentId, model) => {
+    added += 1
+    const [own] = await store.plan([{ title: `${title} ${String(added)}`, scope: [`src/${name}/**`], tasks: ['do it'] }])
     await store.registerSpawnedAgent(
       {
         name,
         agentId: workerAgentId,
         sessionId: 'session-main',
         kind: 'worker',
-        missionId: mission.id,
-        worktree: mission.worktree,
-        branch: mission.branch,
+        missionId: own.id,
+        worktree: own.worktree,
+        branch: own.branch,
         spawnedAt: new Date().toISOString(),
       },
-      { id: mission.id, owner: name },
+      { id: own.id, owner: name },
     )
     agents.set(workerAgentId, agent(workerAgentId, dir, { status: 'running', model }))
   }
-  await addWorker('worker-1', agentId, undefined)
+  await store.registerSpawnedAgent(
+    {
+      name: 'worker-1',
+      agentId,
+      sessionId: 'session-main',
+      kind: 'worker',
+      missionId: mission.id,
+      worktree: mission.worktree,
+      branch: mission.branch,
+      spawnedAt: new Date().toISOString(),
+    },
+    { id: mission.id, owner: 'worker-1' },
+  )
+  agents.set(agentId, agent(agentId, dir, { status: 'running', model: undefined }))
   return {
     dir,
     agentId,
@@ -605,19 +624,46 @@ test('a model lookup that throws is reported once per agent and message at warn 
     assert.equal(log.warn[2].includes(message), true)
     assert.deepEqual(log.debug, [])
 
-    // A lookup that does not throw ends the failure too: a model without a
-    // usable current is not a failure, and it also lets the next one through.
-    setWorker(new FakeModel(undefined))
-    assert.equal((await get(ctx, '/tower/state?sessionId=session-main')).status, 200)
+    // A lookup that does not throw ends the failure too. This time `current`
+    // is genuinely not callable, so the lookup returns before ever calling
+    // it: a card without a model name, not an incident, and no line. (A
+    // callable `current` that returns undefined would take the other, the
+    // success branch, and leave this one untested.)
+    setWorker({ current: 'not a function' })
+    const notCallable = await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(notCallable.status, 200)
+    assert.equal('model' in notCallable.json.missions[0], false)
+    assert.equal(log.warn.length, 3, 'a non-callable current is not a failure')
+    // It still ended the earlier failure, so the same message is reported again.
     setWorker(new Failing())
     await get(ctx, '/tower/state?sessionId=session-main')
     assert.equal(log.warn.length, 4)
+    assert.ok(log.warn[3].includes(message))
+    assert.deepEqual(log.debug, [])
+
+    // "Per agent": a second agent failing with the very same message is a
+    // failure of its own and gets a line of its own. De-duplicating on the
+    // message alone would swallow it behind the first agent's line.
+    const secondAgentId = 'session-w2-logged-lookup'
+    await addWorker('worker-2', secondAgentId, new Failing())
+    const twoFailing = await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(twoFailing.json.missions.length, 2)
+    assert.equal(log.warn.length, 5, 'the second agent is reported once')
+    assert.ok(log.warn[4].includes(secondAgentId), 'the line names the second agent')
+    assert.ok(!log.warn[4].includes(agentId), 'and not the first')
+    assert.ok(log.warn[4].includes(message), 'with the same message')
+    // Both agents are looked up again, once on the dock and twice on the
+    // canvas, and neither gets a second line.
+    await get(ctx, '/tower/state?sessionId=session-main')
+    await get(ctx, '/tower/state?sessionId=session-main&detail=1')
+    assert.equal(log.warn.length, 5, 'each agent is de-duplicated on its own')
+    assert.deepEqual(log.debug, [])
 
     // A logger that cannot take the line must not take the snapshot down, on
     // either route. Every shape gets a worker of its own, registered as the
-    // mission's owner, so its lookup is never stopped by de-duplication before
-    // it reaches the logger: the guard is what keeps these green, and removing
-    // it makes them fail.
+    // owner of a mission of its own, so its lookup is never stopped by
+    // de-duplication before it reaches the logger: the guard is what keeps
+    // these green, and removing it makes them fail.
     const shapes = [
       ['null', null],
       ['no methods', {}],
@@ -629,23 +675,28 @@ test('a model lookup that throws is reported once per agent and message at warn 
       const fresh = `session-w1-guard-${String(index)}`
       await addWorker(`worker-guard-${String(index)}`, fresh, new Failing())
       const host = { agents: { get: (id) => agents.get(id) }, logger: broken }
-      // This worker is the mission's current owner, so its card is the one served.
+      // Find this worker's card by its agent id. There are other cards on the
+      // dock by now, and asserting on `missions[0]` would test one of those.
+      const cardOf = (snapshot) => {
+        const card = snapshot.missions.find((candidate) => candidate.agentId === fresh)
+        assert.ok(card !== undefined, `${label}: the fresh worker's card is served`)
+        return card
+      }
       const dock = await get(host, '/tower/state?sessionId=session-main')
       assert.equal(dock.status, 200, `${label}: dock`)
       assert.equal(dock.json.active, true, label)
-      assert.equal(dock.json.missions[0].agentId, fresh, `${label}: the fresh worker's card is served`)
-      assert.equal('model' in dock.json.missions[0], false, label)
+      assert.equal('model' in cardOf(dock.json), false, label)
       const canvas = await get(host, '/tower/state?sessionId=session-main&detail=1')
       assert.equal(canvas.status, 200, `${label}: detail=1`)
       assert.equal(canvas.json.active, true, label)
-      assert.equal('model' in canvas.json.missions[0], false, label)
+      assert.equal('model' in cardOf(canvas.json), false, label)
       // The roster entry of the failing worker is looked up too, and survives.
       const entry = canvas.json.agents.find((candidate) => candidate.agentId === fresh)
       assert.equal(entry.live, true, label)
       assert.equal('model' in entry, false, label)
     }
     // The good logger was not involved in any of that.
-    assert.equal(log.warn.length, 4)
+    assert.equal(log.warn.length, 5)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
