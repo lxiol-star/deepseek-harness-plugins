@@ -30,11 +30,11 @@ beforeEach(() => stored.clear())
 let root: Root | undefined, container: HTMLElement | undefined
 const opened = vi.fn(async (_id: string) => {})
 function unmount() { act(() => { root?.unmount() }); root = undefined; container?.remove() }
-async function mount() {
+async function mount({ intervalMs = 60000 }: { intervalMs?: number } = {}) {
   unmount()
   container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
-  await act(async () => { root!.render(<PanelProvider t={translator(zh)} openSession={opened}><CanvasPage intervalMs={60000} /></PanelProvider>) })
+  await act(async () => { root!.render(<PanelProvider t={translator(zh)} openSession={opened}><CanvasPage intervalMs={intervalMs} /></PanelProvider>) })
   await settle()
 }
 usePanelServer(unmount)
@@ -108,6 +108,35 @@ it('lays the main Session, the tickets and their workers out as cards joined by 
   expect(document.querySelector('.dt-canvas-load')?.textContent).toBe('执行器 1 / 2')
   expect(document.querySelector('.dt-canvas-bar-sum')?.textContent).toBe('需要你处理 1')
   expect(document.querySelector('.dt-canvas-legend')?.textContent).toContain('虚线：勾选的工单 → Composer（提问）')
+})
+
+it('follows the newest answer in the thread, unless the operator has scrolled up to read an older one', async () => {
+  const entry = (minute: number, text: string) => ({ at: `2026-11-24T10:${String(minute).padStart(2, '0')}:00.000Z`, role: 'orchestrator' as const, text })
+  server.tasks = snapshot([task('a')], { conversation: [entry(1, '一'), entry(2, '二')] })
+  await mount({ intervalMs: 40 })
+  const list = document.querySelector<HTMLElement>('.dt-canvas-thread')!
+  // jsdom lays nothing out: give the list a height that overflows, so what is under test is where its scroll position goes.
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 600 })
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 240 })
+  const grow = async (text: string, minute: number) => {
+    server.tasks = snapshot([task('a')], { conversation: [...server.tasks!.conversation, entry(minute, text)] })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 120)) })
+  }
+  // Reading the newest: a new answer takes the list to its end.
+  list.scrollTop = 360
+  await act(async () => { list.dispatchEvent(new Event('scroll')) })
+  await grow('三', 3)
+  expect(list.scrollTop).toBe(600)
+  // Scrolled up to an older answer: the next one does not pull the list away.
+  list.scrollTop = 100
+  await act(async () => { list.dispatchEvent(new Event('scroll')) })
+  await grow('四', 4)
+  expect(list.scrollTop).toBe(100)
+  // Back at the end: it follows again.
+  list.scrollTop = 360
+  await act(async () => { list.dispatchEvent(new Event('scroll')) })
+  await grow('五', 5)
+  expect(list.scrollTop).toBe(600)
 })
 
 it('asks the main Session about the ticked ticket, and only about one', async () => {
@@ -227,6 +256,22 @@ it('joins two cards on the sides that face each other, so a line to a card on th
   const over = edgePath({ x: 0, y: 0, w: 100, h: 40 }, { x: 60, y: 0, w: 10, h: 40 })
   expect(over).toBe('M 100 20 C 100 20, 60 20, 60 20')
   expect(Math.max(...xs(over))).toBe(100)
+})
+
+it('fits the plane into the part of the viewport the legend does not cover', () => {
+  const lanes = [0, 440, 880].map(x => ({ x, y: 0, w: 360, h: 720 }))
+  const free = fitView(lanes, 1000, 800)
+  const under = fitView(lanes, 1000, 800, 48, 168)
+  // The plane's top edge lies below the legend, and its bottom edge inside the viewport.
+  expect(under.y).toBeGreaterThanOrEqual(168)
+  expect((720) * under.scale + under.y).toBeLessThanOrEqual(800 - 48 + 1)
+  // Nothing else changes: the same width fits, so the same scale and the same horizontal place.
+  expect(under.scale).toBeCloseTo(free.scale, 6)
+  expect(under.x).toBeCloseTo(free.x, 6)
+  // With no legend the plane is centered in the whole viewport, as it was.
+  expect(free.y).toBeCloseTo((800 - 720 * free.scale) / 2, 6)
+  // A viewport too short for the legend and the plane falls back to the resting view rather than a negative scale.
+  expect(fitView(lanes, 1000, 200, 48, 168)).toEqual({ x: 24, y: 24, scale: 1 })
 })
 
 it('fits a plane that holds more than the viewport can show at its own size', () => {

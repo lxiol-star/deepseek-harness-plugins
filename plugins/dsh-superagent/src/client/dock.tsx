@@ -34,7 +34,13 @@ export interface DockInput { draft: string; attachmentIds: readonly unknown[]; p
  * slot also provides `useInput`, a selector hook over the live input machine: the snapshot in `input` is fresh on every
  * keystroke or not as the host decides, so the state is read from the hook when the slot has one.
  */
-export interface DockSlotProps { sessionId: string; input?: DockInput; inputActions?: DockInputActions; useInput?: () => DockInput | undefined }
+export interface DockSlotProps { sessionId: string; input?: DockInput; inputActions?: DockInputActions; useInput?: UseInput }
+/**
+ * The slot's `useInput`, a React hook over the live input machine: `useInput(state => state)` in a component's body returns the
+ * state as of this render and renders the component again when it changes. Like any hook it is not callable from an event
+ * handler, and it takes the selector: the built-in input bar reads it as `useInput(s => s)`.
+ */
+export type UseInput = <T>(select: (state: DockInput) => T) => T
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -45,6 +51,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: DockSlotProps }
   }
 }
+
+/** What stands in for the slot's input hook where there is none: it reads nothing, and is called as often as the real one. */
+const NO_INPUT_HOOK = (_select: (state: DockInput) => DockInput): DockInput | undefined => undefined
 
 /**
  * How many cards the dock lists; the rest are counted. The canvas shows every ticket. Declared here and not imported
@@ -122,10 +131,10 @@ export interface TaskDockProps extends DockSlotProps {
 export function TaskDock({ t, sessionId, input, inputActions, useInput, openSession, openPanel, intervalMs = POLL_MS }: TaskDockProps) {
   const copy = useRef(t)
   copy.current = t
-  // The composer's state as it is at this moment: the slot's live hook when it provides one, else the snapshot in its props.
-  const live = useRef<(() => DockInput | undefined) | undefined>(useInput)
-  live.current = useInput
-  const composerNow = (): DockInput | undefined => live.current?.() ?? input
+  // The composer's state as of this render, read the way the built-in input bar reads it: the hook is called here, in the body,
+  // with its selector, and the dock renders again whenever the composer changes. A slot without the hook gets a stand-in that is
+  // called just as often, since the number of hooks a component calls must not change between renders.
+  const composerNow: DockInput | undefined = (useInput ?? NO_INPUT_HOOK)(state => state) ?? input
   const { data, error } = usePoll<TasksView>(() => caller(() => messages(copy.current))('GET tasks'), [], intervalMs)
   const [collapsed, setCollapsed] = useState(() => readCollapsed())
   const [selected, setSelected] = useState<string>()
@@ -152,7 +161,7 @@ export function TaskDock({ t, sessionId, input, inputActions, useInput, openSess
     if (!picked) return
     const text = question.trim()
     if (!text) return
-    const outcome = askThroughComposer(composerNow(), inputActions, taskQuestion(picked.id, picked.title, text))
+    const outcome = askThroughComposer(composerNow, inputActions, taskQuestion(picked.id, picked.title, text))
     if (outcome !== 'sent') { setNotice(t(`dock.${outcome}`)); return }
     setQuestion('')
     setSelected(undefined)
@@ -168,12 +177,12 @@ export function TaskDock({ t, sessionId, input, inputActions, useInput, openSess
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={14} />
         <span className="dt-dock-title">{t('dock.title')}</span>
         <StateDot state={dockDot(shown.tasks)} />
-        <span className="dt-dock-hint">{t('dock.hint')}</span>
         <span className="dt-dock-count">{shown.total}</span>
       </button>
       {!collapsed && <>
         <span className="dt-dock-summary">{counts.map(([count, key]) => <span key={key}>{t(key, { count: String(count) })}</span>)}
           {omitted > 0 && <span>{t('dock.omitted', { count: String(omitted) })}</span>}</span>
+        <span className="dt-dock-hint">{t('dock.hint')}</span>
         <span className="dt-dock-spacer" />
         {shown.paused && <Tag tone="quiet">{t('dock.paused')}</Tag>}
         <Button variant="ghost" size="sm" onClick={openPanel}>{t('dock.openCanvas')}<Icon name="chevron-right" size={12} /></Button>

@@ -1,5 +1,5 @@
 /** DOM rendering and interaction helpers for panel tests. */
-import { act } from 'react'
+import { act, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { expect, vi } from 'vitest'
 import { App } from '../../src/client/app.tsx'
@@ -77,3 +77,20 @@ export function field<E extends HTMLElement>(label: string): E {
   return match as unknown as E
 }
 export const at = (route: object) => sessionStorage.setItem('dsh-superagent/route', JSON.stringify({ route, stack: [] }))
+
+/** The composer state as the dock reads it, in the shape of rc.5's `InputState`. */
+export interface ComposerState { draft: string; attachmentIds: readonly unknown[]; phase: string }
+/**
+ * A stand-in for the slot's `useInput`, made the way the host makes it: a React hook that takes a selector and returns what it
+ * selects from the composer's state. It calls a real hook (`useSyncExternalStore`), so it can only run while a component renders:
+ * called from an event handler it throws React's "Invalid hook call", as the host's does. A plain function in its place would let
+ * that mistake through, which is how a dock that called the hook on a click once shipped without a test noticing.
+ */
+export function composerHook(state: ComposerState | (() => ComposerState)) {
+  const read = () => typeof state === 'function' ? state() : state
+  let last = read()
+  return <T,>(select: (state: ComposerState) => T): T => {
+    useSyncExternalStore(() => () => {}, () => { const now = read(); if (now !== last && JSON.stringify(now) !== JSON.stringify(last)) last = now; return last })
+    return select(last)
+  }
+}

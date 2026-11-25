@@ -4,9 +4,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { TaskView, TasksView } from '../src/client/api.ts'
-import { askThroughComposer, dockDot, readCollapsed, TaskDock, taskProgress, taskQuestion, type DockInput, type DockInputActions } from '../src/client/dock.tsx'
+import { askThroughComposer, dockDot, readCollapsed, TaskDock, taskProgress, taskQuestion, type DockInput, type DockInputActions, type UseInput } from '../src/client/dock.tsx'
 import { zh } from '../src/client/locales.ts'
-import { all, click, settle, translator, type as typeInto } from './fixtures/panel.tsx'
+import { all, click, settle, translator, type as typeInto, composerHook } from './fixtures/panel.tsx'
 import { server, usePanelServer } from './fixtures/panel-server.ts'
 
 const task = (id: string, fields: Partial<TaskView> = {}): TaskView => ({ id, title: `任务 ${id}`, stage: 'working', summary: '',
@@ -28,7 +28,7 @@ beforeEach(() => {
 })
 beforeEach(() => stored.clear())
 
-interface Mount { sessionId?: string; input?: DockInput; inputActions?: DockInputActions; useInput?: () => DockInput | undefined
+interface Mount { sessionId?: string; input?: DockInput; inputActions?: DockInputActions; useInput?: UseInput
   openSession?: (id: string) => Promise<void>; openPanel?: () => void }
 let root: Root | undefined, container: HTMLElement | undefined
 const opened = vi.fn(async (_id: string) => {}), openPanel = vi.fn()
@@ -193,13 +193,13 @@ it('reads the composer as it is when asking, not as it was when the dock rendere
   // The slot's snapshot says the composer is empty; the live hook says the operator is typing.
   const empty: DockInput = { draft: '', attachmentIds: [], phase: 'plain' }
   const typing: DockInput = { draft: '写到一半的话', attachmentIds: [], phase: 'plain' }
-  await mount({ input: empty, inputActions: actions, useInput: () => typing })
+  await mount({ input: empty, inputActions: actions, useInput: composerHook(typing) })
   await ask('a', '到哪一步了？')
   expect(actions.submit).not.toHaveBeenCalled()
   expect(actions.insertText).not.toHaveBeenCalled()
   expect(document.querySelector('.dt-dock-notice')?.textContent).toBe(zh['dock.draftBusy'])
   // The draft is sent: now the live hook agrees with the snapshot, and the question goes.
-  await mount({ input: empty, inputActions: actions, useInput: () => empty })
+  await mount({ input: empty, inputActions: actions, useInput: composerHook(empty) })
   await ask('a', '到哪一步了？')
   expect(actions.submit).toHaveBeenCalledOnce()
   expect(document.querySelector('.dt-dock-notice')).toBeNull()

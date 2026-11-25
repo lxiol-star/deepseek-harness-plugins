@@ -15,6 +15,13 @@ import { StageMark } from './widgets.tsx'
 
 /** A card's place on the plane, in the plane's own pixels. */
 export interface Rect { x: number; y: number; w: number; h: number }
+/** The key the lanes are measured under; a card's key never starts with it. */
+const LANE = 'lane:'
+/** What fitting the plane has to hold: the lanes when they are laid out, else the cards alone. */
+export const frame = (rects: Record<string, Rect>): Rect[] => {
+  const lanes = Object.entries(rects).filter(([id]) => id.startsWith(LANE)).map(([, rect]) => rect)
+  return lanes.length ? lanes : Object.values(rects)
+}
 /** Where the plane sits in its viewport: `x` and `y` are the plane's origin, `scale` how much a plane pixel takes on screen. */
 export interface View { x: number; y: number; scale: number }
 /** How far the operator can zoom out and in. */
@@ -29,13 +36,18 @@ const LANES = ['master', 'tasks', 'workers'] as const
 /** The three cards that are not a ticket: the main Session, the Composer, and the note that no ticket is open. */
 const MASTER = 'master', COMPOSER = 'composer', EMPTY = 'empty'
 
-/** The view that shows every rect with `padding` around it, centered in a viewport of `width` × `height`, never zoomed in past 1. */
-export function fitView(rects: readonly Rect[], width: number, height: number, padding = 48): View {
-  if (!rects.length || width <= padding * 2 || height <= padding * 2) return { x: 24, y: 24, scale: 1 }
+/**
+ * The view that shows every rect with `padding` around it, centered in a viewport of `width` × `height`, never zoomed in past 1.
+ * `reserve` is the height of what covers the top of the viewport (the legend): the rects are fitted into the part below it, so
+ * what the plane holds is never under it.
+ */
+export function fitView(rects: readonly Rect[], width: number, height: number, padding = 48, reserve = 0): View {
+  if (!rects.length || width <= padding * 2 || height - reserve <= padding * 2) return { x: 24, y: 24, scale: 1 }
   const left = Math.min(...rects.map(rect => rect.x)), top = Math.min(...rects.map(rect => rect.y))
   const right = Math.max(...rects.map(rect => rect.x + rect.w)), bottom = Math.max(...rects.map(rect => rect.y + rect.h))
-  const scale = Math.max(MIN_SCALE, Math.min(1, (width - padding * 2) / (right - left), (height - padding * 2) / (bottom - top)))
-  return { scale, x: (width - (right - left) * scale) / 2 - left * scale, y: (height - (bottom - top) * scale) / 2 - top * scale }
+  const room = height - reserve
+  const scale = Math.max(MIN_SCALE, Math.min(1, (width - padding * 2) / (right - left), (room - padding * 2) / (bottom - top)))
+  return { scale, x: (width - (right - left) * scale) / 2 - left * scale, y: reserve + (room - (bottom - top) * scale) / 2 - top * scale }
 }
 /** Zooms by `factor` about the viewport point (`px`, `py`), which stays where it is. */
 export function zoomAbout(view: View, factor: number, px: number, py: number): View {
@@ -89,7 +101,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const [moved, setMoved] = useState(readLayout)
   const [view, setView] = useState<View>({ x: 24, y: 24, scale: 1 })
   const [rects, setRects] = useState<Record<string, Rect>>({})
-  const [size, setSize] = useState({ w: 0, h: 0 })
+  const [size, setSize] = useState({ w: 0, h: 0, top: 0 })
   const viewport = useRef<HTMLDivElement>(null)
   const pan = useRef<{ px: number; py: number; x: number; y: number } | undefined>(undefined)
   const drag = useRef<{ id: string; px: number; py: number; x: number; y: number } | undefined>(undefined)
@@ -106,12 +118,18 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     const measure = () => {
       const box = element.getBoundingClientRect()
       const next: Record<string, Rect> = {}
-      for (const node of element.querySelectorAll<HTMLElement>('[data-node]')) {
+      // The lanes are the plane's frame and the cards what lies in them: an empty lane (no ticket has an Executor yet) still
+      // takes its place, so both are read, and the lanes decide what "fitting the plane" has to hold.
+      for (const node of element.querySelectorAll<HTMLElement>('[data-node], .dt-canvas-lane')) {
         const rect = node.getBoundingClientRect()
-        next[node.dataset.node!] = { x: (rect.left - box.left - view.x) / view.scale, y: (rect.top - box.top - view.y) / view.scale,
+        next[node.dataset.node ?? `lane:${node.querySelector('.dt-canvas-lane-title')?.textContent ?? ''}`] = {
+          x: (rect.left - box.left - view.x) / view.scale, y: (rect.top - box.top - view.y) / view.scale,
           w: rect.width / view.scale, h: rect.height / view.scale }
       }
-      setSize({ w: box.width, h: box.height })
+      // The legend lies over the top left of the viewport: fitting leaves its place free (and a little air below it).
+      const legend = element.querySelector('.dt-canvas-legend')?.getBoundingClientRect()
+      const top = legend && legend.height > 0 ? Math.ceil(legend.bottom - box.top) + 12 : 0
+      setSize(previous => previous.w === box.width && previous.h === box.height && previous.top === top ? previous : { w: box.width, h: box.height, top })
       setRects(previous => same(previous, next) ? previous : next)
     }
     measure()
@@ -126,12 +144,12 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   // The first layout fills the viewport, and so does each later one that brings more cards into it: a plane fitted to the two
   // cards of an empty canvas would leave the tickets and the Executors below the fold once they arrive. Once the operator
   // moves or zooms the plane themselves it stays where they put it.
-  const cards = Object.keys(rects).length
+  const cards = Object.keys(rects).filter(id => !id.startsWith(LANE)).length
   const autoFit = useRef(true)
   useEffect(() => {
     if (!autoFit.current || size.w <= 0 || cards <= fitted.current) return
     fitted.current = cards
-    setView(fitView(Object.values(rects), size.w, size.h))
+    setView(fitView(frame(rects), size.w, size.h, 48, size.top))
   }, [cards, size])
   // Any pan, zoom or drag of the operator's ends the automatic fitting.
   useEffect(() => { if (movedByHand.current && autoFit.current) autoFit.current = false }, [moved, view])
@@ -158,8 +176,25 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   }, [])
 
   const fit = () => { autoFit.current = true; movedByHand.current = false; fitted.current = Object.keys(rects).length
-    setView(fitView(Object.values(rects), size.w, size.h)) }
+    setView(fitView(frame(rects), size.w, size.h, 48, size.top)) }
   const tasks = data?.tasks ?? []
+  const all = data?.conversation ?? []
+  const recent = all.slice(-4).map((entry, index) => ({ entry, place: all.length - Math.min(4, all.length) + index }))
+  // The newest answer is the one the operator asked for: the list follows it as it arrives, unless the operator has scrolled
+  // up to read an older one (then it stays where they are).
+  const thread = useRef<HTMLOListElement>(null)
+  const following = useRef(true)
+  useEffect(() => {
+    const list = thread.current
+    if (!list) return
+    const onScroll = () => { following.current = list.scrollHeight - list.clientHeight - list.scrollTop < 8 }
+    list.addEventListener('scroll', onScroll, { passive: true })
+    return () => list.removeEventListener('scroll', onScroll)
+  }, [])
+  useLayoutEffect(() => {
+    const list = thread.current
+    if (list && following.current) list.scrollTop = list.scrollHeight
+  }, [all.length, all[all.length - 1]?.at])
   const picked = tasks.find(task => task.id === selected)
   const ask = useAction(async (task: TaskView, text: string) => {
     await call('POST tasks/:id/ask', { id: task.id, body: { question: text } })
@@ -228,6 +263,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     if (picked) join('ask', 'ask', `task:${picked.id}`, COMPOSER, 0.7, 0.5, t('canvas.edge.askLabel'))
     return out
   })()
+  const cardsOf = Object.entries(rects).filter(([id]) => !id.startsWith(LANE)) as [string, Rect][]
+  const lanesOf = Object.entries(rects).filter(([id]) => id.startsWith(LANE)) as [string, Rect][]
   const cover = Object.values(rects)
   const mini = cover.length ? fitInto(union(cover, 24), 176, 112) : undefined
   const needs = tasks.find(task => task.stage === 'person')
@@ -250,7 +287,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     <div className="dt-canvas-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
       <section className="dt-canvas-lane" style={{ left: 0, width: LANE_WIDTH }}><h2 className="dt-canvas-lane-title">{t('canvas.lane.master')}</h2>
         <div className="dt-canvas-stack">
-          <article className="dt-canvas-card" data-node={MASTER} style={place(MASTER)} onPointerDown={stop} data-picked={!selected ? '1' : undefined}>
+          <article className="dt-canvas-card" data-node={MASTER} style={place(MASTER)} onPointerDown={stop}>
             <header className="dt-canvas-card-head">
               <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(MASTER)}><Icon name="session" size={14} />{t('canvas.master')}</h3>
               <StateDot state={data?.active ? 'ongoing' : 'idle'} />
@@ -258,8 +295,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
             </header>
             {data && <p className="dt-canvas-meta">{t('canvas.masterLoad', { total: String(data.total), awaiting: String(data.awaiting) })}</p>}
             <h4 className="dt-canvas-subhead">{t('canvas.conversation')}</h4>
-            <ol className="dt-canvas-thread" data-scroll>
-              {(data?.conversation ?? []).slice(-4).map((entry, index) => <li key={`${entry.at}:${index}`} data-role={entry.role}>
+            <ol ref={thread} className="dt-canvas-thread" data-scroll>
+              {recent.map(({ entry, place }) => <li key={`${entry.at}:${place}`} data-role={entry.role}>
                 <span className="dt-canvas-speaker">{t(entry.role === 'operator' ? 'canvas.operator' : 'canvas.master')}
                   <time dateTime={entry.at} title={fullTime(entry.at, t('lang'))}>{when(entry.at, t('lang'))}</time></span>
                 <span className="dt-canvas-clamp">{entry.text}</span>
@@ -372,8 +409,10 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
         setView({ scale: view.scale, x: size.w / 2 - ((event.clientX - box.left - mini.x) / mini.scale + inside.x) * view.scale,
           y: size.h / 2 - ((event.clientY - box.top - mini.y) / mini.scale + inside.y) * view.scale })
       }}>
-      {cover.map((rect, index) => { const id = Object.keys(rects)[index]!; return <span key={id} className="dt-canvas-mini-node" data-picked={id === `task:${selected}` || id === COMPOSER ? '1' : undefined}
-        style={{ left: rect.x * mini.scale + mini.x, top: rect.y * mini.scale + mini.y, width: rect.w * mini.scale, height: rect.h * mini.scale }} /> })}
+      {lanesOf.map(([id, rect]) => <span key={id} className="dt-canvas-mini-lane"
+        style={{ left: rect.x * mini.scale + mini.x, top: rect.y * mini.scale + mini.y, width: rect.w * mini.scale, height: rect.h * mini.scale }} />)}
+      {cardsOf.map(([id, rect]) => <span key={id} className="dt-canvas-mini-node" data-picked={id === `task:${selected}` ? '1' : undefined}
+        style={{ left: rect.x * mini.scale + mini.x, top: rect.y * mini.scale + mini.y, width: rect.w * mini.scale, height: rect.h * mini.scale }} />)}
       <span className="dt-canvas-mini-view" style={{ left: (-view.x / view.scale) * mini.scale + mini.x, top: (-view.y / view.scale) * mini.scale + mini.y,
         width: (size.w / view.scale) * mini.scale, height: (size.h / view.scale) * mini.scale }} />
     </div>}

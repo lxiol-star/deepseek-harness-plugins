@@ -17,6 +17,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
+import { composerHook } from './fixtures/panel.tsx'
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -173,7 +174,7 @@ it('ships a task canvas and a composer dock that load from the installed bundle 
   // typing is never written over, and nothing is sent when the composer cannot be read at all.
   const submits = { count: 0 }
   const dockActions = { captureInsertion: () => 'span', insertText: () => true, submit: () => { submits.count++ } }
-  const askOn = async (composer: { useInput?: () => DockInput | undefined; input?: DockInput } | undefined) => {
+  const askOn = async (composer: { useInput?: ReturnType<typeof composerHook>; input?: DockInput } | undefined) => {
     const view = await mount(slots.get('conversation.input.dock#dsh-superagent')!.component, { ctx, t, sessionId: MASTER,
       inputActions: dockActions, ...composer?.input ? { input: composer.input } : {}, ...composer?.useInput ? { useInput: composer.useInput } : {} })
     const bar = view.container
@@ -186,12 +187,12 @@ it('ships a task canvas and a composer dock that load from the installed bundle 
   }
   const empty: DockInput = { draft: '', attachmentIds: [], phase: 'plain' }
   // The snapshot says empty, the live hook says the operator is typing: the live state wins.
-  expect(await askOn({ input: empty, useInput: () => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })).toBe(zh['dock.draftBusy'])
+  expect(await askOn({ input: empty, useInput: composerHook({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })).toBe(zh['dock.draftBusy'])
   // No live hook and no snapshot: the composer cannot be read, so nothing is sent.
   expect(await askOn(undefined)).toBe(zh['dock.unknown'])
   expect(submits.count).toBe(0)
   // Both agree the composer is empty: the question goes.
-  expect(await askOn({ input: empty, useInput: () => empty })).toBeUndefined()
+  expect(await askOn({ input: empty, useInput: composerHook(empty) })).toBeUndefined()
   expect(submits.count).toBe(1)
 
   // The stylesheet the bundle injects holds no raw color in the canvas and dock rules.

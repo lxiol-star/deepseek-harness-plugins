@@ -6,6 +6,7 @@ import { ApiError, caller, usePoll } from '../src/client/api.ts'
 import { apply } from '../src/client/index.tsx'
 import { zh } from '../src/client/locales.ts'
 import { SettingsSchema } from '../src/policy.ts'
+import { composerHook } from './fixtures/panel.tsx'
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -94,7 +95,7 @@ it('hands the dock entry every composer prop the slot passes, so a live draft is
   const submit = vi.fn(), insertText = vi.fn(() => true)
   // The slot's snapshot says the composer is empty; the live hook says the operator is typing.
   const view = await render(entries[4]!, { t, ctx, sessionId: 'master', input: { draft: '', attachmentIds: [], phase: 'plain' },
-    inputActions: { captureInsertion: () => 'span', insertText, submit }, useInput: () => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })
+    inputActions: { captureInsertion: () => 'span', insertText, submit }, useInput: composerHook({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })
   await act(async () => { view.container.querySelector<HTMLInputElement>('.dt-dock-check')!.click() })
   const field = view.container.querySelector<HTMLInputElement>('.dt-dock-question input')!
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
