@@ -317,7 +317,7 @@ test('a worker whose Host model has no callable current() costs its own model na
       ['session-main', agent('session-main', dir)],
       ['session-w1', agent('session-w1', dir, {
         status: 'running',
-        model: { current: () => ({ model: 'healthy-model', reasoningEffort: 'high' }) },
+        model: new FakeModel({ model: 'healthy-model', reasoningEffort: 'high' }),
       })],
     ])
 
@@ -394,9 +394,11 @@ test('a worker whose Host model current is present but unusable costs its own mo
     const warnings = []
     const agents = new Map([
       ['session-main', agent('session-main', dir)],
+      // The healthy neighbour is a class model too, so both cards go through
+      // a `current` that reads `this`.
       ['session-w1', agent('session-w1', dir, {
         status: 'running',
-        model: { current: () => ({ model: 'healthy-model', reasoningEffort: 'high' }) },
+        model: new FakeModel({ model: 'healthy-model', reasoningEffort: 'high' }),
       })],
     ])
     const ctx = { agents: { get: (id) => agents.get(id) }, logger: { warn: (...args) => warnings.push(args) } }
@@ -405,13 +407,13 @@ test('a worker whose Host model current is present but unusable costs its own mo
     // optional call `current?.()` still tries to call a value that is present.
     // This is the hardening, and it fails against the baseline bundle.
     const throws = () => { throw new Error('model selection unavailable') }
-    for (const [label, model] of [
-      ['current is a string', { current: 'glm-test' }],
-      ['current is a number', { current: 42 }],
-      ['current is an object', { current: {} }],
-      ['current throws', { current: throws }],
-      ['current returns nothing', { current: () => undefined }],
-      ['current returns null', { current: () => null }],
+    for (const [label, model, reports] of [
+      ['current is a string', { current: 'glm-test' }, false],
+      ['current is a number', { current: 42 }, false],
+      ['current is an object', { current: {} }, false],
+      ['current throws', { current: throws }, true],
+      ['current returns nothing', { current: () => undefined }, false],
+      ['current returns null', { current: () => null }, false],
     ]) {
       agents.set('session-w2', agent('session-w2', dir, { status: 'running', model }))
       const dock = await get(ctx, '/tower/state?sessionId=session-main')
@@ -445,38 +447,55 @@ test('a worker whose Host model current is present but unusable costs its own mo
       assert.equal('effort' in canvas.json.agents[1], false, label)
       assert.equal(canvas.json.agents[0].model, 'healthy-model', label)
       assert.equal(canvas.json.agents[0].effort, 'high', label)
+
+      // Only a lookup that actually threw is a failure worth a warning. A
+      // `current` that is missing or not a function is a card without a model
+      // name, not an incident, and stays silent. Two requests looked the
+      // throwing model up three times; that is still one warning.
+      const expected = reports ? 1 : 0
+      assert.equal(warnings.length, expected, `${label}: warnings`)
+      if (reports) {
+        assert.match(warnings[0][0], /^dsh-kimi-tower: model selection unavailable$/)
+        assert.ok(warnings[0].includes('session-w2'), `${label}: the agent id is in the line`)
+        assert.ok(warnings[0].includes('model selection unavailable'), `${label}: the reason is in the line`)
+      }
+      warnings.length = 0
     }
-    // A broken model on one agent is not an error worth a warning either.
-    assert.deepEqual(warnings, [])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-/** A tower with one worker, whose Host object is set by the test. */
+/** A tower with one mission, whose workers are added by the test. */
 async function makeWorkerTower(title, agentId = 'session-w1') {
   const dir = await makeRepo()
   const store = new TowerStore(dir)
   await store.init('session-main')
   const [mission] = await store.plan([{ title, scope: ['src/receiver/**'], tasks: ['do it'] }])
-  await store.registerSpawnedAgent(
-    {
-      name: 'worker-1',
-      agentId,
-      sessionId: 'session-main',
-      kind: 'worker',
-      missionId: mission.id,
-      worktree: mission.worktree,
-      branch: mission.branch,
-      spawnedAt: new Date().toISOString(),
-    },
-    { id: mission.id, owner: 'worker-1' },
-  )
   const agents = new Map([['session-main', agent('session-main', dir)]])
+  /** Register one more worker for the mission and give it a Host object. */
+  const addWorker = async (name, workerAgentId, model) => {
+    await store.registerSpawnedAgent(
+      {
+        name,
+        agentId: workerAgentId,
+        sessionId: 'session-main',
+        kind: 'worker',
+        missionId: mission.id,
+        worktree: mission.worktree,
+        branch: mission.branch,
+        spawnedAt: new Date().toISOString(),
+      },
+      { id: mission.id, owner: name },
+    )
+    agents.set(workerAgentId, agent(workerAgentId, dir, { status: 'running', model }))
+  }
+  await addWorker('worker-1', agentId, undefined)
   return {
     dir,
     agentId,
     agents,
+    addWorker,
     setWorker(model) {
       agents.set(agentId, agent(agentId, dir, { status: 'running', model }))
     },
@@ -534,10 +553,10 @@ test('current is called as a method of its model, so a model whose current reads
   }
 })
 
-test('a model lookup that throws is reported once per agent and message at debug level, never as a warning', async () => {
-  // Throttling is kept per agent across requests, so this test uses an agent
-  // id and messages of its own and cannot be confused with another test.
-  const { dir, agents, agentId, setWorker } = await makeWorkerTower('M1 logged lookup', 'session-w1-logged-lookup')
+test('a model lookup that throws is reported once per agent and message at warn level, again after a recovery', async () => {
+  // De-duplication is kept per agent across requests, so this test uses agent
+  // ids and messages of its own and cannot be confused with another test.
+  const { dir, agents, agentId, addWorker, setWorker } = await makeWorkerTower('M1 logged lookup', 'session-w1-logged-lookup')
   const { log, logger } = makeLogger()
   const ctx = { agents: { get: (id) => agents.get(id) }, logger }
   try {
@@ -550,40 +569,83 @@ test('a model lookup that throws is reported once per agent and message at debug
     setWorker(new Failing())
 
     // The dock polls and the canvas looks a card and a roster entry up: all of
-    // that is one line, carrying the agent and the reason.
+    // that is one warning, carrying the agent and the reason.
     await get(ctx, '/tower/state?sessionId=session-main')
     await get(ctx, '/tower/state?sessionId=session-main')
     await get(ctx, '/tower/state?sessionId=session-main&detail=1')
     await get(ctx, '/tower/state?sessionId=session-main&detail=1')
-    assert.equal(log.debug.length, 1)
-    assert.match(log.debug[0].join(' '), /model selection unavailable/)
-    assert.ok(log.debug[0].includes(agentId), 'the agent id is in the line')
-    assert.ok(log.debug[0].includes(message), 'the error message is in the line')
-    assert.deepEqual(log.warn, [])
+    assert.equal(log.warn.length, 1, 'one warning for four requests')
+    assert.match(log.warn[0][0], /^dsh-kimi-tower: .*model selection unavailable$/)
+    assert.ok(log.warn[0].includes(agentId), 'the agent id is in the line')
+    assert.ok(log.warn[0].includes(message), 'the error message is in the line')
+    assert.deepEqual(log.debug, [])
 
     // A different failure for the same agent is a new fact and is reported.
     message = 'selection backend returned garbage'
     setWorker(new Failing())
     await get(ctx, '/tower/state?sessionId=session-main')
     await get(ctx, '/tower/state?sessionId=session-main')
-    assert.equal(log.debug.length, 2)
-    assert.ok(log.debug[1].includes(message))
-    assert.deepEqual(log.warn, [])
+    assert.equal(log.warn.length, 2)
+    assert.ok(log.warn[1].includes(message))
+    assert.deepEqual(log.debug, [])
 
-    // Once the model works again nothing else is logged.
+    // Once the model works again nothing else is reported.
     setWorker(new FakeModel({ model: 'recovered' }))
     const recovered = await get(ctx, '/tower/state?sessionId=session-main')
     assert.equal(recovered.json.missions[0].model, 'recovered')
-    assert.equal(log.debug.length, 2)
+    assert.equal(log.warn.length, 2)
 
-    // A logger that cannot take the line must not take the snapshot down.
+    // The recovery ended the earlier failure, so the very same message is a new
+    // incident and is reported again, once.
     setWorker(new Failing())
-    for (const broken of [undefined, {}, { debug: 'not a function' }, { debug() { throw new Error('sink closed') } }]) {
-      const status = await get({ agents: ctx.agents, logger: broken }, '/tower/state?sessionId=session-main')
-      assert.equal(status.status, 200, `logger ${JSON.stringify(broken)}`)
-      assert.equal(status.json.active, true)
-      assert.equal('model' in status.json.missions[0], false)
+    await get(ctx, '/tower/state?sessionId=session-main')
+    await get(ctx, '/tower/state?sessionId=session-main&detail=1')
+    await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(log.warn.length, 3)
+    assert.equal(log.warn[2].includes(message), true)
+    assert.deepEqual(log.debug, [])
+
+    // A lookup that does not throw ends the failure too: a model without a
+    // usable current is not a failure, and it also lets the next one through.
+    setWorker(new FakeModel(undefined))
+    assert.equal((await get(ctx, '/tower/state?sessionId=session-main')).status, 200)
+    setWorker(new Failing())
+    await get(ctx, '/tower/state?sessionId=session-main')
+    assert.equal(log.warn.length, 4)
+
+    // A logger that cannot take the line must not take the snapshot down, on
+    // either route. Every shape gets a worker of its own, registered as the
+    // mission's owner, so its lookup is never stopped by de-duplication before
+    // it reaches the logger: the guard is what keeps these green, and removing
+    // it makes them fail.
+    const shapes = [
+      ['null', null],
+      ['no methods', {}],
+      ['warn missing', { info() {} }],
+      ['warn not a function', { warn: 'not a function' }],
+      ['warn throws', { warn() { throw new Error('sink closed') } }],
+    ]
+    for (const [index, [label, broken]] of shapes.entries()) {
+      const fresh = `session-w1-guard-${String(index)}`
+      await addWorker(`worker-guard-${String(index)}`, fresh, new Failing())
+      const host = { agents: { get: (id) => agents.get(id) }, logger: broken }
+      // This worker is the mission's current owner, so its card is the one served.
+      const dock = await get(host, '/tower/state?sessionId=session-main')
+      assert.equal(dock.status, 200, `${label}: dock`)
+      assert.equal(dock.json.active, true, label)
+      assert.equal(dock.json.missions[0].agentId, fresh, `${label}: the fresh worker's card is served`)
+      assert.equal('model' in dock.json.missions[0], false, label)
+      const canvas = await get(host, '/tower/state?sessionId=session-main&detail=1')
+      assert.equal(canvas.status, 200, `${label}: detail=1`)
+      assert.equal(canvas.json.active, true, label)
+      assert.equal('model' in canvas.json.missions[0], false, label)
+      // The roster entry of the failing worker is looked up too, and survives.
+      const entry = canvas.json.agents.find((candidate) => candidate.agentId === fresh)
+      assert.equal(entry.live, true, label)
+      assert.equal('model' in entry, false, label)
     }
+    // The good logger was not involved in any of that.
+    assert.equal(log.warn.length, 4)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

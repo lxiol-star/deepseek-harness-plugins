@@ -51,7 +51,7 @@ export const INACTIVE_SNAPSHOT: TowerSnapshot = { active: false, running: 0, mis
 export interface SnapshotContext {
   readonly agents: { get(id: string): Agent | undefined }
   /** Where a failed model lookup is reported; absent in tests that do not care. */
-  readonly logger?: { debug?(...args: unknown[]): void }
+  readonly logger?: { warn?(...args: unknown[]): void } | null
 }
 
 /** A tower state bound to one session, ready to be projected without writing. */
@@ -89,10 +89,20 @@ export interface ModelSelection {
 }
 
 /**
- * The last failure logged for an agent, by agent id. The dock polls once a
- * second and the canvas every few, so one broken model would otherwise write
- * the same line on every request; a failure is logged again only when its
- * message changes, so a new problem is never hidden by an old one.
+ * The last failure reported for an agent, by agent id.
+ *
+ * The dock polls once a second and the canvas every few, and one canvas
+ * snapshot looks the same agent up twice, so a broken model would otherwise
+ * write the same line on every request. A failure is reported again only when
+ * its message differs from the last one reported for that agent.
+ *
+ * De-duplication is keyed on the *call*: once `warn` has been invoked for a
+ * message, that message counts as reported, whether or not the Host's log
+ * level lets the line through. The level is `warn` because the Host filters
+ * `debug` by default, and a failure that is de-duplicated before it is
+ * filtered would then never be visible at all. The entry is dropped as soon
+ * as a lookup for that agent ends without throwing, so "fails, recovers,
+ * fails again the same way" reports twice.
  */
 const reportedModelFailures = new Map<string, string>()
 
@@ -111,28 +121,44 @@ const reportedModelFailures = new Map<string, string>()
 export function modelSelection(ctx: SnapshotContext, agentId: string): ModelSelection | undefined {
   const model = ctx.agents.get(agentId)?.model
   const current = model?.current
-  if (typeof current !== 'function') return undefined
+  if (typeof current !== 'function') {
+    forgetModelFailure(agentId)
+    return undefined
+  }
   try {
-    return current.call(model) ?? undefined
+    const selection = current.call(model) ?? undefined
+    forgetModelFailure(agentId)
+    return selection
   } catch (error) {
     reportModelFailure(ctx, agentId, error)
     return undefined
   }
 }
 
-/** Log a failed model lookup once per agent and message, at debug level. */
+/** A lookup that did not throw ends the current failure for that agent. */
+function forgetModelFailure(agentId: string): void {
+  reportedModelFailures.delete(agentId)
+}
+
+/**
+ * Report a failed model lookup, once per agent and message, at warn level.
+ *
+ * Reporting must never be the thing that fails the snapshot, so every shape
+ * the Host might hand over is tolerated: no logger, a null logger, a `warn`
+ * that is missing or not a function, or one that throws.
+ */
 function reportModelFailure(ctx: SnapshotContext, agentId: string, error: unknown): void {
   const logger = ctx.logger
-  if (logger === undefined) return
+  if (logger == null) return
   const message = error instanceof Error ? error.message : String(error)
   if (reportedModelFailures.get(agentId) === message) return
   reportedModelFailures.set(agentId, message)
-  const debug = logger.debug
-  if (typeof debug !== 'function') return
+  const warn = logger.warn
+  if (typeof warn !== 'function') return
   try {
-    debug.call(logger, 'dsh-kimi-tower: model selection unavailable', agentId, message)
+    warn.call(logger, 'dsh-kimi-tower: model selection unavailable', agentId, message)
   } catch {
-    // Reporting must never be the thing that fails the snapshot.
+    // A closed sink is not worth a second report.
   }
 }
 

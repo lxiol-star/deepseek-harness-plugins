@@ -7001,24 +7001,32 @@ var reportedModelFailures = /* @__PURE__ */ new Map();
 function modelSelection(ctx, agentId) {
   const model = ctx.agents.get(agentId)?.model;
   const current = model?.current;
-  if (typeof current !== "function") return void 0;
+  if (typeof current !== "function") {
+    forgetModelFailure(agentId);
+    return void 0;
+  }
   try {
-    return current.call(model) ?? void 0;
+    const selection = current.call(model) ?? void 0;
+    forgetModelFailure(agentId);
+    return selection;
   } catch (error) {
     reportModelFailure(ctx, agentId, error);
     return void 0;
   }
 }
+function forgetModelFailure(agentId) {
+  reportedModelFailures.delete(agentId);
+}
 function reportModelFailure(ctx, agentId, error) {
   const logger = ctx.logger;
-  if (logger === void 0) return;
+  if (logger == null) return;
   const message = error instanceof Error ? error.message : String(error);
   if (reportedModelFailures.get(agentId) === message) return;
   reportedModelFailures.set(agentId, message);
-  const debug = logger.debug;
-  if (typeof debug !== "function") return;
+  const warn = logger.warn;
+  if (typeof warn !== "function") return;
   try {
-    debug.call(logger, "dsh-kimi-tower: model selection unavailable", agentId, message);
+    warn.call(logger, "dsh-kimi-tower: model selection unavailable", agentId, message);
   } catch {
   }
 }
