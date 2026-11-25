@@ -66,7 +66,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-kimi-tower
 - **右侧面板**：选中任务或 Agent 后显示清单、范围、依赖、阻塞、备注、最近评审、
   用户原话；点消息线看该对端点的消息。三个只读列表：消息流、评审历史、活动日志。
 - **模型与推理档**：Agent 卡片、详情面板、详情密度的任务头、dock 卡片都会显示
-  Host 实时 `AgentModel` 的 `模型 · 推理档`（0.1.2 起按接收者调用 `current()`，
+  Host 实时 `AgentModel` 的 `模型 · 推理档`（0.1.2-beta.1 起按接收者调用 `current()`，
   真实 DSH 实例里不再丢失）。
 - **会话跳转**：点 Agent 卡片上的「打开会话」（或双击卡片）切到该 Agent 的会话，
   画布同时关闭。
@@ -78,7 +78,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-kimi-tower
 
 > 路由定义里的 `auth: 'required'` 在 `dsh web` 的插件路由上并不生效：无页面 token
 > 的本机 curl 也能拿到只读元数据（应用壳本身仍然 401）。数据是本机可读的只读元数据
-> （无消息正文、无 CORS 头），不要把它当安全边界；0.1.2 验证时已作为 finding 上报。
+> （无消息正文、无 CORS 头），不要把它当安全边界；0.1.2-beta.1 验证时已作为 finding 上报。
 
 ## 限制
 
@@ -93,7 +93,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-kimi-tower
 npm install
 npm run build      # Host 侧 lib/index.js + 浏览器侧 lib/client.js
 npm test           # 协议 + 集成 + dock/画布 + 契约测试
-npm run check      # typecheck + test（0.1.2 时 120 个测试全绿）
+npm run check      # typecheck + test（0.1.2-beta.1 时 120 个测试全绿）
 ```
 
 `test/canvas-contract.test.mjs` 是从合成塔台仓库到真实 `detail=1` 路由、再到真实

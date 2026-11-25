@@ -95,7 +95,8 @@ Run on macOS with the installed DSH `0.2.2-rc.5`:
   the Host → client contract test (`test/canvas-contract.test.mjs`: synthetic
   tower repository → real `detail=1` route → real `layoutCanvas`, with the
   fields the browser reads asserted by value), and packaging.
-- 0.1.2 real-instance check: a separate `dsh web` 0.2.2-rc.5 instance on a
+- 0.1.2-beta.1 real-instance check (this is the prerelease; 0.1.2 final is not
+  published yet): a separate `dsh web` 0.2.2-rc.5 instance on a
   temporary DSH home, a temporary git repository, and a synthetic fleet
   (running / offline / blocked / paused / merged / abandoned, dependencies, a
   dead worker, review history, inbox traffic, a finding, and a real live Host
@@ -205,7 +206,7 @@ shell and in a browser tab served by the same Host.
 > the route answers without the page token (the app shell itself still returns
 > 401 without it). The payload is read-only metadata with no message bodies and
 > no CORS headers, so it is same-machine information rather than a remote
-> surface — do not treat the flag as a security boundary. The 0.1.2
+> surface — do not treat the flag as a security boundary. The 0.1.2-beta.1
 > verification filed this as a finding.
 
 Verified in the Dev2 desktop app: two real survey workers rendered as
