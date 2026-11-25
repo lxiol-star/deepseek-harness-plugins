@@ -173,9 +173,9 @@ it('ships a task canvas and a composer dock that load from the installed bundle 
   // typing is never written over, and nothing is sent when the composer cannot be read at all.
   const submits = { count: 0 }
   const dockActions = { captureInsertion: () => 'span', insertText: () => true, submit: () => { submits.count++ } }
-  const askOn = async (live: (() => DockInput | undefined) | undefined) => {
+  const askOn = async (composer: { useInput?: () => DockInput | undefined; input?: DockInput } | undefined) => {
     const view = await mount(slots.get('conversation.input.dock#dsh-superagent')!.component, { ctx, t, sessionId: MASTER,
-      input: { draft: '', attachmentIds: [], phase: 'plain' }, inputActions: dockActions, ...live ? { useInput: live } : {} })
+      inputActions: dockActions, ...composer?.input ? { input: composer.input } : {}, ...composer?.useInput ? { useInput: composer.useInput } : {} })
     const bar = view.container
     await act(async () => { bar.querySelector<HTMLInputElement>('.dt-dock-check')!.click() }); await settle()
     const field = bar.querySelector<HTMLInputElement>('.dt-dock-question input')!
@@ -184,10 +184,14 @@ it('ships a task canvas and a composer dock that load from the installed bundle 
     await act(async () => { [...bar.querySelectorAll('button')].find(button => button.textContent?.trim() === '提问')!.click() }); await settle()
     return bar.querySelector('.dt-dock-notice')?.textContent
   }
-  expect(await askOn(() => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }))).toBe(zh['dock.draftBusy'])
+  const empty: DockInput = { draft: '', attachmentIds: [], phase: 'plain' }
+  // The snapshot says empty, the live hook says the operator is typing: the live state wins.
+  expect(await askOn({ input: empty, useInput: () => ({ draft: '写到一半', attachmentIds: [], phase: 'plain' }) })).toBe(zh['dock.draftBusy'])
+  // No live hook and no snapshot: the composer cannot be read, so nothing is sent.
   expect(await askOn(undefined)).toBe(zh['dock.unknown'])
   expect(submits.count).toBe(0)
-  expect(await askOn(() => ({ draft: '', attachmentIds: [], phase: 'plain' }))).toBeUndefined()
+  // Both agree the composer is empty: the question goes.
+  expect(await askOn({ input: empty, useInput: () => empty })).toBeUndefined()
   expect(submits.count).toBe(1)
 
   // The stylesheet the bundle injects holds no raw color in the canvas and dock rules.
