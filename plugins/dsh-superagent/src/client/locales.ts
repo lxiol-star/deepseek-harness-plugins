@@ -359,6 +359,11 @@ const TEXT = {
   // Task dock above the main Session's composer, and the task canvas
   'dock.title': ['Superagent 任务', 'Superagent tasks'],
   'dock.running': ['{count} 个执行中', '{count} working'],
+  'canvas.otherChildren': ['其他子会话 · {total}', 'Other child Sessions · {total}'],
+  'canvas.child': ['子会话', 'Child Session'],
+  'canvas.childOrigin.subagent': ['子 agent', 'subagent'],
+  'canvas.childOrigin.other': ['协作方', 'collaborator'],
+  'canvas.noChildTitle': ['未命名子会话', 'Untitled child'],
   'dock.toolNow': ['正在{tool}', '{tool}'],
   'canvas.toolNow': ['正在{tool}', '{tool}'],
   'tool.read': ['读文件', 'reading a file'],

@@ -1579,6 +1579,19 @@ it('reads the main Session\'s preset from a registry with or without presetForSe
   expect(main(watch)).toMatch(/^This shell waits up to 60 seconds by default/)
 })
 
+it('lets a worker drive the tower protocol in its own workspace, and still none of the waiting tools', async () => {
+  const { sessionId } = await acceptedTicket()
+  const guard = guards.get(sessionId)!
+  const call = (name: string) => guard({ name, arguments: {} })
+  // Tower mode is a main agent's mode, and a worker is the main agent of its own workspace: the protocol is allowed there.
+  expect(call('tower_activate')).toBeUndefined()
+  expect(call('tower_init')).toBeUndefined()
+  expect(call('tower_status')).toBeUndefined()
+  // The work allow-list did not become "anything the Host registers".
+  expect(call('wait_agent')).toContain('works with its ticket\'s tools only')
+  expect(call('experience_list')).toContain('works with its ticket\'s tools only')
+})
+
 it('refuses an ended ticket\'s worker its tools, and restricts the main Session to the tools it may use', async () => {
   const { ticket, sessionId } = await acceptedTicket()
   expect(guards.get(sessionId)!()).toBeUndefined()
@@ -1754,6 +1767,29 @@ it('gives a subagent of a worker only the worker\'s work tools, and none once th
   other.session.header = { parentSession: 'someone-else' }
   await (runtime as unknown as { ctx: Context }).ctx.parallel('agent/created', { agent: other } as never)
   expect(restricts.get('child-2')).toBeUndefined()
+})
+
+it('reports the child Sessions the main Session started itself, and only those', async () => {
+  // Two children of the main Session and one of somebody else, as DSH stamps them in the session header.
+  for (const id of ['child-a', 'child-b', 'child-x']) {
+    await (controller.create as (options: { sessionId: string }) => Promise<void>)({ sessionId: id })
+  }
+  const stamp = async (id: string, header: { parentSession?: string; title?: string; origin?: string }, status?: string) => {
+    const agent = agents.get(id) as unknown as { session: { header: unknown }; status?: string }
+    agent.session.header = { id, cwd: '/tmp', ...header }
+    if (status !== undefined) agent.status = status
+    await (runtime as unknown as { ctx: Context }).ctx.parallel('agent/created', { agent } as never)
+  }
+  await stamp('child-a', { parentSession: runtime.masterId, title: '读者', origin: 'subagent' }, 'running')
+  await stamp('child-b', { parentSession: runtime.masterId })
+  await stamp('child-x', { parentSession: 'someone-else', title: '别人家的' })
+  expect(runtime.sessions.children()).toEqual([
+    { id: 'child-a', title: '读者', origin: 'subagent', live: true },
+    { id: 'child-b', live: false },
+  ])
+  // A ticket's own executor is not a child of the main Session, so a running ticket adds nothing here.
+  const { sessionId } = await acceptedTicket()
+  expect(runtime.sessions.children().map(child => child.id)).not.toContain(sessionId)
 })
 
 it('gives a subagent of a worker\'s subagent the same work tools and guard', async () => {

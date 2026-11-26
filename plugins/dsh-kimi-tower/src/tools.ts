@@ -68,18 +68,44 @@ function array(items: Record<string, unknown>, description: string): Record<stri
 const MISSION_STATUSES = ['planned', 'active', 'completed', 'blocked', 'paused', 'merged', 'abandoned'] as const
 
 /** Register all tower tools. */
-export function registerTowerTools(ctx: Context, runtime: TowerRuntime): void {
+export function registerTowerTools(ctx: Context, runtime: TowerRuntime, options: { agentCanEnable?: boolean } = {}): void {
   const register = (definition: ToolDefinition, when: (context: { agent: Agent }) => boolean): void => {
     ctx.effect(() => ctx.tools.register(definition, { when }), `dsh-kimi-tower:${definition.name}`)
   }
 
   const mainOnly = ({ agent }: { agent: Agent }): boolean => runtime.isActive(agent)
+  /** Offered only while tower is off: once it is on, `tower_init` and the rest of the protocol take over. */
+  const activatable = ({ agent }: { agent: Agent }): boolean =>
+    options.agentCanEnable === true && isMainAgent(agent) && !runtime.isActive(agent)
   const shared = ({ agent }: { agent: Agent }): boolean => runtime.toolVisible(agent, 'tower_send')
   const completeOnly = ({ agent }: { agent: Agent }): boolean => runtime.childOf(agent)?.kind === 'worker'
   const reviewOnly = ({ agent }: { agent: Agent }): boolean => {
     const binding = runtime.childOf(agent)
     return binding?.kind === 'reviewer' || (isMainAgent(agent) && runtime.isActive(agent))
   }
+
+  register({
+    name: 'tower_activate',
+    description: 'Enter tower mode in this Session\'s own workspace without waiting for a person to run /tower on. Only the main '
+      + 'agent of a workspace may call it, and only where the workspace owner allows it. On success tower mode is active and the '
+      + 'rest of the protocol (tower_init, tower_plan, ...) becomes available; prefer tower_init afterwards if the workspace is fresh.',
+    parameters: objectSchema({ base: string('Local branch that missions fork from and merge back into, as tower_init takes it.') }),
+    output: TEXT_OUTPUT,
+    execute: (args, exec) => runTool(ctx, exec, async () => {
+      const agent = exec.agent as Agent | undefined
+      if (agent === undefined || !isMainAgent(agent)) {
+        throw new TowerProtocolError('tower mode is entered by the main agent of a workspace, which this Session is not')
+      }
+      if (runtime.isActive(agent)) return { text: 'Tower mode is already active in this workspace.' }
+      const base = typeof args.base === 'string' && args.base.length > 0 ? args.base : undefined
+      const result = await runtime.activate(agent, base)
+      return { text: [
+        `Tower mode: ON (base ${result.base}, checkout ${result.checkout})`,
+        result.created ? 'Created .tower/ in this workspace.' : 'Adopted the existing .tower/ workspace.',
+        'Next: tower_init to plan missions, then tower_spawn per mission.',
+      ].join('\n') }
+    }),
+  }, activatable)
 
   register({
     name: 'tower_init',

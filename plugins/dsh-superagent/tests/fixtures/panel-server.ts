@@ -22,6 +22,7 @@ import { githubKind } from '../../src/sources/github.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
 import { testDeployment } from './deployment.ts'
+import type { ChildSession } from '../../src/app/views/tasks.ts'
 
 export const MEMBER = 'ou_alice'
 const ALLOWED: Record<string, { id: string; name?: string }[]> = { feishu: [{ id: MEMBER, name: 'Alice' }], github: [{ id: 'alice' }] }
@@ -92,6 +93,8 @@ export interface PanelServer {
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** The task dock's answer; unset means the host derives it from the open and person tickets. */
   tasks?: TasksView | undefined
+  /** Child Sessions the main Session started itself, served with the derived task view. */
+  children: ChildSession[]
   /** Questions the canvas asked about a ticket, in the order they arrived. */
   asks: { id: string; question: string; files?: string[] }[]
   /** Messages said to the main Session with no ticket behind them. */
@@ -182,7 +185,7 @@ const tasksView = (): TasksView => {
     ...index === 0 && ticket.sessionId ? { todos: { done: 1, total: 3, current: '补测试' } } : {} }))
   return { masterId: 'master', active: false, paused: server.settings.paused, maxWorkers: server.settings.executor.maxWorkers,
     running: tasks.filter(task => task.live).length, awaiting: tasks.filter(task => task.stage === 'person').length,
-    queued: tasks.filter(task => task.action === 'queued').length, total: tasks.length, tasks, conversation: [] }
+    queued: tasks.filter(task => task.action === 'queued').length, total: tasks.length, tasks, children: server.children, conversation: [] }
 }
 const settingsView = (): ApiResponse<'GET settings'> => ({
   policyVersion: 'abcdef1234567890',
@@ -275,6 +278,8 @@ function initial(): PanelServer {
     says: [] as { text: string; files?: string[] }[],
     /** Files written by {@link POST uploads}, under a state directory that no test reads. */
     uploads: [] as { name: string; path: string; bytes: number }[],
+    /** Child Sessions the main Session started itself, served with the derived task view. */
+    children: [] as ChildSession[],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },

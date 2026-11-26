@@ -36,7 +36,7 @@ export interface HttpHost {
   readonly sourceLinks: Pick<TextCache, 'entries'>
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
-  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'todoList' | 'ask' | 'say' | 'conversation' | 'active' | 'toolNow'>
+  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'todoList' | 'ask' | 'say' | 'conversation' | 'active' | 'toolNow' | 'children'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount' | 'running'>
@@ -161,6 +161,7 @@ function routes(runtime: HttpHost): Routes {
       paused: runtime.store.settings().paused, maxWorkers: runtime.store.settings().executor.maxWorkers,
       openTickets: () => runtime.store.tickets.open(), live: ticket => runtime.executor.running(ticket),
       todos: sessionId => runtime.sessions.todoList(sessionId), tool: sessionId => runtime.sessions.toolNow(sessionId),
+      children: () => runtime.sessions.children(),
       conversation: () => runtime.sessions.conversation() }),
     // The question reaches the main Session as a relay, which is ordered and retried until delivered. A file it attached first
     // went through `POST uploads`: only a path this Host wrote may be named, so a browser cannot point the main Session at a file

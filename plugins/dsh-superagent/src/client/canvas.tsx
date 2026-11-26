@@ -8,9 +8,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { usePoll, type TaskView, type TasksView } from './api.ts'
 import { Button, Icon, StateDot, Tag } from './controls.tsx'
 import { dockDot, started, taskProgress } from './dock.tsx'
+import { zh, type DshSuperagentKey } from './locales.ts'
 import { ticketMark, toolText } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
-import { fullTime, when } from './text.ts'
+import { fullTime, when, type T } from './text.ts'
 import { StageMark } from './widgets.tsx'
 
 /** A card's place on the plane, in the plane's own pixels. */
@@ -200,6 +201,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const fit = () => { autoFit.current = true; movedByHand.current = false; fitted.current = Object.keys(rects).length
     setView(fitView(frame(rects), size.w, size.h, 48, size.top)) }
   const tasks = data?.tasks ?? []
+  const children = data?.children ?? []
   const all = data?.conversation ?? []
   const recent = all.slice(-4).map((entry, index) => ({ entry, place: all.length - Math.min(4, all.length) + index }))
   // The newest answer is the one the operator asked for: the list follows it as it arrives, unless the operator has scrolled
@@ -443,7 +445,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
         <div className="dt-canvas-stack">
           {tasks.filter(task => task.sessionId).map(task => {
             const id = `worker:${task.sessionId}`
-            return <article key={id} className="dt-canvas-card" data-node={id} style={place(id)} onPointerDown={stop}>
+            return <article key={id} className="dt-canvas-card" data-node={id} data-kind="worker" style={place(id)} onPointerDown={stop}>
               <header className="dt-canvas-card-head">
                 <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(id)}><Icon name="running" size={14} />{t('canvas.worker')}</h3>
                 <StateDot state={task.live ? 'ongoing' : 'idle'} />
@@ -457,6 +459,26 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
               </footer>
             </article>
           })}
+          {children.length > 0 && <>
+            <h3 className="dt-canvas-group">{t('canvas.otherChildren', { total: String(children.length) })}</h3>
+            {children.map(child => {
+              const id = `child:${child.id}`
+              return <article key={id} className="dt-canvas-card" data-node={id} data-kind="child" style={place(id)} onPointerDown={stop}>
+                <header className="dt-canvas-card-head">
+                  <h3 className="dt-canvas-card-title dt-canvas-handle" tabIndex={0} {...handle(id)}>
+                    <Icon name="user" size={14} />{t('canvas.child')}</h3>
+                  <StateDot state={child.live ? 'ongoing' : 'idle'} />
+                </header>
+                <p className="dt-canvas-clamp" title={child.title ?? child.id}>{child.title ?? t('canvas.noChildTitle')}</p>
+                <p className="dt-canvas-meta">{childOrigin(t, child.origin)} · {t(child.live ? 'dock.live' : 'dock.idle')}</p>
+                <footer className="dt-canvas-card-foot">
+                  <Button variant="ghost" size="sm" icon={<Icon name="session" size={14} />}
+                    onClick={() => { openSession(child.id).catch(failure => notify(failure instanceof Error ? failure.message : String(failure))) }}>
+                    {t('dock.openWorker')}</Button>
+                </footer>
+              </article>
+            })}
+          </>}
         </div>
       </section>
     </div>
@@ -520,4 +542,11 @@ export function curveMiddle(path: string): { x: number; y: number } {
   const [sx, sy, c1x, c1y, c2x, c2y, tx, ty] = path.match(/-?[\d.]+/g)!.map(Number)
   // The point at t = 1/2 of a cubic Bézier.
   return { x: (sx! + 3 * c1x! + 3 * c2x! + tx!) / 8, y: (sy! + 3 * c1y! + 3 * c2y! + ty!) / 8 }
+}
+
+/** A child Session's origin in the operator's language, and the Host's own word for one the copy does not name. */
+function childOrigin(t: T, origin: string | undefined): string {
+  if (origin === 'subagent') return t('canvas.childOrigin.subagent')
+  if (origin === undefined) return t('canvas.childOrigin.other')
+  return origin in zh ? t(`canvas.childOrigin.${origin}` as DshSuperagentKey) : origin
 }

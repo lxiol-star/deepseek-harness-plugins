@@ -19,6 +19,16 @@ export type StageAction = Extract<TicketStage, { stage: 'person' }>['action'] | 
  * One open ticket as the task views show it: the fields of its summary that the composer dock and the task canvas read, with a
  * stage that reads without narrowing, beside whether its worker holds a slot and the todo list it last wrote.
  */
+/**
+ * A Session the main Session started for itself, as opposed to an executor a ticket owns. `origin` is the Host's word for how
+ * it was started (`subagent`, or whatever a teammate or tower sets), and `live` is its turn running now.
+ */
+export interface ChildSession {
+  id: string
+  title?: string
+  origin?: string
+  live: boolean
+}
 export interface TaskView {
   id: string
   title: string
@@ -60,6 +70,8 @@ export interface TasksView {
   tasks: TaskView[]
   /** The tool the main Session runs now, which is what it is busy with between turns of its own. */
   masterTool?: { name: string; since: string }
+  /** The main Session's child Sessions that no ticket owns, oldest first: what it started for itself. */
+  children: readonly ChildSession[]
   /** The main Session's latest exchanges, oldest first: the operator's questions from the task canvas and the replies that ended its turns. */
   conversation: readonly Exchange[]
 }
@@ -77,6 +89,8 @@ export interface TasksHost {
   todos(sessionId: string): Todos | undefined
   /** The tool the Session runs now, with the moment it started, or undefined when it runs none. */
   tool(sessionId: string): { name: string; since: string } | undefined
+  /** The child Sessions the main Session started itself: subagents, teammates, tower children. No ticket owns them. */
+  children(): readonly ChildSession[]
   /** The main Session's latest exchanges, oldest first. */
   conversation(): readonly Exchange[]
 }
@@ -111,7 +125,7 @@ export function tasksView(host: TasksHost): TasksView {
   const masterTool = host.tool(host.masterId)
   return { masterId: host.masterId, active: host.active, paused: host.paused, maxWorkers: host.maxWorkers,
     running: count(0), awaiting: count(1), queued: count(2), total: tasks.length, tasks,
-    ...masterTool ? { masterTool } : {}, conversation: host.conversation() }
+    ...masterTool ? { masterTool } : {}, children: host.children(), conversation: host.conversation() }
 }
 
 /**

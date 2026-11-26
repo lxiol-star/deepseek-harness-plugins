@@ -1,6 +1,7 @@
 /** The task views of the main Session: the ticket line, the ranking, the list, the todo and reply readers, and the routes that read and ask. */
 import { expect, it, vi } from 'vitest'
 import { registerHttp, type HttpHost } from '../src/app/http.ts'
+import type { ChildSession } from '../src/app/views/tasks.ts'
 import { EXCHANGES, replyText, todosOf } from '../src/app/sessions.ts'
 import { ticketLine } from '../src/core/questions.ts'
 import type { Mandate, Ticket } from '../src/core/index.ts'
@@ -31,9 +32,10 @@ const live = new Set(['run', 'review'])
 const todos = new Map([['worker-run', { done: 1, total: 3, current: '补测试' }]])
 const conversation = [{ at: at(9), role: 'operator' as const, text: '到哪一步了？' }, { at: at(10), role: 'orchestrator' as const, text: '在补测试。' }]
 const runningTool = new Map([['worker-run', { name: 'read', since: at(9) }]])
+const children: ChildSession[] = [{ id: 'child-a', title: '读者', origin: 'subagent', live: true }]
 const host = (tickets: Ticket[], overrides: Partial<TasksHost> = {}): TasksHost => ({ masterId: 'master', active: true, paused: false,
   maxWorkers: 2, openTickets: () => tickets, live: item => live.has(item.id), todos: sessionId => todos.get(sessionId),
-  tool: sessionId => runningTool.get(sessionId), conversation: () => conversation, ...overrides })
+  tool: sessionId => runningTool.get(sessionId), children: () => children, conversation: () => conversation, ...overrides })
 
 it('orders a running worker first, then what waits for a person, then the queue, then a worker between turns, then a ticket waiting for a Trigger', () => {
   expect([0, 3, 2, 1, 4]).toEqual([
@@ -45,6 +47,8 @@ it('orders a running worker first, then what waits for a person, then the queue,
 it('lists the open tickets that are not dismissed in that order, each with its worker Session, start, report and todo list, and counts the rest', () => {
   const view = tasksView(host(running, { tool: sessionId => sessionId === 'master' ? { name: 'bash', since: at(11) } : runningTool.get(sessionId) }))
   expect(view.masterTool).toEqual({ name: 'bash', since: at(11) })
+  // A child the main Session started itself is carried beside the tickets, not among them.
+  expect(view.children).toEqual([{ id: 'child-a', title: '读者', origin: 'subagent', live: true }])
   expect(view.tasks.map(task => task.id)).toEqual(['run', 'answer', 'review', 'queue', 'idle'])
   expect(view).toMatchObject({ masterId: 'master', active: true, paused: false, maxWorkers: 2, running: 1, awaiting: 2, queued: 1,
     total: 5, conversation })
@@ -120,11 +124,13 @@ it('answers the task list from the store, the executor and the sessions, and car
   const call = serve({ masterId: 'master', store: { tickets: { open: () => [stored], get: (id: string) => id === 'abc' ? stored : undefined },
     settings: () => ({ paused: true, executor: { maxWorkers: 3 } }) }, executor: { running: (item: Ticket) => item.id === 'abc' },
     sessions: { active: () => false, todoList: () => undefined, toolNow: (id: string) => id === 'worker-abc' ? { name: 'bash', since: 'now' } : undefined,
+      children: () => [{ id: 'child-a', title: '读者', origin: 'subagent', live: true }],
       conversation: () => [], ask } })
   const read = await call('GET', 'tasks')
   expect(read.status).toBe(200)
   expect(read.body).toMatchObject({ masterId: 'master', active: false, paused: true, maxWorkers: 3, running: 1, awaiting: 0, total: 1,
-    tasks: [{ id: 'abc', title: '修复登录', live: true, sessionId: 'worker-abc', tool: { name: 'bash', since: 'now' } }], conversation: [] })
+    tasks: [{ id: 'abc', title: '修复登录', live: true, sessionId: 'worker-abc', tool: { name: 'bash', since: 'now' } }],
+    children: [{ id: 'child-a', title: '读者', origin: 'subagent', live: true }], conversation: [] })
   const asked = await call('POST', 'tasks/abc/ask', { question: '  到哪一步了？ ' })
   expect(asked).toEqual({ status: 200, body: { delivered: 'queued' } })
   expect(ask).toHaveBeenCalledOnce()

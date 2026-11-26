@@ -19,6 +19,7 @@ import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import type { RegisterTool, Tool } from './tools/tool.ts'
+import type { ChildSession } from './views/tasks.ts'
 
 /**
  * The mode a relay takes. `steer` reaches the turn that is running; it is not a wake-up call, so a message relayed to an idle
@@ -94,8 +95,17 @@ declare module '@deepseek-ai/cordis' {
  * changes the profile, schedules work or starts goals outside the worker slots, the pause and a person's hold, starts or
  * messages other Sessions, or edits documents.
  */
+/**
+ * The tower protocol's tools. A worker runs in a workspace of its own, and tower mode is a main agent's mode there, so the
+ * worker may orchestrate inside it — the names are allowed here and only the ones the Host registers ever exist.
+ */
+const TOWER_TOOLS = ['tower_activate', 'tower_init', 'tower_plan', 'tower_mission', 'tower_spawn', 'tower_send',
+  'tower_status', 'tower_inbox', 'tower_finding', 'tower_review', 'tower_merge', 'tower_rebase', 'tower_teardown',
+  'tower_complete'] as const
 const WORK_TOOLS = ['read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash', 'pwsh', 'job_output', 'job_list', 'job_kill', 'web_search',
   'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent']
+/** What a worker Session may call: the work tools, plus the tower protocol when this Host offers it. */
+const WORK_ALLOWED: readonly string[] = [...WORK_TOOLS, ...TOWER_TOOLS]
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = 'Reports, follow_up notices, new candidates and a background job\'s end with its output arrive by themselves as messages; '
   + 'end the turn instead of waiting for them.'
@@ -148,6 +158,8 @@ export class Sessions {
    * a todo list or a report can only say after the fact.
    */
   private readonly runningTools = new Map<string, { name: string; since: string }>()
+  /** Every Session this plugin has decorated, which is how it knows the main Session's children without a service lookup. */
+  private readonly known = new Set<Agent>()
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
   constructor(private readonly host: SessionsHost) {
@@ -162,7 +174,7 @@ export class Sessions {
   install(): void {
     const ctx = this.ctx
     ctx.on('agent/disposed', ({ agent }) => {
-      this.release(agent)
+      this.release(agent); this.known.delete(agent)
       this.retryHealth.clear(agent.id); this.todos.delete(agent.id); this.runningTools.delete(agent.id); this.updateModelHealth()
     })
     ctx.on('session/event', (session, event) => {
@@ -328,6 +340,22 @@ export class Sessions {
   conversation(): readonly Exchange[] { return [...this.exchanges] }
   /** The tool `sessionId` runs now, with the moment it started, or undefined when it runs none. */
   toolNow(sessionId: string): { name: string; since: string } | undefined { return this.runningTools.get(sessionId) }
+  /**
+   * The Sessions the main Session started for itself — a subagent, a teammate, a tower child — which no ticket owns. Read from
+   * the loaded agents, because a child is only worth drawing while it exists; a ticket's executor is not one of them, since a
+   * ticket runs its own top-level Session rather than a child of the main one.
+   */
+  children(): ChildSession[] {
+    const sessionOf = (agent: Agent) => agent.session as { header?: { parentSession?: string; title?: string; origin?: string } }
+    return [...this.known]
+      .filter(agent => sessionOf(agent).header?.parentSession === this.host.masterId)
+      .map((agent): ChildSession => {
+        const header = sessionOf(agent).header
+        return { id: agent.id, ...header?.title ? { title: header.title } : {}, ...header?.origin ? { origin: header.origin } : {},
+          live: agent.status === 'running' }
+      })
+      .sort((one, other) => Number(other.live) - Number(one.live) || one.id.localeCompare(other.id))
+  }
   /** Whether the Session's turn runs now; false for a Session that is not loaded. */
   active(sessionId: string): boolean { return this.ctx.agents.get(sessionId as SessionId)?.status === 'running' }
   private updateModelHealth(): void {
@@ -341,6 +369,8 @@ export class Sessions {
     return ticketId === undefined ? undefined : this.host.store.tickets.get(ticketId)
   }
   private async decorate(agent: Agent): Promise<void> {
+    // Recorded before the role decides anything, so a child of the main Session is known even when no ticket owns it.
+    this.known.add(agent)
     if (this.bindings.has(agent)) return
     const host = this.host
     const master = agent.id === host.masterId
@@ -417,8 +447,8 @@ export class Sessions {
      */
     const parent = scopeParentOf(agent)
     const candidates = [
-      WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent) !== undefined),
-      WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent) !== undefined),
+      WORK_ALLOWED.filter(name => agent.ctx.tools.get(name, parent) !== undefined),
+      WORK_ALLOWED.filter(name => agent.ctx.tools.get(name, agent) !== undefined),
     ]
     const restrictors: (() => void)[] = []
     for (const allow of candidates) {
@@ -427,7 +457,7 @@ export class Sessions {
     }
     // Whatever no restriction could hide is refused by name when it is called, so an executor works with its prescribed set even
     // where the filter named none.
-    const allowed = new Set(WORK_TOOLS)
+    const allowed = new Set(WORK_ALLOWED)
     return [...restrictors, agent.ctx.tools.guard(exec => {
       const denied = ended()
       if (denied !== undefined) return denied

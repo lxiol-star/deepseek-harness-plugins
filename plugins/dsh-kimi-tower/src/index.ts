@@ -27,6 +27,12 @@ export const inject = ['tools', 'systemPrompt', 'agents', 'subagents']
 export interface Config {
   /** Advisory maximum number of tower children allowed to run at once. */
   maxWorkers?: number
+  /**
+   * Let the main agent of a workspace enter tower mode by itself, with the `tower_activate` tool, instead of waiting for a
+   * person to type `/tower on`. Off by default: tower spawns agents, opens worktrees and merges into a base branch, so a person
+   * turning it on is the safer default. A Host that runs agents in throwaway workspaces (dsh-superagent) turns it on.
+   */
+  agentCanEnable?: boolean
 }
 
 /** Plugin entry point. */
@@ -44,7 +50,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     'dsh-kimi-tower:tower-policy',
   )
 
-  registerTowerTools(ctx, runtime)
+  registerTowerTools(ctx, runtime, { agentCanEnable: config.agentCanEnable === true })
   registerCommand(ctx, runtime)
   registerStatusRoute(ctx)
 

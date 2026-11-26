@@ -5,3 +5,7 @@
 - insert:
     - id: kimi-tower
       name: dsh-kimi-tower
+      config:
+        # The main agent of a workspace may enter tower mode with `tower_activate` instead of waiting for a person to type
+        # `/tower on`. Profiles that want tower to stay a human decision remove this line.
+        agentCanEnable: true

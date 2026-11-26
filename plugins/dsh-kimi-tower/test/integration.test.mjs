@@ -32,6 +32,7 @@ function makeHarness({ cwd }) {
   const agents = new Map()
   const listeners = new Map()
   const tools = new Map()
+  const whens = new Map()
   const guards = new Map()
   const restrictions = new Map()
   const sections = []
@@ -42,8 +43,9 @@ function makeHarness({ cwd }) {
 
   const ctx = {
     tools: {
-      register(definition) {
+      register(definition, options) {
         tools.set(definition.name, definition)
+        whens.set(definition.name, options?.when)
         return () => tools.delete(definition.name)
       },
       get(name) {
@@ -197,6 +199,7 @@ function makeHarness({ cwd }) {
     agents,
     listeners,
     tools,
+    whens,
     guards,
     sections,
     commands,
@@ -211,6 +214,40 @@ function makeHarness({ cwd }) {
 function execution(agent, args, name) {
   return { agent, arguments: args, signal: new AbortController().signal, name, callId: `call-${name}` }
 }
+
+test('tower_activate lets a workspace main agent enter the mode, only where the profile allows it', async () => {
+  const dir = await makeRepo()
+  try {
+    // Off by default: a profile that installs the plugin does not hand agents the key to unrestricted orchestration. The tool is
+    // registered like every other tower tool and stays hidden through its `when` rule, which is what the Host filters on.
+    const closed = makeHarness({ cwd: dir })
+    apply(closed.ctx, {})
+    const closedWhen = closed.whens.get('tower_activate')
+    assert.equal(typeof closedWhen, 'function', 'registered, so its visibility rule is what decides')
+    assert.equal(closedWhen({ agent: closed.main }), false, 'hidden without the flag')
+
+    const harness = makeHarness({ cwd: dir })
+    apply(harness.ctx, { agentCanEnable: true })
+    const tool = harness.tools.get('tower_activate')
+    const when = harness.whens.get('tower_activate')
+    assert.ok(tool && when, 'flag registers tower_activate with a visibility rule')
+    assert.equal(when({ agent: harness.main }), true, 'offered to a workspace main agent while tower is off')
+    // `isMainAgent` reads the session header only, so a structural stand-in is enough for the visibility rule.
+    const child = { id: 'child', session: { header: { id: 'child', cwd: dir, parentSession: 'session-main', origin: 'subagent' } } }
+    assert.equal(when({ agent: child }), false, 'never offered to a subagent')
+
+    const result = await tool.execute({}, execution(harness.main, {}, 'tower_activate'))
+    assert.match(result.text, /Tower mode: ON/)
+    const state = JSON.parse(await readFile(join(dir, '.tower/comms/state.json'), 'utf8'))
+    assert.equal(state.sessionId, 'session-main')
+    assert.equal(when({ agent: harness.main }), false, 'withdrawn once tower is active')
+
+    const again = await tool.execute({}, execution(harness.main, {}, 'tower_activate'))
+    assert.match(again.text, /already active/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 
 test('the /tower command activates the mode and the tool set', async () => {
   const dir = await makeRepo()

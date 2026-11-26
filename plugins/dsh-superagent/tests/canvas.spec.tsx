@@ -15,7 +15,7 @@ const task = (id: string, fields: Partial<TaskView> = {}): TaskView => ({ id, ti
   live: false, ...fields })
 const snapshot = (tasks: TaskView[], fields: Partial<TasksView> = {}): TasksView => ({ masterId: 'master', active: true, paused: false,
   maxWorkers: 2, running: tasks.filter(item => item.live).length, awaiting: tasks.filter(item => item.stage === 'person').length,
-  queued: 0, total: tasks.length, tasks, conversation: [{ at: '2026-11-24T10:09:00.000Z', role: 'operator', text: '到哪一步了？' },
+  queued: 0, total: tasks.length, tasks, children: [], conversation: [{ at: '2026-11-24T10:09:00.000Z', role: 'operator', text: '到哪一步了？' },
     { at: '2026-11-24T10:10:00.000Z', role: 'orchestrator', text: '在补测试。' }], ...fields })
 
 // jsdom gives an opaque origin no storage: a Map stands in for it, so the dock remembers what the operator collapsed.
@@ -355,6 +355,27 @@ it('fits a plane that holds more than the viewport can show at its own size', ()
   // The bottom of the last card lands inside the viewport.
   const bottom = (60 + 14 * 132 + 120) * view.scale + view.y
   expect(bottom).toBeLessThanOrEqual(800)
+})
+
+it('draws the child Sessions the main Session started itself, apart from the ticket workers', async () => {
+  server.tasks = snapshot([task('a', { live: true })], { children: [
+    { id: 'child-live', title: '读者', origin: 'subagent', live: true },
+    { id: 'child-idle', title: '审查者', origin: 'subagent', live: false },
+    { id: 'child-odd', live: false },
+  ] })
+  await mount()
+  const workers = [...document.querySelectorAll('[data-kind=worker]')]
+  const children = [...document.querySelectorAll('[data-kind=child]')]
+  expect(workers).toHaveLength(1)
+  expect(children).toHaveLength(3)
+  // The group says how many, and each card names its own kind and origin, so the two are never read as each other.
+  expect(document.querySelector('.dt-canvas-group')?.textContent).toContain(zh['canvas.otherChildren'].replace('{total}', '3'))
+  expect(children[0]?.textContent).toContain(zh['canvas.childOrigin.subagent'])
+  expect(children[0]?.textContent).toContain(zh['dock.live'])
+  expect(children[1]?.textContent).toContain(zh['dock.idle'])
+  // A child with no title still draws, named rather than blank, and an origin the copy does not know is shown as it is.
+  expect(children[2]?.textContent).toContain(zh['canvas.noChildTitle'])
+  expect(children.every(node => node.querySelector('.dt-canvas-card-title')?.textContent?.includes(zh['canvas.child']))).toBe(true)
 })
 
 it('shows the tool the worker runs now, and the one the main Session runs', async () => {

@@ -5,7 +5,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -24,9 +28,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/picomatch/lib/constants.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/picomatch/lib/constants.js"(exports, module) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var WIN_SLASH = "\\\\/";
     var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -226,9 +230,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/picomatch/lib/utils.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/utils.js
 var require_utils = __commonJS({
-  "node_modules/picomatch/lib/utils.js"(exports) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var {
       REGEX_BACKSLASH,
@@ -290,9 +294,9 @@ var require_utils = __commonJS({
   }
 });
 
-// node_modules/picomatch/lib/scan.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "node_modules/picomatch/lib/scan.js"(exports, module) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils();
     var {
@@ -628,9 +632,9 @@ var require_scan = __commonJS({
   }
 });
 
-// node_modules/picomatch/lib/parse.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS({
-  "node_modules/picomatch/lib/parse.js"(exports, module) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants();
     var utils = require_utils();
@@ -1643,9 +1647,9 @@ var require_parse = __commonJS({
   }
 });
 
-// node_modules/picomatch/lib/picomatch.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var scan = require_scan();
     var parse = require_parse();
@@ -1783,9 +1787,9 @@ var require_picomatch = __commonJS({
   }
 });
 
-// node_modules/picomatch/index.js
+// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "node_modules/picomatch/index.js"(exports, module) {
+  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     var pico = require_picomatch();
     var utils = require_utils();
@@ -1827,6 +1831,9 @@ var GitError = class extends Error {
     this.exitCode = exitCode;
     this.name = "GitError";
   }
+  args;
+  stderr;
+  exitCode;
 };
 async function git(cwd, args, options = {}) {
   return new Promise((resolve5, reject) => {
@@ -2501,6 +2508,7 @@ var TowerStore = class {
     this.stateLockTimeoutMs = options.stateLockTimeoutMs ?? 1e4;
     this.stateLockPollMs = options.stateLockPollMs ?? 10;
   }
+  repoRoot;
   stateLockTimeoutMs;
   stateLockPollMs;
   async runPrepared(prepare, commit) {
@@ -6209,17 +6217,38 @@ function array(items, description) {
   return { type: "array", items, description };
 }
 var MISSION_STATUSES = ["planned", "active", "completed", "blocked", "paused", "merged", "abandoned"];
-function registerTowerTools(ctx, runtime) {
+function registerTowerTools(ctx, runtime, options = {}) {
   const register = (definition, when) => {
     ctx.effect(() => ctx.tools.register(definition, { when }), `dsh-kimi-tower:${definition.name}`);
   };
   const mainOnly = ({ agent }) => runtime.isActive(agent);
+  const activatable = ({ agent }) => options.agentCanEnable === true && isMainAgent(agent) && !runtime.isActive(agent);
   const shared = ({ agent }) => runtime.toolVisible(agent, "tower_send");
   const completeOnly = ({ agent }) => runtime.childOf(agent)?.kind === "worker";
   const reviewOnly = ({ agent }) => {
     const binding = runtime.childOf(agent);
     return binding?.kind === "reviewer" || isMainAgent(agent) && runtime.isActive(agent);
   };
+  register({
+    name: "tower_activate",
+    description: "Enter tower mode in this Session's own workspace without waiting for a person to run /tower on. Only the main agent of a workspace may call it, and only where the workspace owner allows it. On success tower mode is active and the rest of the protocol (tower_init, tower_plan, ...) becomes available; prefer tower_init afterwards if the workspace is fresh.",
+    parameters: objectSchema({ base: string("Local branch that missions fork from and merge back into, as tower_init takes it.") }),
+    output: TEXT_OUTPUT,
+    execute: (args, exec) => runTool(ctx, exec, async () => {
+      const agent = exec.agent;
+      if (agent === void 0 || !isMainAgent(agent)) {
+        throw new TowerProtocolError("tower mode is entered by the main agent of a workspace, which this Session is not");
+      }
+      if (runtime.isActive(agent)) return { text: "Tower mode is already active in this workspace." };
+      const base = typeof args.base === "string" && args.base.length > 0 ? args.base : void 0;
+      const result = await runtime.activate(agent, base);
+      return { text: [
+        `Tower mode: ON (base ${result.base}, checkout ${result.checkout})`,
+        result.created ? "Created .tower/ in this workspace." : "Adopted the existing .tower/ workspace.",
+        "Next: tower_init to plan missions, then tower_spawn per mission."
+      ].join("\n") };
+    })
+  }, activatable);
   register({
     name: "tower_init",
     description: init_default,
@@ -7054,7 +7083,7 @@ function apply(ctx, config = {}) {
     }),
     "dsh-kimi-tower:tower-policy"
   );
-  registerTowerTools(ctx, runtime);
+  registerTowerTools(ctx, runtime, { agentCanEnable: config.agentCanEnable === true });
   registerCommand(ctx, runtime);
   registerStatusRoute(ctx);
   ctx.effect(

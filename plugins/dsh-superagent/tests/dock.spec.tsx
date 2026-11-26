@@ -14,7 +14,7 @@ const task = (id: string, fields: Partial<TaskView> = {}): TaskView => ({ id, ti
   live: false, ...fields })
 const snapshot = (tasks: TaskView[], fields: Partial<TasksView> = {}): TasksView => ({ masterId: 'master', active: false, paused: false,
   maxWorkers: 2, running: tasks.filter(item => item.live).length, awaiting: tasks.filter(item => item.stage === 'person').length,
-  queued: tasks.filter(item => item.action === 'queued').length, total: tasks.length, tasks, conversation: [], ...fields })
+  queued: tasks.filter(item => item.action === 'queued').length, total: tasks.length, tasks, children: [], conversation: [], ...fields })
 const running = (id: string) => task(id, { live: true, summary: '已改两个文件', todos: { done: 1, total: 3, current: '补测试' } })
 const review = (id: string) => task(id, { stage: 'person', action: 'review', note: { text: 'PR #42 待验收', error: false } })
 const queued = (id: string) => task(id, { action: 'queued', sessionId: '' })
