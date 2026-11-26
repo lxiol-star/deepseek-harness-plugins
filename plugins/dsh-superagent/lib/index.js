@@ -8678,6 +8678,7 @@ function tasksView(host) {
 	const tasks = host.openTickets().filter((ticket) => ticket.dismissed !== true).map((ticket) => {
 		const summary = ticketSummary(ticket), startedAt = latestAssignment(ticket)?.startedAt;
 		const todos = summary.sessionId ? host.todos(summary.sessionId) : void 0;
+		const tool = summary.sessionId ? host.tool(summary.sessionId) : void 0;
 		return {
 			id: summary.id,
 			title: summary.title,
@@ -8690,10 +8691,12 @@ function tasksView(host) {
 			...startedAt ? { startedAt } : {},
 			updatedAt: summary.updatedAt,
 			live: host.live(ticket),
-			...todos ? { todos } : {}
+			...todos ? { todos } : {},
+			...tool ? { tool } : {}
 		};
 	}).sort((one, other) => taskRank(one) - taskRank(other) || other.updatedAt.localeCompare(one.updatedAt));
 	const count = (rank) => tasks.filter((task) => taskRank(task) === rank).length;
+	const masterTool = host.tool(host.masterId);
 	return {
 		masterId: host.masterId,
 		active: host.active,
@@ -8704,6 +8707,7 @@ function tasksView(host) {
 		queued: count(2),
 		total: tasks.length,
 		tasks,
+		...masterTool ? { masterTool } : {},
 		conversation: host.conversation()
 	};
 }
@@ -8918,6 +8922,7 @@ function routes(runtime) {
 			openTickets: () => runtime.store.tickets.open(),
 			live: (ticket) => runtime.executor.running(ticket),
 			todos: (sessionId) => runtime.sessions.todoList(sessionId),
+			tool: (sessionId) => runtime.sessions.toolNow(sessionId),
 			conversation: () => runtime.sessions.conversation()
 		}),
 		"POST tasks/:id/ask": async ({ params, body }) => {
@@ -9624,6 +9629,11 @@ var Sessions = class {
 	todos = /* @__PURE__ */ new Map();
 	/** The main Session's latest exchanges, oldest first: a derived cache of its log that this process holds (docs/007). */
 	exchanges = [];
+	/**
+	* The tool each Session runs at this moment, with the moment it started: what a task view shows while a worker works, which
+	* a todo list or a report can only say after the fact.
+	*/
+	runningTools = /* @__PURE__ */ new Map();
 	ctx;
 	/** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
 	constructor(host) {
@@ -9640,6 +9650,7 @@ var Sessions = class {
 			this.release(agent);
 			this.retryHealth.clear(agent.id);
 			this.todos.delete(agent.id);
+			this.runningTools.delete(agent.id);
 			this.updateModelHealth();
 		});
 		ctx.on("session/event", (session, event) => {
@@ -9665,6 +9676,27 @@ var Sessions = class {
 		});
 		ctx.on("agent/created", async ({ agent }) => {
 			await this.decorate(agent);
+		});
+		/**
+		* The call a Session is making, for the task views. `tools/execute` is a waterfall, so the handler passes the call along and
+		* records it until the call returns: `exec.name` is the tool, `exec.agent.id` the Session. The previous entry is put back,
+		* because one tool may run another in the same Session.
+		*/
+		ctx.on("tools/execute", async (exec, next) => {
+			const sessionId = exec?.agent?.id;
+			const name = exec?.name;
+			if (sessionId === void 0 || typeof name !== "string") return next();
+			const previous = this.runningTools.get(sessionId);
+			this.runningTools.set(sessionId, {
+				name,
+				since: (/* @__PURE__ */ new Date()).toISOString()
+			});
+			try {
+				return await next();
+			} finally {
+				if (previous === void 0) this.runningTools.delete(sessionId);
+				else this.runningTools.set(sessionId, previous);
+			}
 		});
 		ctx.inject(["agentPresets"], (child) => {
 			child.on("agent-preset/selected", (sessionId, preset) => {
@@ -9839,6 +9871,10 @@ var Sessions = class {
 	/** The main Session's latest exchanges, oldest first, as far back as this process remembers. */
 	conversation() {
 		return [...this.exchanges];
+	}
+	/** The tool `sessionId` runs now, with the moment it started, or undefined when it runs none. */
+	toolNow(sessionId) {
+		return this.runningTools.get(sessionId);
 	}
 	/** Whether the Session's turn runs now; false for a Session that is not loaded. */
 	active(sessionId) {

@@ -187,6 +187,18 @@ it('writes a question into the composer only where it is safe to', () => {
   expect(insert.mock.calls.length).toBe(1)
 })
 
+it('says what the worker is doing right now, not only what it reported', async () => {
+  server.tasks = snapshot([task('a', { live: true, tool: { name: 'read', since: '2026-11-24T10:06:00.000Z' } }),
+    task('b', { tool: { name: 'bash', since: '2026-11-24T10:06:00.000Z' } })])
+  await mount()
+  const lines = [...document.querySelectorAll('.dt-dock-tool')].map(node => node.textContent)
+  expect(lines).toEqual([zh['dock.toolNow'].replace('{tool}', zh['tool.read']), zh['dock.toolNow'].replace('{tool}', zh['tool.bash'])])
+  // A tool the copy does not name is shown as the Host names it, so a new tool still reads.
+  server.tasks = snapshot([task('c', { tool: { name: 'some_new_tool', since: '2026-11-24T10:06:00.000Z' } })])
+  await mount()
+  expect(document.querySelector('.dt-dock-tool')?.textContent).toContain('some_new_tool')
+})
+
 it('reads the composer as it is when asking, not as it was when the dock rendered', async () => {
   server.tasks = snapshot([running('a')])
   const actions = { captureInsertion: vi.fn(() => 'span'), insertText: vi.fn(() => true), submit: vi.fn() }

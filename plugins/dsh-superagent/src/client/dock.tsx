@@ -8,7 +8,7 @@ import { ticketLine } from '../core/questions.ts'
 import { caller, usePoll, type TaskView, type TasksView } from './api.ts'
 import STYLES from './client.css?raw'
 import { Button, Icon, Input, StateDot, Tag, type DotState } from './controls.tsx'
-import { ticketMark } from './marks.ts'
+import { ticketMark, toolText } from './marks.ts'
 import { messages } from './provider.tsx'
 import { errorText, fullTime, readableMarkers, when, type T } from './text.ts'
 import { StageMark } from './widgets.tsx'
@@ -202,6 +202,7 @@ export function TaskDock({ t, sessionId, input, inputActions, useInput, openSess
             {progress.ratio && <span className="dt-dock-ratio">{progress.ratio}</span>}
             <span className="dt-dock-ellipsis" title={progress.text}>{progress.text}</span>
           </div>}
+          {task.tool && <div className="dt-dock-tool"><StateDot state="ongoing" />{toolText(t, task.tool)}</div>}
           <div className="dt-dock-meta">
             {hasWorker(task) && <span className="dt-dock-live"><StateDot state={task.live ? 'ongoing' : 'idle'} />
               {t(task.live ? 'dock.live' : 'dock.idle')}</span>}

@@ -21,7 +21,7 @@
 DSH 插件管理器里安装指定版本（需要 DSH `^0.2.1-alpha.2`）：
 
 ```
-github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.10&path:/plugins/dsh-superagent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.11&path:/plugins/dsh-superagent
 ```
 
 也可以从本地目录安装（`设置 → 插件 → 添加插件` 填本地路径）。

@@ -38,6 +38,8 @@ export interface TaskView {
   live: boolean
   /** Present once the worker wrote a todo list; empty (`total` 0) once it cleared it. */
   todos?: Todos
+  /** The tool its worker runs at this moment, which changes faster than any report. */
+  tool?: { name: string; since: string }
 }
 export interface TasksView {
   /** The main Session's id: the dock belongs to the conversation of that Session and no other. */
@@ -56,6 +58,8 @@ export interface TasksView {
   total: number
   /** Every open ticket, a running worker first, then what waits for a person, then the queue, newest first within a rank. */
   tasks: TaskView[]
+  /** The tool the main Session runs now, which is what it is busy with between turns of its own. */
+  masterTool?: { name: string; since: string }
   /** The main Session's latest exchanges, oldest first: the operator's questions from the task canvas and the replies that ended its turns. */
   conversation: readonly Exchange[]
 }
@@ -71,6 +75,8 @@ export interface TasksHost {
   live(ticket: Ticket): boolean
   /** The todo list the Session last wrote, if it wrote one. */
   todos(sessionId: string): Todos | undefined
+  /** The tool the Session runs now, with the moment it started, or undefined when it runs none. */
+  tool(sessionId: string): { name: string; since: string } | undefined
   /** The main Session's latest exchanges, oldest first. */
   conversation(): readonly Exchange[]
 }
@@ -93,15 +99,19 @@ export function tasksView(host: TasksHost): TasksView {
       const summary = ticketSummary(ticket), startedAt = latestAssignment(ticket)?.startedAt
       // Every started Assignment of a Ticket runs in its one shared worker Session.
       const todos = summary.sessionId ? host.todos(summary.sessionId) : undefined
+      const tool = summary.sessionId ? host.tool(summary.sessionId) : undefined
       return { id: summary.id, title: summary.title, stage: summary.stage,
         ...'action' in summary ? { action: summary.action } : {}, ...'note' in summary ? { note: summary.note } : {},
         summary: summary.summary, sessionId: summary.sessionId, createdAt: summary.createdAt,
-        ...startedAt ? { startedAt } : {}, updatedAt: summary.updatedAt, live: host.live(ticket), ...todos ? { todos } : {} }
+        ...startedAt ? { startedAt } : {}, updatedAt: summary.updatedAt, live: host.live(ticket),
+        ...todos ? { todos } : {}, ...tool ? { tool } : {} }
     })
     .sort((one, other) => taskRank(one) - taskRank(other) || other.updatedAt.localeCompare(one.updatedAt))
   const count = (rank: number) => tasks.filter(task => taskRank(task) === rank).length
+  const masterTool = host.tool(host.masterId)
   return { masterId: host.masterId, active: host.active, paused: host.paused, maxWorkers: host.maxWorkers,
-    running: count(0), awaiting: count(1), queued: count(2), total: tasks.length, tasks, conversation: host.conversation() }
+    running: count(0), awaiting: count(1), queued: count(2), total: tasks.length, tasks,
+    ...masterTool ? { masterTool } : {}, conversation: host.conversation() }
 }
 
 /**

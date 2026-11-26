@@ -357,6 +357,17 @@ it('fits a plane that holds more than the viewport can show at its own size', ()
   expect(bottom).toBeLessThanOrEqual(800)
 })
 
+it('shows the tool the worker runs now, and the one the main Session runs', async () => {
+  server.tasks = snapshot([task('a', { live: true, tool: { name: 'read_image', since: '2026-11-24T10:06:00.000Z' } })],
+    { masterTool: { name: 'bash', since: '2026-11-24T10:07:00.000Z' } })
+  await mount()
+  const lines = [...document.querySelectorAll('.dt-canvas-running')].map(node => node.textContent ?? '')
+  expect(lines.some(text => text.includes(zh['tool.read_image']))).toBe(true)
+  expect(lines.some(text => text.includes(zh['tool.bash']))).toBe(true)
+  // The zoom toolbar keeps its own class and layout: the new line is a different one.
+  expect(document.querySelectorAll('.dt-canvas-tool').length).toBe(3)
+})
+
 it('shows every ticket, past the twelve the dock lists', async () => {
   server.tasks = snapshot(Array.from({ length: 15 }, (_, index) => task(`t${index}`)), { total: 15 })
   await mount()

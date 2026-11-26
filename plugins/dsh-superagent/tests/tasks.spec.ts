@@ -30,9 +30,10 @@ const running: Ticket[] = [
 const live = new Set(['run', 'review'])
 const todos = new Map([['worker-run', { done: 1, total: 3, current: '补测试' }]])
 const conversation = [{ at: at(9), role: 'operator' as const, text: '到哪一步了？' }, { at: at(10), role: 'orchestrator' as const, text: '在补测试。' }]
+const runningTool = new Map([['worker-run', { name: 'read', since: at(9) }]])
 const host = (tickets: Ticket[], overrides: Partial<TasksHost> = {}): TasksHost => ({ masterId: 'master', active: true, paused: false,
   maxWorkers: 2, openTickets: () => tickets, live: item => live.has(item.id), todos: sessionId => todos.get(sessionId),
-  conversation: () => conversation, ...overrides })
+  tool: sessionId => runningTool.get(sessionId), conversation: () => conversation, ...overrides })
 
 it('orders a running worker first, then what waits for a person, then the queue, then a worker between turns, then a ticket waiting for a Trigger', () => {
   expect([0, 3, 2, 1, 4]).toEqual([
@@ -42,13 +43,17 @@ it('orders a running worker first, then what waits for a person, then the queue,
 })
 
 it('lists the open tickets that are not dismissed in that order, each with its worker Session, start, report and todo list, and counts the rest', () => {
-  const view = tasksView(host(running))
+  const view = tasksView(host(running, { tool: sessionId => sessionId === 'master' ? { name: 'bash', since: at(11) } : runningTool.get(sessionId) }))
+  expect(view.masterTool).toEqual({ name: 'bash', since: at(11) })
   expect(view.tasks.map(task => task.id)).toEqual(['run', 'answer', 'review', 'queue', 'idle'])
   expect(view).toMatchObject({ masterId: 'master', active: true, paused: false, maxWorkers: 2, running: 1, awaiting: 2, queued: 1,
     total: 5, conversation })
   // A worker that runs keeps its start, its latest report and the todo list it last wrote; the panel's own fields stay with the panel.
   expect(view.tasks[0]).toEqual({ id: 'run', title: '修复回归', stage: 'working', summary: 'changed two files', sessionId: 'worker-run',
-    createdAt: at(0), startedAt: at(5), updatedAt: at(1), live: true, todos: { done: 1, total: 3, current: '补测试' } })
+    createdAt: at(0), startedAt: at(5), updatedAt: at(1), live: true, todos: { done: 1, total: 3, current: '补测试' },
+    tool: { name: 'read', since: at(9) } })
+  // No Session, no tool: a ticket still waiting for a worker says nothing about what runs.
+  expect('tool' in view.tasks[3]!).toBe(false)
   // A ticket still waiting for a worker has no Session and no start.
   expect(view.tasks[3]).toMatchObject({ id: 'queue', stage: 'working', action: 'queued', sessionId: '', summary: '', live: false })
   expect('startedAt' in view.tasks[3]!).toBe(false)
@@ -114,11 +119,12 @@ it('answers the task list from the store, the executor and the sessions, and car
   const ask = vi.fn(), stored = ticket('abc', { title: '修复登录', assignments: [started] })
   const call = serve({ masterId: 'master', store: { tickets: { open: () => [stored], get: (id: string) => id === 'abc' ? stored : undefined },
     settings: () => ({ paused: true, executor: { maxWorkers: 3 } }) }, executor: { running: (item: Ticket) => item.id === 'abc' },
-    sessions: { active: () => false, todoList: () => undefined, conversation: () => [], ask } })
+    sessions: { active: () => false, todoList: () => undefined, toolNow: (id: string) => id === 'worker-abc' ? { name: 'bash', since: 'now' } : undefined,
+      conversation: () => [], ask } })
   const read = await call('GET', 'tasks')
   expect(read.status).toBe(200)
   expect(read.body).toMatchObject({ masterId: 'master', active: false, paused: true, maxWorkers: 3, running: 1, awaiting: 0, total: 1,
-    tasks: [{ id: 'abc', title: '修复登录', live: true, sessionId: 'worker-abc' }], conversation: [] })
+    tasks: [{ id: 'abc', title: '修复登录', live: true, sessionId: 'worker-abc', tool: { name: 'bash', since: 'now' } }], conversation: [] })
   const asked = await call('POST', 'tasks/abc/ask', { question: '  到哪一步了？ ' })
   expect(asked).toEqual({ status: 200, body: { delivered: 'queued' } })
   expect(ask).toHaveBeenCalledOnce()

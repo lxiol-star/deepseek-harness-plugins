@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { usePoll, type TaskView, type TasksView } from './api.ts'
 import { Button, Icon, StateDot, Tag } from './controls.tsx'
 import { dockDot, started, taskProgress } from './dock.tsx'
-import { ticketMark } from './marks.ts'
+import { ticketMark, toolText } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
 import { fullTime, when } from './text.ts'
 import { StageMark } from './widgets.tsx'
@@ -351,6 +351,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
               <span className="dt-canvas-state">{t(data?.active ? 'canvas.masterActive' : 'canvas.masterIdle')}</span>
             </header>
             {data && <p className="dt-canvas-meta">{t('canvas.masterLoad', { total: String(data.total), awaiting: String(data.awaiting) })}</p>}
+            {data?.masterTool && <p className="dt-canvas-running"><StateDot state="ongoing" />{toolText(t, data.masterTool)}</p>}
             <h4 className="dt-canvas-subhead">{t('canvas.conversation')}</h4>
             <ol ref={thread} className="dt-canvas-thread" data-scroll>
               {recent.map(({ entry, place }) => <li key={`${entry.at}:${place}`} data-role={entry.role}>
@@ -423,6 +424,7 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
               {(progress.text || progress.ratio) && <p className="dt-canvas-progress">
                 {progress.ratio && <b className="dt-canvas-ratio">{progress.ratio}</b>}<span className="dt-canvas-clamp" title={progress.text}>{progress.text}</span>
               </p>}
+              {task.tool && <p className="dt-canvas-running"><StateDot state="ongoing" />{toolText(t, task.tool)}</p>}
               <p className="dt-canvas-meta">
                 {task.stage === 'working' && task.action !== 'queued' && <span className="dt-canvas-live"><StateDot state={task.live ? 'ongoing' : 'idle'} />
                   {t(task.live ? 'dock.live' : 'dock.idle')}</span>}

@@ -1,6 +1,6 @@
 /** Pure mappers from domain states (Tickets, Threads, Sources, Decisions) to UI status indicators. */
 import type { DecisionRow, SourceStatusRow, ThreadRow, TicketStage, TicketSummary } from './api.ts'
-import type { DshSuperagentKey } from './locales.ts'
+import { zh, type DshSuperagentKey } from './locales.ts'
 import { valueLabel, type T } from './text.ts'
 import type { DotState, IconName, TagTone } from './controls.tsx'
 
@@ -60,4 +60,14 @@ const DECISION_MARKS: Record<Outcome, Omit<Mark, 'label'>> = {
 /** Maps a Decision outcome to its visual mark, distinguishing `wouldAccept` (an ignore that observe mode would have accepted). */
 export function decisionMark(t: T, outcome: Outcome): Mark {
   return { ...DECISION_MARKS[outcome], label: outcome === 'wouldAccept' ? t('wouldAccept') : valueLabel(t, 'decision', outcome) }
+}
+
+/**
+ * What a Session is doing, for a task view: the tool it runs now, named in the operator's language where the plugin knows it, and
+ * as the Host names it where it does not. The time it started is left to the caller, which formats it.
+ */
+export function toolText(t: T, tool: { name: string; since: string }): string {
+  const known = `tool.${tool.name}`
+  const label = known in zh ? t(known as keyof typeof zh) : tool.name
+  return t('dock.toolNow', { tool: label })
 }
