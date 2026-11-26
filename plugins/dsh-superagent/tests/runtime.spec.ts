@@ -1795,6 +1795,9 @@ it('reports the child Sessions the main Session started itself, and only those',
   // A ticket's own executor is not a child of the main Session, so a running ticket adds nothing here.
   const { sessionId } = await acceptedTicket()
   expect(runtime.sessions.children().map(child => child.id)).not.toContain(sessionId)
+  // Nothing outlives the plugin: a reload must not report Sessions it no longer owns.
+  runtime.sessions.dispose()
+  expect(runtime.sessions.children()).toEqual([])
 })
 
 it('gives a subagent of a worker\'s subagent the same work tools and guard', async () => {

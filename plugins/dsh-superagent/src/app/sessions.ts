@@ -527,5 +527,9 @@ export class Sessions {
     }
   }
   /** Releases prompt sections, skills, and tools registered by `Sessions` across all decorated agents. */
-  dispose(): void { for (const agent of [...this.bindings.keys()]) this.release(agent) }
+  dispose(): void {
+    for (const agent of [...this.bindings.keys()]) this.release(agent)
+    // The derived caches outlive a release otherwise, and a reload would report Sessions and tools it no longer owns.
+    this.known.clear(); this.runningTools.clear()
+  }
 }
