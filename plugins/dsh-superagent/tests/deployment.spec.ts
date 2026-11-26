@@ -71,7 +71,10 @@ describe('setup', () => {
     const needs = (place: string, code: string, values: Record<string, unknown>, github: unknown) =>
       expect(resolveDeployment(machine(), github, probe, path)).rejects.toEqual(setupError(place, code, values))
     const repository = 'acme/widgets'
-    await needs('github', 'repositoryUnset', {}, { cli: 'gh' })
+    // A deployment without a repository resolves with GitHub left empty: MSP signals do not need it, and the GitHub Source
+    // reports `repositoryUnset` as its own health. The resolver only refuses what it cannot check.
+    await expect(resolveDeployment(machine(), { cli: 'gh' }, probe, path))
+      .resolves.toMatchObject({ repository: '', github: { cli: '', login: '' } })
     await needs('github', 'agentCliUnset', {}, { repository })
     await needs('github', 'agentCliMissing', { output: `${join(dir, 'missing')} is not an executable file` }, { repository, cli: join(dir, 'missing') })
     await needs('github', 'agentCliMissing', { output: 'bin/gh must be a command name or an absolute path' }, { repository, cli: 'bin/gh' })
