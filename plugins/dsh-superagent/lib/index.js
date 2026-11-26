@@ -10130,6 +10130,8 @@ var Sessions = class {
 	/** Releases prompt sections, skills, and tools registered by `Sessions` across all decorated agents. */
 	dispose() {
 		for (const agent of [...this.bindings.keys()]) this.release(agent);
+		this.known.clear();
+		this.runningTools.clear();
 	}
 };
 //#endregion

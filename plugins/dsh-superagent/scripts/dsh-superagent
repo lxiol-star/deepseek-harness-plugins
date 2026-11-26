@@ -368,6 +368,9 @@ def prune_logs(profile):
 
 def start(args):
     session = 'dsh-' + args.profile
+    # An explicit `--url` is the operator's answer to "where will it listen": do not spend the discovery window looking for it
+    # in a log that, for a service started elsewhere, may never say.
+    explicit_url = bool(args.url)
     args.url = service_url(args)
     pids = processes(args.profile, args.url)
     if len(pids) > 1:
@@ -407,7 +410,7 @@ def start(args):
                 (control(args.profile) / 'service.pid').write_text(pane + '\n')
         print('Log: ' + str(log), flush=True)
         discovered = None
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + (0 if explicit_url else 20)
         while time.monotonic() < deadline:
             try:
                 found = re.findall(r'dsh web:\s*(https?://\S+)', log.read_text(errors='replace'))
