@@ -223,8 +223,9 @@ it('says why it did not ask, and confirms when it did', async () => {
   await mount({ inputActions: actions })
   await ask('a', '到哪一步了？')
   expect(document.querySelector('.dt-dock-notice')?.textContent).toBe(zh['dock.unknown'])
-  // The hint says what the tick is for before anything is clicked.
-  expect(document.querySelector('.dt-dock-hint')?.textContent).toBe(zh['dock.hint'])
+  // A ticket is ticked now, and the ask form names it: the instruction to tick one is gone rather than repeated.
+  expect(document.querySelector('.dt-dock-hint')).toBeNull()
+  expect(document.querySelector('.dt-dock-target')?.textContent).toContain(zh['dock.askAbout'].replace('{title}', '任务 a'))
 })
 
 it('summarizes a task list with one dot and names what a task is doing', () => {

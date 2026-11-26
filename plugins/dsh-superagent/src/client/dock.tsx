@@ -182,7 +182,8 @@ export function TaskDock({ t, sessionId, input, inputActions, useInput, openSess
       {!collapsed && <>
         <span className="dt-dock-summary">{counts.map(([count, key]) => <span key={key}>{t(key, { count: String(count) })}</span>)}
           {omitted > 0 && <span>{t('dock.omitted', { count: String(omitted) })}</span>}</span>
-        <span className="dt-dock-hint">{t('dock.hint')}</span>
+        {/* Once a ticket is ticked the ask form names it, so the instruction to tick one would only be noise. */}
+        {!picked && <span className="dt-dock-hint">{t('dock.hint')}</span>}
         <span className="dt-dock-spacer" />
         {shown.paused && <Tag tone="quiet">{t('dock.paused')}</Tag>}
         <Button variant="ghost" size="sm" onClick={openPanel}>{t('dock.openCanvas')}<Icon name="chevron-right" size={12} /></Button>

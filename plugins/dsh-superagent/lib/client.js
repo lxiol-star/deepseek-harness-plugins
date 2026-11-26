@@ -7108,7 +7108,7 @@ window.__ModuleLoader__.load({
 								className: "dt-dock-summary",
 								children: [counts.map(([count, key]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t(key, { count: String(count) }) }, key)), omitted > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("dock.omitted", { count: String(omitted) }) })]
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							!picked && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "dt-dock-hint",
 								children: t("dock.hint")
 							}),
