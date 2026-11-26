@@ -232,7 +232,6 @@ test('tower_activate lets a workspace main agent enter the mode, only where the 
     const when = harness.whens.get('tower_activate')
     assert.ok(tool && when, 'flag registers tower_activate with a visibility rule')
     assert.equal(when({ agent: harness.main }), true, 'offered to a workspace main agent while tower is off')
-    // `isMainAgent` reads the session header only, so a structural stand-in is enough for the visibility rule.
     const child = { id: 'child', session: { header: { id: 'child', cwd: dir, parentSession: 'session-main', origin: 'subagent' } } }
     assert.equal(when({ agent: child }), false, 'never offered to a subagent')
 

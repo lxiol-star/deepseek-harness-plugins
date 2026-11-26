@@ -9,6 +9,9 @@ sync through a file-backed inbox under `.tower/comms/`.
 
 ## What you get
 
+- **`tower_activate`** — where the profile sets `agentCanEnable: true`, the main agent of a
+  workspace may enter tower mode itself instead of asking a person to run `/tower on`; it is
+  offered only while tower is off, and only to the main agent of that workspace.
 - **`/tower` command** — `/tower on`, `/tower off`, `/tower status`,
   `/tower stop <mission>`, `/tower teardown`, or `/tower <base-branch>`.
 - **13 tools** (model-facing, all gated to tower mode):
