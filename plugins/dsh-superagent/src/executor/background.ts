@@ -13,11 +13,18 @@ interface Jobs {
   kill(id: string, caller: string, reason?: string): unknown
   readonly events: { subscribe(filter: { owner: string }, listener: (event: { type: string }) => void): () => void }
 }
-/** What the Executor uses of DSH's subagents: joining a worker's subagents that work, its subagents, and releasing them. */
+/**
+ * What the Executor uses of DSH's subagents: joining a worker's subagents that work, its subagents, and releasing them.
+ *
+ * None of the three is required. DeepSeek Harness 0.2.2-rc.5 replaced this service with one built on projections and a
+ * lifecycle emitter, and exposes none of them; a Host without them has no subagent background work to wait for, which is a
+ * narrower executor, not a broken one. Requiring them made every ticket fail to end with
+ * `TypeError: subagents.waitForChildren is not a function`.
+ */
 interface Subagents {
-  waitForChildren(parent: Agent): Promise<boolean>
-  listChildren(parentSessionId: string): Promise<readonly { id: string }[]>
-  drainChildren(parent: Agent, childIds: readonly string[]): Promise<void>
+  waitForChildren?(parent: Agent): Promise<boolean>
+  listChildren?(parentSessionId: string): Promise<readonly { id: string }[]>
+  drainChildren?(parent: Agent, childIds: readonly string[]): Promise<void>
 }
 /** How long a stop waits for a killed job to end, collecting its end so the worker is not woken to hear of it. */
 const KILL_WAIT_MS = 10_000
@@ -47,6 +54,8 @@ export const cancelled = new WeakSet<Agent>()
 /** The pending join of each worker's subagents, which DSH cannot cancel, so a later look joins the same one. */
 const joins = new WeakMap<Agent, Promise<boolean>>()
 function childrenEnd(subagents: Subagents, agent: Agent): Promise<boolean> {
+  // A Host that cannot report on a worker's subagents has nothing to join: the turn ends with its own work.
+  if (typeof subagents.waitForChildren !== 'function') return Promise.resolve(false)
   let join = joins.get(agent)
   if (!join) {
     join = subagents.waitForChildren(agent).finally(() => { joins.delete(agent) })
@@ -142,6 +151,7 @@ export async function stopSubagents(ctx: Context, agent: Agent, keepInbox = fals
   const subagents = subagentsOf(ctx)
   if (!subagents) return
   // The catalog lists every subagent the Session had; one that ended has no agent.
+  if (typeof subagents.listChildren !== 'function' || typeof subagents.drainChildren !== 'function') return
   const live = (await subagents.listChildren(agent.id)).map(child => child.id).filter(id => ctx.agents.get(id as SessionId))
   if (!live.length) return
   try { await until(subagents.drainChildren(agent, live), undefined, DRAIN_LIMIT_MS) }

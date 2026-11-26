@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.10 — 2026-11-26
+
+在 DSH `0.2.2-rc.5` 上执行器**干不了活**的根因找到了，并且画布发的文件现在真的能被打开。
+
+- **修复：执行器（worker）拿不到任何工具。** 根因在我们自己的 `workOnly()`：它用 `scopeParentOf(agent)` 取允许的工具名，rc.5 里这个查找返回空，于是把一个**空的 allow-list** 交给 `tools.restrict()`——而空的 allow-list 不是"不限制"，是"把继承来的工具全藏起来"。执行器因此只剩插件自己的 `orchestrator_*`，读不了文件、跑不了命令。
+  - 现在按 rc.5 的真实语义算白名单：`restrict` 只过滤**继承**的工具，会话自身作用域（预设挂载的）工具是豁免的、且**点名会报错**；所以先读父作用域、再读会话自身，两级都为空时**不下空名单**，改用按名字拒绝的守卫兜底。
+  - 实测（隔离实例 + 真实模型）：worker 的 `bash` 跑出 `final-check` / `fix-verified`，退出码 0；schema 里 32 个名字，其中 `WORK_TOOLS` 的 18 个可调用，越界调用被拒并给出原因（`wait_agent` 实测：`An executor Session works with its ticket's tools only, not "wait_agent"`）。
+- **修复：工单永远停在 `working`、worker 起不来或结束不了。** rc.5 把 `subagents` 服务换成了基于 projection/lifecycle 的新实现，我们依赖的 `waitForChildren` / `listChildren` / `drainChildren` 三个方法都不存在，于是收尾时抛 `TypeError: subagents.waitForChildren is not a function`（更早还表现为 `AggregateError: Stopping the background work ... failed`）。三者改为**可选**：宿主没有就视为没有子 agent 后台工作要等，工单正常收尾。
+- **修复：工单结束后没有收回执行器工具。** 上一版把 `tools.guard()` 的返回值（注销器）当成检查函数再调用了一次，导致"工单已结束"的拒绝在兜底路径里恒为放行；现在把检查函数单独抽出，两处共用。
+- **画布发的文件现在真的能被打开**：上传 → 路径随消息 → 主会话开单时把路径带给执行器 → 执行器 `read_image` 读取。实测让 worker 打开我上传的一张画布截图，它准确说出「主会话 / 任务 / 执行器」三列、图例文字与卡片内容。**注意链路是"文件 → 工单 → 执行器"**：主会话本身没有 `read`/`read_image`（它只有编排工具，这是设计如此），所以不勾选工单直接发给主会话的文件，主会话也读不了，只有它开出的工单能让执行器读。
+- 单测：`runtime.spec.ts` 91 项全绿（含执行器/子 agent 的工具收窄、工单结束后的拒绝）；全量 1255 通过 / 6 个既有环境噪声（本机无 tmux ×5、一个 setup 断言）。
+
 ## 0.2.9 — 2026-11-25
 
 在真正登录的页面里（另起的隔离实例，不碰你自己的实例）测出来的问题，以及画布发文件。

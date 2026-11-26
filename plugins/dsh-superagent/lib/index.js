@@ -5105,6 +5105,7 @@ const cancelled = /* @__PURE__ */ new WeakSet();
 /** The pending join of each worker's subagents, which DSH cannot cancel, so a later look joins the same one. */
 const joins = /* @__PURE__ */ new WeakMap();
 function childrenEnd(subagents, agent) {
+	if (typeof subagents.waitForChildren !== "function") return Promise.resolve(false);
 	let join = joins.get(agent);
 	if (!join) {
 		join = subagents.waitForChildren(agent).finally(() => {
@@ -5209,6 +5210,7 @@ async function collectJob(ctx, sessionId, job, signal) {
 async function stopSubagents(ctx, agent, keepInbox = false) {
 	const subagents = subagentsOf(ctx);
 	if (!subagents) return;
+	if (typeof subagents.listChildren !== "function" || typeof subagents.drainChildren !== "function") return;
 	const live = (await subagents.listChildren(agent.id)).map((child) => child.id).filter((id) => ctx.agents.get(id));
 	if (!live.length) return;
 	try {
@@ -9931,11 +9933,33 @@ var Sessions = class {
 	*/
 	workOnly(agent, ticketId) {
 		const store = this.host.store;
-		const parent = scopeParentOf(agent);
-		const allow = WORK_TOOLS.filter((name) => agent.ctx.tools.get(name, parent));
-		return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(() => {
+		/** Refuses a worker its tools once its ticket ended; the same check serves both the restriction and the fallback guard. */
+		const ended = () => {
 			const current = store.tickets.get(ticketId);
 			return !current || !liveTicket(current) ? "Ticket ended; new work needs a new authorized ticket" : void 0;
+		};
+		/**
+		* The names `restrict` accepts: the tools this Session inherits, which are the ones a restriction can hide. Read from the
+		* parent scope first, because a preset's own tools are exempt and naming one is an error; the Session's own view is the
+		* second reading, and an empty list from both is not "no restriction" but a lookup that found nothing, which must not be
+		* handed over as an empty allow-list: that hides every tool and leaves an executor unable to read, write or run anything.
+		*/
+		const parent = scopeParentOf(agent);
+		const candidates = [WORK_TOOLS.filter((name) => agent.ctx.tools.get(name, parent) !== void 0), WORK_TOOLS.filter((name) => agent.ctx.tools.get(name, agent) !== void 0)];
+		const restrictors = [];
+		for (const allow of candidates) {
+			if (allow.length === 0) continue;
+			try {
+				restrictors.push(agent.ctx.tools.restrict({ allow }));
+				break;
+			} catch {}
+		}
+		const allowed = new Set(WORK_TOOLS);
+		return [...restrictors, agent.ctx.tools.guard((exec) => {
+			const denied = ended();
+			if (denied !== void 0) return denied;
+			const name = exec?.name;
+			return name === void 0 || allowed.has(name) ? void 0 : `An executor Session works with its ticket's tools only, not "${name}"`;
 		})];
 	}
 	/**

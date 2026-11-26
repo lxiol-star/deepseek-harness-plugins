@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
-import { scopeParentOf } from '@deepseek-ai/dsh-scope'
+import { scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
@@ -380,11 +380,35 @@ export class Sessions {
    */
   private workOnly(agent: Agent, ticketId: string): (() => void)[] {
     const store = this.host.store
-    const parent = scopeParentOf(agent)
-    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
-    return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(() => {
+    /** Refuses a worker its tools once its ticket ended; the same check serves both the restriction and the fallback guard. */
+    const ended = (): string | undefined => {
       const current = store.tickets.get(ticketId)
       return !current || !liveTicket(current) ? 'Ticket ended; new work needs a new authorized ticket' : undefined
+    }
+    /**
+     * The names `restrict` accepts: the tools this Session inherits, which are the ones a restriction can hide. Read from the
+     * parent scope first, because a preset's own tools are exempt and naming one is an error; the Session's own view is the
+     * second reading, and an empty list from both is not "no restriction" but a lookup that found nothing, which must not be
+     * handed over as an empty allow-list: that hides every tool and leaves an executor unable to read, write or run anything.
+     */
+    const parent = scopeParentOf(agent)
+    const candidates = [
+      WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent) !== undefined),
+      WORK_TOOLS.filter(name => agent.ctx.tools.get(name, agent) !== undefined),
+    ]
+    const restrictors: (() => void)[] = []
+    for (const allow of candidates) {
+      if (allow.length === 0) continue
+      try { restrictors.push(agent.ctx.tools.restrict({ allow })); break } catch { /* the next reading may name only inherited tools */ }
+    }
+    // Whatever no restriction could hide is refused by name when it is called, so an executor works with its prescribed set even
+    // where the filter named none.
+    const allowed = new Set(WORK_TOOLS)
+    return [...restrictors, agent.ctx.tools.guard(exec => {
+      const denied = ended()
+      if (denied !== undefined) return denied
+      const name = (exec as { name?: string } | undefined)?.name
+      return name === undefined || allowed.has(name) ? undefined : `An executor Session works with its ticket's tools only, not "${name}"`
     })]
   }
   /**
