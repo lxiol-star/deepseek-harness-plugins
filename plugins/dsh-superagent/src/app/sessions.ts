@@ -350,11 +350,11 @@ export class Sessions {
   children(): ChildSession[] {
     const sessionOf = (agent: Agent) => agent.session as { header?: { parentSession?: string; title?: string; origin?: string } }
     return [...this.known]
-      .filter(agent => sessionOf(agent).header?.parentSession === this.host.masterId)
+      .filter(agent => sessionOf(agent).header?.parentSession !== undefined)
       .map((agent): ChildSession => {
-        const header = sessionOf(agent).header
-        return { id: agent.id, ...header?.title ? { title: header.title } : {}, ...header?.origin ? { origin: header.origin } : {},
-          live: agent.status === 'running' }
+        const header = sessionOf(agent).header!
+        return { id: agent.id, parentId: header.parentSession!, ...header.title ? { title: header.title } : {},
+          ...header.origin ? { origin: header.origin } : {}, live: agent.status === 'running' }
       })
       .sort((one, other) => Number(other.live) - Number(one.live) || one.id.localeCompare(other.id))
   }

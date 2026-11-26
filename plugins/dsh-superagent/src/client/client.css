@@ -417,6 +417,9 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-canvas:active { cursor: grabbing; }
 .dt-canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .dt-canvas-lane { position: absolute; top: 0; box-sizing: border-box; min-height: 720px; padding: 16px 0 64px; border: 0.5px dashed var(--dsw-alias-border-l3); border-radius: 14px; background: var(--dsw-alias-bg-layer-1); }
+.dt-canvas-kids { margin: 6px 0 0; padding: 0 0 0 10px; list-style: none; border-left: 1px dashed var(--dsw-alias-separator-secondary); }
+.dt-canvas-kid { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.dt-canvas-kid-origin { margin-left: auto; opacity: .75; }
 .dt-canvas-group { margin: 18px 0 0; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
 .dt-canvas-card[data-kind=child] { border-style: dashed; }
 .dt-canvas-lane-title { margin: 0 0 8px; padding: 2px 14px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-tertiary); }

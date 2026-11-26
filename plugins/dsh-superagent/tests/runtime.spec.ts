@@ -1783,9 +1783,14 @@ it('reports the child Sessions the main Session started itself, and only those',
   await stamp('child-a', { parentSession: runtime.masterId, title: '读者', origin: 'subagent' }, 'running')
   await stamp('child-b', { parentSession: runtime.masterId })
   await stamp('child-x', { parentSession: 'someone-else', title: '别人家的' })
+  // A helper an executor grew belongs on the canvas too, under that executor rather than under the main Session.
+  await (controller.create as (options: { sessionId: string }) => Promise<void>)({ sessionId: 'kid-of-worker' })
+  await stamp('kid-of-worker', { parentSession: 'child-a', title: '孙辈' })
   expect(runtime.sessions.children()).toEqual([
-    { id: 'child-a', title: '读者', origin: 'subagent', live: true },
-    { id: 'child-b', live: false },
+    { id: 'child-a', parentId: runtime.masterId, title: '读者', origin: 'subagent', live: true },
+    { id: 'child-b', parentId: runtime.masterId, live: false },
+    { id: 'child-x', parentId: 'someone-else', title: '别人家的', live: false },
+    { id: 'kid-of-worker', parentId: 'child-a', title: '孙辈', live: false },
   ])
   // A ticket's own executor is not a child of the main Session, so a running ticket adds nothing here.
   const { sessionId } = await acceptedTicket()

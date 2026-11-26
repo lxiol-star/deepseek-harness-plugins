@@ -25,6 +25,8 @@ export type StageAction = Extract<TicketStage, { stage: 'person' }>['action'] | 
  */
 export interface ChildSession {
   id: string
+  /** The Session that started it: the main Session, or an executor whose own helpers this is. */
+  parentId: string
   title?: string
   origin?: string
   live: boolean
@@ -89,7 +91,10 @@ export interface TasksHost {
   todos(sessionId: string): Todos | undefined
   /** The tool the Session runs now, with the moment it started, or undefined when it runs none. */
   tool(sessionId: string): { name: string; since: string } | undefined
-  /** The child Sessions the main Session started itself: subagents, teammates, tower children. No ticket owns them. */
+  /**
+   * Every child Session this plugin knows of — started by the main Session or by an executor — so the canvas can show which card
+   * grew them. A ticket's executor is not one of them: a ticket runs its own top-level Session.
+   */
   children(): readonly ChildSession[]
   /** The main Session's latest exchanges, oldest first. */
   conversation(): readonly Exchange[]

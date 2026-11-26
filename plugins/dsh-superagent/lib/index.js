@@ -9919,12 +9919,13 @@ var Sessions = class {
 	*/
 	children() {
 		const sessionOf = (agent) => agent.session;
-		return [...this.known].filter((agent) => sessionOf(agent).header?.parentSession === this.host.masterId).map((agent) => {
+		return [...this.known].filter((agent) => sessionOf(agent).header?.parentSession !== void 0).map((agent) => {
 			const header = sessionOf(agent).header;
 			return {
 				id: agent.id,
-				...header?.title ? { title: header.title } : {},
-				...header?.origin ? { origin: header.origin } : {},
+				parentId: header.parentSession,
+				...header.title ? { title: header.title } : {},
+				...header.origin ? { origin: header.origin } : {},
 				live: agent.status === "running"
 			};
 		}).sort((one, other) => Number(other.live) - Number(one.live) || one.id.localeCompare(other.id));

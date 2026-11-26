@@ -357,11 +357,27 @@ it('fits a plane that holds more than the viewport can show at its own size', ()
   expect(bottom).toBeLessThanOrEqual(800)
 })
 
+it('puts a worker\'s own helpers under that worker, not in the main Session\'s group', async () => {
+  server.tasks = snapshot([task('a'), task('b')], { children: [
+    { id: 'mine', parentId: 'master', title: '主会话的帮手', origin: 'subagent', live: false },
+    { id: 'kid-a', parentId: 'worker-a', title: 'a 的帮手', origin: 'subagent', live: true },
+  ] })
+  await mount()
+  // The main Session's group counts only its own child.
+  expect(document.querySelector('.dt-canvas-group')?.textContent).toContain(zh['canvas.otherChildren'].replace('{total}', '1'))
+  // The worker that grew one shows it under its card, with its origin.
+  const cards = [...document.querySelectorAll('[data-kind=worker]')]
+  const withKid = cards.filter(card => card.querySelector('.dt-canvas-kid'))
+  expect(withKid).toHaveLength(1)
+  expect(withKid[0]?.textContent).toContain('a 的帮手')
+  expect(withKid[0]?.textContent).toContain(zh['canvas.childOrigin.subagent'])
+})
+
 it('draws the child Sessions the main Session started itself, apart from the ticket workers', async () => {
   server.tasks = snapshot([task('a', { live: true })], { children: [
-    { id: 'child-live', title: '读者', origin: 'subagent', live: true },
-    { id: 'child-idle', title: '审查者', origin: 'subagent', live: false },
-    { id: 'child-odd', live: false },
+    { id: 'child-live', parentId: 'master', title: '读者', origin: 'subagent', live: true },
+    { id: 'child-idle', parentId: 'master', title: '审查者', origin: 'subagent', live: false },
+    { id: 'child-odd', parentId: 'master', live: false },
   ] })
   await mount()
   const workers = [...document.querySelectorAll('[data-kind=worker]')]

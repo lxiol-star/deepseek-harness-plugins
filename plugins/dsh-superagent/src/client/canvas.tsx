@@ -202,6 +202,8 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
     setView(fitView(frame(rects), size.w, size.h, 48, size.top)) }
   const tasks = data?.tasks ?? []
   const children = data?.children ?? []
+  /** The Sessions started by one card, which the canvas shows on that card rather than as a lane of their own. */
+  const kidsOf = (sessionId: string) => children.filter(child => child.parentId === sessionId)
   const all = data?.conversation ?? []
   const recent = all.slice(-4).map((entry, index) => ({ entry, place: all.length - Math.min(4, all.length) + index }))
   // The newest answer is the one the operator asked for: the list follows it as it arrives, unless the operator has scrolled
@@ -451,6 +453,14 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
                 <StateDot state={task.live ? 'ongoing' : 'idle'} />
               </header>
               <p className="dt-canvas-clamp" title={task.title}>{t('canvas.workerOf', { title: task.title })}</p>
+              {kidsOf(task.sessionId).length > 0 && <ul className="dt-canvas-kids">
+                {kidsOf(task.sessionId).map(child => <li key={child.id} className="dt-canvas-kid" data-live={child.live ? '1' : undefined}>
+                  <StateDot state={child.live ? 'ongoing' : 'idle'} />
+                  <span className="dt-canvas-clamp" title={child.title ?? child.id}>{child.title ?? t('canvas.noChildTitle')}</span>
+                  <span className="dt-canvas-kid-origin">{childOrigin(t, child.origin)}</span>
+                </li>)}
+              </ul>}
+
               <p className="dt-canvas-meta">{t(task.live ? 'dock.live' : 'dock.idle')}</p>
               <footer className="dt-canvas-card-foot">
                 <Button variant="ghost" size="sm" icon={<Icon name="session" size={14} />}
@@ -459,9 +469,9 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
               </footer>
             </article>
           })}
-          {children.length > 0 && <>
-            <h3 className="dt-canvas-group">{t('canvas.otherChildren', { total: String(children.length) })}</h3>
-            {children.map(child => {
+          {kidsOf(data?.masterId ?? '').length > 0 && <>
+            <h3 className="dt-canvas-group">{t('canvas.otherChildren', { total: String(kidsOf(data?.masterId ?? '').length) })}</h3>
+            {kidsOf(data?.masterId ?? '').map(child => {
               const id = `child:${child.id}`
               return <article key={id} className="dt-canvas-card" data-node={id} data-kind="child" style={place(id)} onPointerDown={stop}>
                 <header className="dt-canvas-card-head">
