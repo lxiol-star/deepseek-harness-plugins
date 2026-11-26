@@ -37,9 +37,15 @@ github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.15&path:/plugins/
 3. 直接说任务，例如「在当前工作区把 README 的安装步骤补全，做完告诉我」。
 4. 主 Session 调 `orchestrator_task` 开单，worker 在子工作树里执行，完成后把结果回报到主 Session。
 5. 看进度：主会话输入框上方的**任务条**列出每张工单的阶段和进度，可收起成一颗带计数的药丸；侧栏的 **Superagent 画布** 把主会话、任务、执行器画成三列卡片，可平移、缩放、拖动。勾选一张工单，就能就它向主会话提问，回答出现在主会话的对话里。
+   - 执行器「此刻在跑哪个工具」直接显示在卡上（读文件 / 跑命令 / 看图…）。
+   - **子会话**分两类且分得清：主会话自己开的（分组「其他子会话」，虚线边框、人形图标），和执行器长出来的（画在**那张执行器卡内部**，缩进列表并标出来源）。
 6. 收拾子工作区也交给主 Session：`orchestrator_workspaces` 的 `op=list` 列出来，`op=archive` 按 DSH 客户端语义归档其中的会话，`op=delete`+`confirm=true` 才删工作区注册（默认不删，目录与会话日志保留；有会话在跑或未归档一律拒绝）。不要再让它去点 DevTools。
 
 来源事件（MSP / 工作区树 / GitHub）到达后出现在面板「触发」，被接受后进入「执行」，每个工单一个 worker Session。
+
+**执行器的工作区**：建目录时若这里还不是 git 仓库，会用临时身份 `git init` 并留一个空提交——需要底座 commit 的工具（例如 tower 模式）才能起来；已经是仓库的原样不动，没有 git 的宿主保持普通目录。
+
+**tower 模式**：装了 `dsh-kimi-tower` 且其 bundle patch 设置了 `agentCanEnable: true` 时，执行器可以用 `tower_activate` 在自己的工作区里自行进入 tower 模式（默认关闭，需要人敲 `/tower on`）。
 
 ## 配置
 
