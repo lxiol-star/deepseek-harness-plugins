@@ -143,6 +143,22 @@ export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 
 }
 
 /**
+ * Gives a ticket workspace a repository with one commit when it has none. Tools that need a base commit then work: tower mode
+ * refuses an unborn HEAD ("the repository has no commits yet"), and a worker's diff has nothing to compare against without one. A
+ * directory that is already a repository is left alone, and a Host without git keeps the plain directory it had.
+ */
+export async function seedRepository(directory: string, subprocess: SubprocessRuntime, signal: AbortSignal): Promise<void> {
+  const within = AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+  const repository = await runAsWorker(subprocess, ['git', 'rev-parse', '--git-dir'], directory, within).then(() => true, () => false)
+  if (repository) return
+  // The identity travels in the environment, so seeding never writes to a git config the worker will later read.
+  const identity = { GIT_AUTHOR_NAME: 'dsh-superagent', GIT_AUTHOR_EMAIL: 'superagent@localhost',
+    GIT_COMMITTER_NAME: 'dsh-superagent', GIT_COMMITTER_EMAIL: 'superagent@localhost' }
+  await runAsWorker(subprocess, ['git', 'init', '-q'], directory, within, identity)
+  await runAsWorker(subprocess, ['git', 'commit', '-q', '--allow-empty', '-m', 'Start the ticket workspace'], directory, within, identity)
+}
+
+/**
  * Verifies that a ticket directory's local or worktree git config defines no custom `credential.*` or `http.*extraheader`
  * keys, which the agent's git would read from the repository's own config and act on.
  */

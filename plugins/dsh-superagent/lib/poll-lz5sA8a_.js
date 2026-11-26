@@ -520,6 +520,38 @@ async function verifyEnvironment(deployment, subprocess, signal) {
 	].join("\0")) throw new SetupError("gitTooOld");
 }
 /**
+* Gives a ticket workspace a repository with one commit when it has none. Tools that need a base commit then work: tower mode
+* refuses an unborn HEAD ("the repository has no commits yet"), and a worker's diff has nothing to compare against without one. A
+* directory that is already a repository is left alone, and a Host without git keeps the plain directory it had.
+*/
+async function seedRepository(directory, subprocess, signal) {
+	const within = AbortSignal.any([signal, AbortSignal.timeout(6e4)]);
+	if (await runAsWorker(subprocess, [
+		"git",
+		"rev-parse",
+		"--git-dir"
+	], directory, within).then(() => true, () => false)) return;
+	const identity = {
+		GIT_AUTHOR_NAME: "dsh-superagent",
+		GIT_AUTHOR_EMAIL: "superagent@localhost",
+		GIT_COMMITTER_NAME: "dsh-superagent",
+		GIT_COMMITTER_EMAIL: "superagent@localhost"
+	};
+	await runAsWorker(subprocess, [
+		"git",
+		"init",
+		"-q"
+	], directory, within, identity);
+	await runAsWorker(subprocess, [
+		"git",
+		"commit",
+		"-q",
+		"--allow-empty",
+		"-m",
+		"Start the ticket workspace"
+	], directory, within, identity);
+}
+/**
 * Verifies that a ticket directory's local or worktree git config defines no custom `credential.*` or `http.*extraheader`
 * keys, which the agent's git would read from the repository's own config and act on.
 */
@@ -785,4 +817,4 @@ function pause(ms, signal) {
 	});
 }
 //#endregion
-export { isoTime as A, waitsForPerson as B, CliError as C, LIMITS as D, SetupError as E, readUntil as F, runningAssignment as I, settled as L, latestReport as M, liveTicket as N, key as O, reached as P, threadKey as R, writeEnvironment as S, validItems as T, runAsWorker as _, polled as a, withoutDirectory as b, GithubAccountsSchema as c, resolveDeployment as d, resolveFeishuBot as f, applyEnvironment as g, agentVariables as h, pollThreads as i, latestAssignment as j, followupOwners as k, SETUP_FIELDS as l, WORKER_COMMANDS as m, cursorAt as n, Config as o, workerProbe as p, pause as r, FeishuBotSchema as s, POLL_HORIZON_MS as t, machineOf as u, verifyDirectory as v, Commands as w, workerBin as x, verifyEnvironment as y, ticketOutcome as z };
+export { followupOwners as A, ticketOutcome as B, writeEnvironment as C, SetupError as D, validItems as E, reached as F, readUntil as I, runningAssignment as L, latestAssignment as M, latestReport as N, LIMITS as O, liveTicket as P, settled as R, workerBin as S, Commands as T, waitsForPerson as V, runAsWorker as _, polled as a, verifyEnvironment as b, GithubAccountsSchema as c, resolveDeployment as d, resolveFeishuBot as f, applyEnvironment as g, agentVariables as h, pollThreads as i, isoTime as j, key as k, SETUP_FIELDS as l, WORKER_COMMANDS as m, cursorAt as n, Config as o, workerProbe as p, pause as r, FeishuBotSchema as s, POLL_HORIZON_MS as t, machineOf as u, seedRepository as v, CliError as w, withoutDirectory as x, verifyDirectory as y, threadKey as z };

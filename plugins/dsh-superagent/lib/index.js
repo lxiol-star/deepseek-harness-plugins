@@ -1,7 +1,7 @@
-import { A as isoTime, B as waitsForPerson, D as LIMITS, E as SetupError, F as readUntil, I as runningAssignment, L as settled, M as latestReport, N as liveTicket, O as key, P as reached, R as threadKey, S as writeEnvironment, _ as runAsWorker, b as withoutDirectory, d as resolveDeployment, f as resolveFeishuBot, g as applyEnvironment, h as agentVariables, j as latestAssignment, k as followupOwners, l as SETUP_FIELDS, m as WORKER_COMMANDS, o as Config, p as workerProbe, u as machineOf, v as verifyDirectory, w as Commands, x as workerBin, y as verifyEnvironment, z as ticketOutcome } from "./poll-DnbywwKN.js";
+import { A as followupOwners, B as ticketOutcome, C as writeEnvironment, D as SetupError, F as reached, I as readUntil, L as runningAssignment, M as latestAssignment, N as latestReport, O as LIMITS, P as liveTicket, R as settled, S as workerBin, T as Commands, V as waitsForPerson, _ as runAsWorker, b as verifyEnvironment, d as resolveDeployment, f as resolveFeishuBot, g as applyEnvironment, h as agentVariables, j as isoTime, k as key, l as SETUP_FIELDS, m as WORKER_COMMANDS, o as Config, p as workerProbe, u as machineOf, v as seedRepository, x as withoutDirectory, y as verifyDirectory, z as threadKey } from "./poll-lz5sA8a_.js";
 import { o as sameName, r as checkedImText, s as wordCount, t as health } from "./host-_39SpoCg.js";
-import { i as pullOf, m as readRepositoryPath, o as readPull, p as readGithub, r as pullEndNotices, t as claimPull } from "./github-pull-DG2B5DMN.js";
-import { b as feishuTriggerId, d as feishuChatLink, f as feishuRead, g as feishuRef, m as readFeishuLink, p as feishuReferences, r as feishuSettings } from "./feishu-BSF14ZUd.js";
+import { i as pullOf, m as readRepositoryPath, o as readPull, p as readGithub, r as pullEndNotices, t as claimPull } from "./github-pull-ClG24JJ-.js";
+import { b as feishuTriggerId, d as feishuChatLink, f as feishuRead, g as feishuRef, m as readFeishuLink, p as feishuReferences, r as feishuSettings } from "./feishu-XztFg_kf.js";
 import { t as KV } from "./kv-Dp1nVXMG.js";
 import { sessionTrigger } from "./session-watch.js";
 import { Service } from "@deepseek-ai/cordis";
@@ -5504,6 +5504,7 @@ var DshExecutor = class {
 			throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`);
 		});
 		await mkdir(directory, { recursive: true });
+		await seedRepository(directory, this.host.context.subprocess, this.host.lifetime).catch(() => {});
 		await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime);
 	}
 	/** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
@@ -9580,8 +9581,7 @@ const TOWER_TOOLS = [
 	"tower_teardown",
 	"tower_complete"
 ];
-/** What a worker Session may call: the work tools, plus the tower protocol when this Host offers it. */
-const WORK_ALLOWED = [...[
+const WORK_TOOLS = [
 	"read",
 	"write",
 	"edit",
@@ -9602,7 +9602,17 @@ const WORK_ALLOWED = [...[
 	"send_message",
 	"list_agents",
 	"interrupt_agent"
-], ...TOWER_TOOLS];
+];
+/** The tools without which an executor cannot do its work at all: a restriction that names none of them is not applied. */
+const CORE_TOOLS = [
+	"read",
+	"write",
+	"edit",
+	"bash",
+	"grep"
+];
+/** What a worker Session may call: the work tools, plus the tower protocol when this Host offers it. */
+const WORK_ALLOWED = [...WORK_TOOLS, ...TOWER_TOOLS];
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = "Reports, follow_up notices, new candidates and a background job's end with its output arrive by themselves as messages; end the turn instead of waiting for them.";
 /** What the main Session is told when it would wait on an agent of its own: that agent's message arrives by itself too. */
@@ -10026,9 +10036,16 @@ var Sessions = class {
 		*/
 		const parent = scopeParentOf(agent);
 		const candidates = [WORK_ALLOWED.filter((name) => agent.ctx.tools.get(name, parent) !== void 0), WORK_ALLOWED.filter((name) => agent.ctx.tools.get(name, agent) !== void 0)];
+		/**
+		* A restriction may only be handed a list that still leaves the everyday work tools: an allow-list missing them is the
+		* symptom of a lookup that read the wrong scope, and applying it would hide the very tools the worker needs. Measured on a
+		* live Host: adding the global `tower_*` names made the list non-empty but held none of these, and every executor lost
+		* bash, read and write.
+		*/
+		const keepsWorking = (allow) => CORE_TOOLS.some((name) => allow.includes(name));
 		const restrictors = [];
 		for (const allow of candidates) {
-			if (allow.length === 0) continue;
+			if (!keepsWorking(allow)) continue;
 			try {
 				restrictors.push(agent.ctx.tools.restrict({ allow }));
 				break;

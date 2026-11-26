@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.13 — 2026-11-27
+
+实测（隔离实例 + 真实模型 + 真跑一次工单）抓出并修掉两处，都是"看起来正常、实际干不了活"的那种。
+
+- **修复：worker 又只剩几个工具了（我 0.2.12 引入的）。** `tower_*` 是全局工具，它们让 `restrict()` 的白名单**非空**，于是"空名单就下手"的保护被绕过，`restrict({allow: ['tower_activate']})` 成功执行并把继承来的 bash/read/write 全藏了——worker 只剩 6 个 `orchestrator_*` 加一个 `tower_activate`，而它会照常"汇报已执行"。现在只有当白名单里**仍包含核心工作工具**（read/write/edit/bash/grep）时才会应用限制，否则只留按名字拒绝的守卫。
+- **修复：工单目录是空仓库，需要底座 commit 的工具用不了。** 建工单目录后若它还不是 git 仓库，就用一个临时身份 `git init` 并留一个空提交；已经是仓库的原样不动，没有 git 的宿主保持普通目录、不影响开单。依据是 tower 的原话：`the repository has no commits yet — create an initial commit first`。
+- **实机验证**（隔离 home，模型真跑）：worker 25 个工具（bash/read/write 齐）→ `bash -c "echo shell-ok && pwd"` 退出码 0 → 调 `tower_activate` 返回 `Tower mode: ON (base main, checkout main)` 且工作目录出现 `.git` + `.tower/` → 激活后 schema 动态长出 13 个 tower 工具（`tower_status`/`tower_inbox` 已实调成功）。
+- 单测：`environment.spec` 新增两条（空目录播种后一个提交、二次播种不变、已有仓原样保留）；全量 1262 通过 / 6 个既有环境噪声。
+
 ## 0.2.12 — 2026-11-26
 
 画布上能看见主会话自己开出来的子会话了，而且和工单执行器分得清。

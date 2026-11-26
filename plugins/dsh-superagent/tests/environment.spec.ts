@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
+import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, seedRepository, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
   from '../src/infra/environment.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -120,8 +120,8 @@ it('removes every spelling of a directory from PATH and keeps the other entries'
 
 /** Minimal SubprocessRuntime backed by child_process.spawn with an isolated global git config. */
 const subprocess = (config: string): SubprocessRuntime => ({
-  spawn: ({ argv, cwd }: { argv: readonly string[]; cwd: string }) => {
-    const child = spawn(argv[0]!, argv.slice(1), { cwd, env: gitEnv({ GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' }) })
+  spawn: ({ argv, cwd, env }: { argv: readonly string[]; cwd: string; env?: Record<string, string> }) => {
+    const child = spawn(argv[0]!, argv.slice(1), { cwd, env: { ...gitEnv({ GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' }), ...env } })
     const output = { stdout: '', stderr: '' }
     child.stdout.on('data', chunk => { output.stdout += String(chunk) })
     child.stderr.on('data', chunk => { output.stderr += String(chunk) })
@@ -130,6 +130,31 @@ const subprocess = (config: string): SubprocessRuntime => ({
     return { done, collected: { stdout: reader('stdout'), stderr: reader('stderr') } }
   },
 }) as unknown as SubprocessRuntime
+describe('ticket workspace seed', () => {
+  const signal = () => new AbortController().signal
+  const seed = (name: string) => seedRepository(join(dir, name), subprocess(join(dir, 'global')), signal())
+  const git = async (...args: string[]) => exec('git', args, { cwd: dir, env: gitEnv({ GIT_CONFIG_GLOBAL: join(dir, 'global'), GIT_CONFIG_NOSYSTEM: '1' }) })
+  const commits = async (name: string) => (await git('-C', join(dir, name), 'log', '--format=%s', '--all')).stdout.trim().split('\n').filter(Boolean)
+  beforeEach(() => { writeFileSync(join(dir, 'global'), '') })
+
+  it('gives an empty directory a repository with one commit, so a tool that needs a base HEAD works, and re-seeding changes nothing', async () => {
+    mkdirSync(join(dir, 'fresh'))
+    await seed('fresh')
+    expect(readdirSync(join(dir, 'fresh'))).toContain('.git')
+    expect(await commits('fresh')).toHaveLength(1)
+    // Seeding again must not add a second commit: the workspace is prepared once and prepared again on resume.
+    await seed('fresh')
+    expect(await commits('fresh')).toHaveLength(1)
+  })
+
+  it('leaves a repository that already has commits exactly as it found it', async () => {
+    await git('init', '-q', 'existing')
+    await git('-C', join(dir, 'existing'), '-c', 'user.name=T', '-c', 'user.email=t@example.test', 'commit', '-q', '--allow-empty', '-m', 'mine')
+    await seed('existing')
+    expect(await commits('existing')).toEqual(['mine'])
+  })
+})
+
 describe('ticket directory check', () => {
   const signal = new AbortController().signal
   const env = () => gitEnv({ GIT_CONFIG_GLOBAL: join(dir, 'global'), GIT_CONFIG_NOSYSTEM: '1' })

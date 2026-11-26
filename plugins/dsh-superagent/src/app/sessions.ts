@@ -104,6 +104,8 @@ const TOWER_TOOLS = ['tower_activate', 'tower_init', 'tower_plan', 'tower_missio
   'tower_complete'] as const
 const WORK_TOOLS = ['read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash', 'pwsh', 'job_output', 'job_list', 'job_kill', 'web_search',
   'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent']
+/** The tools without which an executor cannot do its work at all: a restriction that names none of them is not applied. */
+const CORE_TOOLS = ['read', 'write', 'edit', 'bash', 'grep']
 /** What a worker Session may call: the work tools, plus the tower protocol when this Host offers it. */
 const WORK_ALLOWED: readonly string[] = [...WORK_TOOLS, ...TOWER_TOOLS]
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
@@ -450,9 +452,16 @@ export class Sessions {
       WORK_ALLOWED.filter(name => agent.ctx.tools.get(name, parent) !== undefined),
       WORK_ALLOWED.filter(name => agent.ctx.tools.get(name, agent) !== undefined),
     ]
+    /**
+     * A restriction may only be handed a list that still leaves the everyday work tools: an allow-list missing them is the
+     * symptom of a lookup that read the wrong scope, and applying it would hide the very tools the worker needs. Measured on a
+     * live Host: adding the global `tower_*` names made the list non-empty but held none of these, and every executor lost
+     * bash, read and write.
+     */
+    const keepsWorking = (allow: readonly string[]): boolean => CORE_TOOLS.some(name => allow.includes(name))
     const restrictors: (() => void)[] = []
     for (const allow of candidates) {
-      if (allow.length === 0) continue
+      if (!keepsWorking(allow)) continue
       try { restrictors.push(agent.ctx.tools.restrict({ allow })); break } catch { /* the next reading may name only inherited tools */ }
     }
     // Whatever no restriction could hide is refused by name when it is called, so an executor works with its prescribed set even
