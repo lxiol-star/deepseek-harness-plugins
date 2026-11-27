@@ -47,5 +47,8 @@
       "platform": "web"
     },
     "manifestVersion": 1
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
   }
 }
