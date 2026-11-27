@@ -29,10 +29,12 @@ const DEFAULT_SECTIONS = [
 ]
 
 function fixture(sections, rail) {
-  const body = sections.map(section => `<section class="group">
+  const render = (section) => `<section class="group">
         <div data-row-key="workspace:${section.ws}" role="treeitem"></div>
         ${section.sessions.map(id => `<div data-row-key="session:${id}"></div>`).join('\n        ')}
-      </section>`).join('\n      ')
+        ${(section.children ?? []).map(render).join('\n        ')}
+      </section>`
+  const body = sections.map(render).join('\n      ')
   return `<div class="${rail ? 'x_root_x x_rail_x' : 'x_root_x'}">
     <div class="x_sectionHeader_x"><span class="x_sectionLabel_x">sessions</span></div>
     <div class="x_listArea_x">
@@ -604,6 +606,41 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5))
   await wait()
   check('fresh blank Workspace stays visible during grace', !world.hidden('ws-a'))
   check('stale blank Workspace is hidden after grace', world.hidden('ws-b'))
+  world.dispose()
+  world.window.close()
+}
+
+// A worktree is drawn under its project: an empty parent must not take the nested group's sessions with it.
+{
+  const world = boot({
+    items: [
+      { workspaceId: 'ws-project', sessionIds: [], title: 'project', path: '/tmp/project' },
+      { workspaceId: 'ws-worktree', sessionIds: ['s1'], title: 'worktree', path: '/tmp/project/.worktrees/wt' },
+    ],
+    sessionsById: { s1: { id: 's1', blank: false, updatedAt: Date.now() } },
+    sections: [{ ws: 'ws-project', sessions: [], children: [{ ws: 'ws-worktree', sessions: ['s1'] }] }],
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  check('empty parent with a visible nested Workspace stays', !world.hidden('ws-project'))
+  check('nested Workspace with a visible Session stays', !world.hidden('ws-worktree'))
+  world.dispose()
+  world.window.close()
+}
+
+// A section that also holds session rows must not be marked as a whole: only the Workspace row goes.
+{
+  const world = boot({
+    items: [{ workspaceId: 'ws-empty', sessionIds: [], title: 'empty', path: '/tmp/empty' }],
+    sessionsById: { neighbour: { id: 'neighbour', blank: false, updatedAt: Date.now() } },
+    sections: [{ ws: 'ws-empty', sessions: ['neighbour'] }],
+  })
+  world.exported.apply(world.ctx)
+  await wait()
+  const section = world.row('workspace:ws-empty').parentElement
+  check('the empty Workspace row itself is hidden', world.hidden('ws-empty'))
+  check('the section holding a session row keeps no hide mark', !section.hasAttribute('data-dsh-hide-empty'))
+  check('a session row next to it stays visible', !world.sessionHidden('neighbour'))
   world.dispose()
   world.window.close()
 }

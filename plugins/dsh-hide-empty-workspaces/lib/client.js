@@ -992,6 +992,7 @@ window.__ModuleLoader__.load({
           const graceMs = readGraceMinutes() * 60_000
           const now = Date.now()
           if (mode === 'active') {
+            const seen = []
             for (const item of snapshot.items) {
               const ids = item !== undefined && item !== null && item.sessionIds !== undefined
                 ? item.sessionIds
@@ -1001,7 +1002,22 @@ window.__ModuleLoader__.load({
                 if (stateVisible(stateOf(id, archived, summaries, includeBlank, graceMs, now))) visible += 1
               }
               visibleSessions += visible
-              if (visible === 0) hiddenWorkspaces.add(String(item.workspaceId))
+              seen.push({
+                id: item !== undefined && item !== null ? String(item.workspaceId) : '',
+                path: item !== undefined && item !== null && typeof item.path === 'string' ? item.path : '',
+                visible,
+              })
+            }
+            for (const item of seen) if (item.visible === 0) hiddenWorkspaces.add(item.id)
+            // The tree nests Workspaces (a worktree under the project it was branched from): an empty parent that still holds a
+            // visible nested group must stay, or hiding it takes the nested sessions off the list with it.
+            const under = (child, parent) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/')
+            for (const visible of seen) {
+              if (visible.visible === 0 || visible.path === '') continue
+              for (const empty of seen) {
+                if (empty.visible !== 0 || empty.path === '') continue
+                if (under(visible.path, empty.path)) hiddenWorkspaces.delete(empty.id)
+              }
             }
           }
 
@@ -1247,7 +1263,9 @@ window.__ModuleLoader__.load({
       const parent = workspaceRow.parentElement
       if (parent === null) return workspaceRow
       const own = parent.querySelectorAll(`:scope > [data-row-key^="${ROW_PREFIX}"]`)
-      return own.length === 1 ? parent : workspaceRow
+      // Climb only when the parent exists to hold this row and nothing else. A section that also holds session rows — or a
+      // nested Workspace group, which is how the tree draws a worktree under its project — would lose all of them with it.
+      return own.length === 1 && parent.children.length === 1 ? parent : workspaceRow
     }
 
     exports.apply = apply
