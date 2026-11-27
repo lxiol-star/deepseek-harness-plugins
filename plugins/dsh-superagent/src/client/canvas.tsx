@@ -78,6 +78,52 @@ export type Side = 'left' | 'right'
  * The curve bends at most to the middle of the gap between the two edges, so it stays between them however close the cards are;
  * where the edges touch or overlap (a card the operator dragged onto another) it is a straight run, which cannot loop over a card.
  */
+/**
+ * A line that leaves `from` towards `to` and turns on a shared trunk: out of the card, along the gap, then into the other card.
+ * Peers that leave the same card share the trunk, so a column of links reads as one bus with short branches instead of a fan of
+ * curves that cross each other and the cards. `labelAt` is where a caption belongs, just beside the trunk.
+ */
+export function elbowPath(from: Rect, to: Rect, fromShare = 0.5, toShare = 0.5): { d: string; labelAt: { x: number; y: number } } {
+  const rightward = to.x + to.w / 2 >= from.x + from.w / 2
+  const sx = rightward ? from.x + from.w : from.x
+  const sy = from.y + from.h * fromShare
+  const tx = rightward ? to.x : to.x + to.w
+  const ty = to.y + to.h * toShare
+  const trunk = (sx + tx) / 2
+  const labelAt = { x: trunk, y: (sy + ty) / 2 }
+  if (Math.abs(ty - sy) < 1) return { d: `M ${sx} ${sy} H ${tx}`, labelAt: { x: (sx + tx) / 2, y: sy } }
+  const r = Math.min(12, Math.abs(ty - sy) / 2, Math.abs(trunk - sx), Math.abs(tx - trunk))
+  const down = Math.sign(ty - sy), inward = Math.sign(tx - trunk), out = Math.sign(trunk - sx)
+  const d = `M ${sx} ${sy} H ${trunk} ${Number.isFinite(r) && r > 0
+    ? `Q ${trunk} ${sy} ${trunk} ${sy + r * down} V ${ty - r * down} Q ${trunk} ${ty} ${trunk + r * inward} ${ty} H ${tx}`
+    : `V ${ty} H ${tx}`}`
+  return { d, labelAt }
+}
+
+/** One link from a card to another, with the caption the canvas draws beside its trunk. */
+export interface CanvasEdge { id: string; kind: 'dispatch' | 'run' | 'ask'; d: string; label?: { text: string; x: number; y: number } }
+
+/**
+ * Every link on the plane, routed from the measured cards. Dispatch links carry no caption: the legend names that line, and one
+ * caption per link turned the gap into a wall of the same word. The run caption appears once, on the first executor link.
+ */
+export function routeEdges(tasks: readonly TaskView[], rects: Record<string, Rect>, picked: TaskView | undefined,
+  text: { run: string; ask: string }): CanvasEdge[] {
+  const out: CanvasEdge[] = []
+  const join = (id: string, kind: CanvasEdge['kind'], from: string, to: string, fromShare: number, toShare: number) => {
+    const a = rects[from], b = rects[to]
+    if (!a || !b) return
+    const routed = elbowPath(a, b, fromShare, toShare)
+    const label = kind === 'run' ? (out.some(edge => edge.kind === 'run') ? undefined : { text: text.run, ...routed.labelAt })
+      : kind === 'ask' ? { text: text.ask, ...routed.labelAt } : undefined
+    out.push({ id, kind, d: routed.d, ...label ? { label: { text: label.text, x: label.x + 8, y: label.y } } : {} })
+  }
+  for (const task of tasks) join(`dispatch:${task.id}`, 'dispatch', MASTER, `task:${task.id}`, 0.5, 0.3)
+  for (const task of tasks) if (task.sessionId) join(`run:${task.id}`, 'run', `task:${task.id}`, `worker:${task.sessionId}`, 0.5, 0.5)
+  if (picked) join('ask', 'ask', `task:${picked.id}`, COMPOSER, 0.7, 0.5)
+  return out
+}
+
 export function edgePath(from: Rect, to: Rect, fromShare = 0.5, toShare = 0.5, out: Side = 'right', into: Side = 'left'): string {
   const sx = out === 'right' ? from.x + from.w : from.x, sy = from.y + from.h * fromShare
   const tx = into === 'left' ? to.x : to.x + to.w, ty = to.y + to.h * toShare
@@ -308,20 +354,10 @@ export function CanvasPage({ intervalMs = POLL_MS }: { intervalMs?: number }) {
   const screen = (rect: Rect): Rect => ({ x: rect.x * view.scale + view.x, y: rect.y * view.scale + view.y,
     w: rect.w * view.scale, h: rect.h * view.scale })
   const lines = (() => {
-    const out: { id: string; kind: 'dispatch' | 'run' | 'ask'; d: string; label?: { text: string; x: number; y: number } }[] = []
-    const join = (id: string, kind: 'dispatch' | 'run' | 'ask', from: string, to: string, fromShare: number, toShare: number, label?: string) => {
-      const a = node(from), b = node(to)
-      if (!a || !b) return
-      // The line leaves `from` towards `to`: by its right edge when `to` lies to the right, by its left edge otherwise.
-      // The line leaves `from` by the edge that faces `to`: its right edge when `to` lies to the right, its left edge otherwise.
-      const rightward = b.x + b.w / 2 >= a.x + a.w / 2
-      const d = edgePath(screen(a), screen(b), fromShare, toShare, rightward ? 'right' : 'left', rightward ? 'left' : 'right')
-      const at = curveMiddle(d)
-      out.push({ id, kind, d, ...label ? { label: { text: label, ...at } } : {} })
-    }
-    for (const task of tasks) join(`dispatch:${task.id}`, 'dispatch', MASTER, `task:${task.id}`, 0.5, 0.3)
-    for (const task of tasks) if (task.sessionId) join(`run:${task.id}`, 'run', `task:${task.id}`, `worker:${task.sessionId}`, 0.5, 0.5, t('canvas.edge.runLabel'))
-    if (picked) join('ask', 'ask', `task:${picked.id}`, COMPOSER, 0.7, 0.5, t('canvas.edge.askLabel'))
+    const out: CanvasEdge[] = []
+    const scaled = (id: string): Rect | undefined => { const rect = node(id); return rect === undefined ? undefined : screen(rect) }
+    for (const edge of routeEdges(tasks, Object.fromEntries(Object.keys(rects).map(id => [id, scaled(id)!])), picked,
+      { run: t('canvas.edge.runLabel'), ask: t('canvas.edge.askLabel') })) out.push(edge)
     return out
   })()
   const cardsOf = Object.entries(rects).filter(([id]) => !id.startsWith(LANE)) as [string, Rect][]

@@ -1772,8 +1772,8 @@ it('gives a subagent of a worker only the worker\'s work tools, and none once th
 it('reads the tool a Session runs from its log, and stops when the call returns', async () => {
   const { sessionId } = await acceptedTicket()
   const ctx = (runtime as unknown as { ctx: Context }).ctx
-  const agent = agents.get(sessionId)!
-  const emit = (type: string, data: unknown = {}, time = 1_700_000_000_000) => ctx.emit('session/event', agent.session, { type, time, data })
+  const agent = agents.get(sessionId)! as unknown as { session: Parameters<Context['emit']>[1] }
+  const emit = (type: string, data: unknown = {}, time = 1_700_000_000_000) => ctx.emit('session/event', agent.session, { type, time, data } as never)
   expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
   emit('tool/call', { name: 'bash' })
   expect(runtime.sessions.toolNow(sessionId)).toEqual({ name: 'bash', since: new Date(1_700_000_000_000).toISOString() })

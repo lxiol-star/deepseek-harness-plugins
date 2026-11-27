@@ -36,7 +36,7 @@
 
 ```text
 # 主动式 Super-agent
-github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.17&path:/plugins/dsh-superagent
+github:lxiol-star/deepseek-harness-plugins#dsh-superagent-v0.2.18&path:/plugins/dsh-superagent
 # 跟随最新发布：每次重新安装都拉到当时最新的 release（tag 随发布移动）
 github:lxiol-star/deepseek-harness-plugins#dsh-superagent-latest&path:/plugins/dsh-superagent
 # 塔台模式

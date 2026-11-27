@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { TaskView, TasksView } from '../src/client/api.ts'
-import { CanvasPage, curveMiddle, edgePath, fitView, readLayout, union, zoomAbout } from '../src/client/canvas.tsx'
+import { CanvasPage, curveMiddle, edgePath, elbowPath, fitView, readLayout, routeEdges, union, zoomAbout } from '../src/client/canvas.tsx'
 import { zh } from '../src/client/locales.ts'
 import { PanelProvider } from '../src/client/provider.tsx'
 import { all, click, settle, translator, type as typeInto } from './fixtures/panel.tsx'
@@ -104,7 +104,7 @@ it('lays the main Session, the tickets and their workers out as cards joined by 
   expect(all('.dt-canvas-line[data-kind="dispatch"]')).toHaveLength(3)
   expect(all('.dt-canvas-line[data-kind="run"]')).toHaveLength(2)
   expect(all('.dt-canvas-line[data-kind="ask"]')).toEqual([])
-  expect(all('.dt-canvas-edge-label').map(label => label.textContent)).toEqual(['执行', '执行'])
+  expect(all('.dt-canvas-edge-label').map(label => label.textContent)).toEqual(['执行'])
   expect(document.querySelector('.dt-canvas-load')?.textContent).toBe('执行器 1 / 2')
   expect(document.querySelector('.dt-canvas-bar-sum')?.textContent).toBe('需要你处理 1')
   expect(document.querySelector('.dt-canvas-legend')?.textContent).toContain('虚线：勾选的工单 → Composer（提问）')
@@ -371,6 +371,45 @@ it('puts a worker\'s own helpers under that worker, not in the main Session\'s g
   expect(withKid).toHaveLength(1)
   expect(withKid[0]?.textContent).toContain('a 的帮手')
   expect(withKid[0]?.textContent).toContain(zh['canvas.childOrigin.subagent'])
+})
+
+it('routes links along a shared trunk, so peers do not fan across the cards', () => {
+  const from = { x: 0, y: 100, w: 100, h: 60 }, to = { x: 200, y: 400, w: 100, h: 60 }
+  const elbow = elbowPath(from, to)
+  // It leaves the right edge and arrives at the left edge, turning on the middle of the gap between them.
+  expect(elbow.d.startsWith('M 100 130')).toBe(true)
+  expect(elbow.d.endsWith('H 200')).toBe(true)
+  expect(elbow.d).toContain('Q 150 130 150 142')
+  expect(elbow.labelAt).toEqual({ x: 150, y: 280 })
+  // Peers of one card share that trunk: the same links leave at different heights and still turn on x = 150.
+  expect(elbowPath(from, { ...to, y: 800 }).d).toContain('Q 150 130 150 142')
+})
+
+it('sends every executor link through one trunk in the gap, and captions it once', () => {
+  const rects: Record<string, { x: number; y: number; w: number; h: number }> = { master: { x: 0, y: 60, w: 360, h: 240 }, composer: { x: 0, y: 360, w: 360, h: 200 } }
+  const tasks = Array.from({ length: 6 }, (_, index) => task(`t${String(index)}`, { live: true }))
+  for (const [index, item] of tasks.entries()) {
+    rects[`task:${item.id}`] = { x: 440, y: 60 + index * 150, w: 360, h: 120 }
+    rects[`worker:${item.sessionId ?? ''}`] = { x: 880, y: 60 + index * 150, w: 360, h: 120 }
+  }
+  const edges = routeEdges(tasks, rects, undefined, { run: '执行', ask: '提问' })
+  const dispatch = edges.filter(edge => edge.kind === 'dispatch'), run = edges.filter(edge => edge.kind === 'run')
+  expect(dispatch).toHaveLength(6)
+  expect(run).toHaveLength(6)
+  // Every link leaves its card's outer edge and enters the other card's facing edge, never crossing a card on the way.
+  for (const [index, edge] of run.entries()) {
+    expect(edge.d.startsWith('M 800 ')).toBe(true)
+    expect(edge.d.endsWith('H 880')).toBe(true)
+    // A task whose executor sits at its own height needs no turn at all; a misaligned one turns on x = 840, the middle of the
+    // gap, so every turn lands on one trunk instead of a fan.
+    const aligned = rects[`task:${tasks[index]!.id}`]!.y === rects[`worker:${tasks[index]!.sessionId ?? ''}`]!.y
+    if (aligned) expect(edge.d).toMatch(/^M 800 \d+ H 880$/)
+    else expect(edge.d).toContain('Q 840 ')
+  }
+  // The legend already names the dispatch line, so only the executor links carry a caption, and only once.
+  expect(dispatch.every(edge => edge.label === undefined)).toBe(true)
+  expect(run.filter(edge => edge.label !== undefined)).toHaveLength(1)
+  expect(run.find(edge => edge.label)?.label?.text).toBe('执行')
 })
 
 it('draws the child Sessions the main Session started itself, apart from the ticket workers', async () => {
