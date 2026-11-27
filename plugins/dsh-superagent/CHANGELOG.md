@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.17 — 2026-11-27
+
+工具级进度在真实宿主里**一直没生效**，这次改到真正可靠的事件源上。
+
+- **根因**：`tools/execute` 是在**带作用域的 carrier** 上派发的（`scopeTarget(tools, exec.agent)`），宿主级 `ctx.on('tools/execute', …)` 监听收不到它。实测：worker 在 11:15:02 连续调 `bash`，而 `GET tasks` 的 `tool` 在 30 次采样（15 秒）里**全为空**。
+- **改法**：改从会话日志的 `session/event` 读——`tool/call` 带 `data.name` 与毫秒 `time`，`tool/result` 结束一次调用。这条通道对 worker 本来就是通的（任务卡上的 `2/7` 待办进度就来自它）。同一 step 可能并行多个调用、而 `tool/result` 不带 callId，所以按**计数**判断"是否还在干活"。
+- 已被证明不生效的 `tools/execute` 监听删除，避免以后有人以为它在工作。
+- 单测：新增用例按生产日志的真实形状发事件（call → 有值；并行 call + result → 仍报最后一个；全部 result → 清空）。全量 1269 通过。
+
 ## 0.2.16 — 2026-11-27
 
 测试从 6 个红变成**全绿**，而最后 5 个红是产品里的一处浪费。

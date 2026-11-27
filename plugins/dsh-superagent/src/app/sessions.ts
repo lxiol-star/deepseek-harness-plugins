@@ -159,7 +159,7 @@ export class Sessions {
    * The tool each Session runs at this moment, with the moment it started: what a task view shows while a worker works, which
    * a todo list or a report can only say after the fact.
    */
-  private readonly runningTools = new Map<string, { name: string; since: string }>()
+  private readonly runningTools = new Map<string, { name: string; since: string; calls: number }>()
   /** Every Session this plugin has decorated, which is how it knows the main Session's children without a service lookup. */
   private readonly known = new Set<Agent>()
   private readonly ctx: Context
@@ -181,10 +181,12 @@ export class Sessions {
     })
     ctx.on('session/event', (session, event) => {
       const agent = ctx.agents.get(session.id)
-      const binding = agent && agent.session === session ? this.bindings.get(agent) : undefined
-      if (!agent || !binding || binding.subagent) return
+      if (!agent) return
+      const written = event as { type?: string; time?: number; data?: { name?: unknown } | unknown }
+      this.observeTool(agent.id, written)
+      const binding = agent.session === session ? this.bindings.get(agent) : undefined
+      if (!binding || binding.subagent) return
       this.retryHealth.observe(agent.id, event)
-      const written = event as { type?: string; data?: unknown }
       if (written.type === 'todo/write') {
         const list = todosOf(written.data)
         if (list) this.todos.set(agent.id, list); else this.todos.delete(agent.id)
@@ -196,23 +198,6 @@ export class Sessions {
       this.updateModelHealth()
     })
     ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
-    /**
-     * The call a Session is making, for the task views. `tools/execute` is a waterfall, so the handler passes the call along and
-     * records it until the call returns: `exec.name` is the tool, `exec.agent.id` the Session. The previous entry is put back,
-     * because one tool may run another in the same Session.
-     */
-    ctx.on('tools/execute', async (exec, next) => {
-      const sessionId = (exec as { agent?: { id?: string } } | undefined)?.agent?.id
-      const name = (exec as { name?: unknown } | undefined)?.name
-      if (sessionId === undefined || typeof name !== 'string') return next()
-      const previous = this.runningTools.get(sessionId)
-      this.runningTools.set(sessionId, { name, since: new Date().toISOString() })
-      try { return await next() } finally {
-        // A `return` here would swallow the call's own result: only the record is put back.
-        if (previous === undefined) this.runningTools.delete(sessionId)
-        else this.runningTools.set(sessionId, previous)
-      }
-    })
     // Opening a Session in DSH's Web UI before its first turn may select the default preset for it: select ours again. After
     // its first turn DSH refuses any selection, which leaves it as it is.
     ctx.inject(['agentPresets'], child => {
@@ -341,7 +326,28 @@ export class Sessions {
   /** The main Session's latest exchanges, oldest first, as far back as this process remembers. */
   conversation(): readonly Exchange[] { return [...this.exchanges] }
   /** The tool `sessionId` runs now, with the moment it started, or undefined when it runs none. */
-  toolNow(sessionId: string): { name: string; since: string } | undefined { return this.runningTools.get(sessionId) }
+  toolNow(sessionId: string): { name: string; since: string } | undefined {
+    const running = this.runningTools.get(sessionId)
+    return running === undefined ? undefined : { name: running.name, since: running.since }
+  }
+  /**
+   * Tracks the tool a Session runs from its log: `tool/call` names it and stamps when, `tool/result` ends one. A step may run
+   * several calls at once and a result names no call, so the count is what decides when the Session is doing nothing.
+   */
+  private observeTool(sessionId: string, event: { type?: string; time?: number; data?: unknown }): void {
+    if (event.type !== 'tool/call' && event.type !== 'tool/result') return
+    const running = this.runningTools.get(sessionId)
+    if (event.type === 'tool/result') {
+      if (running === undefined) return
+      if (running.calls <= 1) this.runningTools.delete(sessionId)
+      else this.runningTools.set(sessionId, { ...running, calls: running.calls - 1 })
+      return
+    }
+    const name = (event.data as { name?: unknown } | undefined)?.name
+    if (typeof name !== 'string') return
+    const since = new Date(event.time ?? Date.now()).toISOString()
+    this.runningTools.set(sessionId, { name, since, calls: (running?.calls ?? 0) + 1 })
+  }
   /**
    * The Sessions the main Session started for itself — a subagent, a teammate, a tower child — which no ticket owns. Read from
    * the loaded agents, because a child is only worth drawing while it exists; a ticket's executor is not one of them, since a

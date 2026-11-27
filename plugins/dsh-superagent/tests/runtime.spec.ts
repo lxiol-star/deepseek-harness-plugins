@@ -1769,6 +1769,22 @@ it('gives a subagent of a worker only the worker\'s work tools, and none once th
   expect(restricts.get('child-2')).toBeUndefined()
 })
 
+it('reads the tool a Session runs from its log, and stops when the call returns', async () => {
+  const { sessionId } = await acceptedTicket()
+  const ctx = (runtime as unknown as { ctx: Context }).ctx
+  const agent = agents.get(sessionId)!
+  const emit = (type: string, data: unknown = {}, time = 1_700_000_000_000) => ctx.emit('session/event', agent.session, { type, time, data })
+  expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
+  emit('tool/call', { name: 'bash' })
+  expect(runtime.sessions.toolNow(sessionId)).toEqual({ name: 'bash', since: new Date(1_700_000_000_000).toISOString() })
+  // A step may run two calls at once and a result names no call: the Session keeps reporting work until both return.
+  emit('tool/call', { name: 'read' })
+  emit('tool/result')
+  expect(runtime.sessions.toolNow(sessionId)?.name).toBe('read')
+  emit('tool/result')
+  expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
+})
+
 it('reports the child Sessions the main Session started itself, and only those', async () => {
   // Two children of the main Session and one of somebody else, as DSH stamps them in the session header.
   for (const id of ['child-a', 'child-b', 'child-x']) {

@@ -9691,10 +9691,12 @@ var Sessions = class {
 		});
 		ctx.on("session/event", (session, event) => {
 			const agent = ctx.agents.get(session.id);
-			const binding = agent && agent.session === session ? this.bindings.get(agent) : void 0;
-			if (!agent || !binding || binding.subagent) return;
-			this.retryHealth.observe(agent.id, event);
+			if (!agent) return;
 			const written = event;
+			this.observeTool(agent.id, written);
+			const binding = agent.session === session ? this.bindings.get(agent) : void 0;
+			if (!binding || binding.subagent) return;
+			this.retryHealth.observe(agent.id, event);
 			if (written.type === "todo/write") {
 				const list = todosOf(written.data);
 				if (list) this.todos.set(agent.id, list);
@@ -9712,27 +9714,6 @@ var Sessions = class {
 		});
 		ctx.on("agent/created", async ({ agent }) => {
 			await this.decorate(agent);
-		});
-		/**
-		* The call a Session is making, for the task views. `tools/execute` is a waterfall, so the handler passes the call along and
-		* records it until the call returns: `exec.name` is the tool, `exec.agent.id` the Session. The previous entry is put back,
-		* because one tool may run another in the same Session.
-		*/
-		ctx.on("tools/execute", async (exec, next) => {
-			const sessionId = exec?.agent?.id;
-			const name = exec?.name;
-			if (sessionId === void 0 || typeof name !== "string") return next();
-			const previous = this.runningTools.get(sessionId);
-			this.runningTools.set(sessionId, {
-				name,
-				since: (/* @__PURE__ */ new Date()).toISOString()
-			});
-			try {
-				return await next();
-			} finally {
-				if (previous === void 0) this.runningTools.delete(sessionId);
-				else this.runningTools.set(sessionId, previous);
-			}
 		});
 		ctx.inject(["agentPresets"], (child) => {
 			child.on("agent-preset/selected", (sessionId, preset) => {
@@ -9910,7 +9891,36 @@ var Sessions = class {
 	}
 	/** The tool `sessionId` runs now, with the moment it started, or undefined when it runs none. */
 	toolNow(sessionId) {
-		return this.runningTools.get(sessionId);
+		const running = this.runningTools.get(sessionId);
+		return running === void 0 ? void 0 : {
+			name: running.name,
+			since: running.since
+		};
+	}
+	/**
+	* Tracks the tool a Session runs from its log: `tool/call` names it and stamps when, `tool/result` ends one. A step may run
+	* several calls at once and a result names no call, so the count is what decides when the Session is doing nothing.
+	*/
+	observeTool(sessionId, event) {
+		if (event.type !== "tool/call" && event.type !== "tool/result") return;
+		const running = this.runningTools.get(sessionId);
+		if (event.type === "tool/result") {
+			if (running === void 0) return;
+			if (running.calls <= 1) this.runningTools.delete(sessionId);
+			else this.runningTools.set(sessionId, {
+				...running,
+				calls: running.calls - 1
+			});
+			return;
+		}
+		const name = event.data?.name;
+		if (typeof name !== "string") return;
+		const since = new Date(event.time ?? Date.now()).toISOString();
+		this.runningTools.set(sessionId, {
+			name,
+			since,
+			calls: (running?.calls ?? 0) + 1
+		});
 	}
 	/**
 	* The Sessions the main Session started for itself — a subagent, a teammate, a tower child — which no ticket owns. Read from
