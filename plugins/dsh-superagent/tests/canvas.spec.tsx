@@ -385,6 +385,47 @@ it('routes links along a shared trunk, so peers do not fan across the cards', ()
   expect(elbowPath(from, { ...to, y: 800 }).d).toContain('Q 150 130 150 142')
 })
 
+/** The straight runs of a path, as segments in the order they are drawn; a corner's control point is not a run. */
+const segments = (d: string): { x1: number; y1: number; x2: number; y2: number }[] => {
+  const out: { x1: number; y1: number; x2: number; y2: number }[] = []
+  let x = 0, y = 0
+  for (const [, command, numbers] of d.matchAll(/([MHVCQ])([^MHVCQ]*)/g)) {
+    const values = (numbers!.match(/-?[\d.]+/g) ?? []).map(Number)
+    if (command === 'M') { x = values[0]!; y = values[1]! }
+    else if (command === 'H') { out.push({ x1: x, y1: y, x2: values[0]!, y2: y }); x = values[0]! }
+    else if (command === 'V') { out.push({ x1: x, y1: y, x2: x, y2: values[0]! }); y = values[0]! }
+    else if (command === 'Q') { x = values[2]!; y = values[3]! }
+  }
+  return out
+}
+
+it('never runs a link through a card, in the layout the operator actually had', () => {
+  const card: Record<string, { x: number; y: number; w: number; h: number }> = { master: { x: 0, y: 60, w: 360, h: 240 },
+    composer: { x: 0, y: 360, w: 360, h: 200 } }
+  const tasks = Array.from({ length: 6 }, (_, index) => task(`t${String(index)}`))
+  for (const [index, item] of tasks.entries()) {
+    card[`task:${item.id}`] = { x: 440, y: 60 + index * 130, w: 360, h: 110 }
+    card[`worker:${item.sessionId ?? ''}`] = { x: 880, y: 60 + index * 130 + (index % 2) * 40, w: 360, h: 110 }
+  }
+  const edges = routeEdges(tasks, card, tasks[2], { run: '执行', ask: '提问' })
+  /** Whether an axis-aligned run enters the inside of `rect`, ignoring a touch on its border. */
+  const crosses = (run: { x1: number; y1: number; x2: number; y2: number }, rect: { x: number; y: number; w: number; h: number }) => {
+    const left = Math.min(run.x1, run.x2), right = Math.max(run.x1, run.x2)
+    const top = Math.min(run.y1, run.y2), bottom = Math.max(run.y1, run.y2)
+    return left < rect.x + rect.w - 1 && right > rect.x + 1 && top < rect.y + rect.h - 1 && bottom > rect.y + 1
+  }
+  // The two cards a link belongs to are where it starts and ends; every other card must stay clear.
+  const owns = (edgeId: string, id: string) => edgeId.split(':')[1] !== undefined && id.endsWith(edgeId.split(':')[1]!)
+  for (const edge of edges) {
+    for (const run of segments(edge.d)) {
+      for (const [id, rect] of Object.entries(card)) {
+        if (owns(edge.id, id.replace(/^(task|worker):/, ''))) continue
+        expect([edge.id, run, id, crosses(run, rect)]).toEqual([edge.id, run, id, false])
+      }
+    }
+  }
+})
+
 it('sends every executor link through one trunk in the gap, and captions it once', () => {
   const rects: Record<string, { x: number; y: number; w: number; h: number }> = { master: { x: 0, y: 60, w: 360, h: 240 }, composer: { x: 0, y: 360, w: 360, h: 200 } }
   const tasks = Array.from({ length: 6 }, (_, index) => task(`t${String(index)}`, { live: true }))
