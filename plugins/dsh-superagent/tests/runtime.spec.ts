@@ -1783,6 +1783,15 @@ it('reads the tool a Session runs from its log, and stops when the call returns'
   expect(runtime.sessions.toolNow(sessionId)?.name).toBe('read')
   emit('tool/result')
   expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
+  // A call whose result never arrives must not hang on the card: the step that ends reconciles it.
+  emit('tool/call', { name: 'grep', step: 4 })
+  expect(runtime.sessions.toolNow(sessionId)?.name).toBe('grep')
+  emit('step/end', { step: 4 })
+  expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
+  // So does the end of the turn.
+  emit('tool/call', { name: 'bash' })
+  emit('turn/end')
+  expect(runtime.sessions.toolNow(sessionId)).toBeUndefined()
 })
 
 it('reports the child Sessions the main Session started itself, and only those', async () => {

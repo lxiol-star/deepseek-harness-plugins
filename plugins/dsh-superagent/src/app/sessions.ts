@@ -335,6 +335,9 @@ export class Sessions {
    * several calls at once and a result names no call, so the count is what decides when the Session is doing nothing.
    */
   private observeTool(sessionId: string, event: { type?: string; time?: number; data?: unknown }): void {
+    // A step or a turn cannot end with a call still in flight, so either one reconciles a result that never arrived: a Session
+    // killed mid-call would otherwise keep claiming a tool it no longer runs.
+    if (event.type === 'step/end' || event.type === 'turn/end') { this.runningTools.delete(sessionId); return }
     if (event.type !== 'tool/call' && event.type !== 'tool/result') return
     const running = this.runningTools.get(sessionId)
     if (event.type === 'tool/result') {

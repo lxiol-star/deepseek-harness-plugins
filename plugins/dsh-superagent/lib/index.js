@@ -9902,6 +9902,10 @@ var Sessions = class {
 	* several calls at once and a result names no call, so the count is what decides when the Session is doing nothing.
 	*/
 	observeTool(sessionId, event) {
+		if (event.type === "step/end" || event.type === "turn/end") {
+			this.runningTools.delete(sessionId);
+			return;
+		}
 		if (event.type !== "tool/call" && event.type !== "tool/result") return;
 		const running = this.runningTools.get(sessionId);
 		if (event.type === "tool/result") {
