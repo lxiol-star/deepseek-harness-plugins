@@ -28,7 +28,6 @@ import {
   branchExists,
   branchTip,
   checkoutNewLocalBranch,
-  commitAllowEmpty,
   commitPaths,
   currentBranch,
   diffNameOnly,
@@ -656,10 +655,9 @@ export class TowerStore {
         `the base checkout has ${String(dirty.length)} uncommitted entries; tower refuses to snapshot this workspace in bulk. Commit or stash the changes, or initialize tower in a dedicated clean worktree (limit ${String(MAX_BASE_WIP_ENTRIES)}).`,
       );
     }
-    if (dirty.length === 0) {
-      await commitAllowEmpty(this.repoRoot, 'tower: init');
-      return;
-    }
+    // A clean checkout needs nothing: the base branch already has the commit the fleet forks from. Committing an empty
+    // `tower: init` here put one blank commit on the operator's branch on every activation.
+    if (dirty.length === 0) return;
     await commitPaths(
       this.repoRoot,
       dirty.map((entry) => entry.path),

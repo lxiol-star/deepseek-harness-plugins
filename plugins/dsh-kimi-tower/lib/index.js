@@ -5,11 +5,7 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  try {
-    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-  } catch (e) {
-    throw mod = 0, e;
-  }
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -28,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/constants.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/constants.js"(exports, module) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var WIN_SLASH = "\\\\/";
     var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -230,9 +226,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/utils.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/lib/utils.js
 var require_utils = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/utils.js"(exports) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var {
       REGEX_BACKSLASH,
@@ -294,9 +290,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/scan.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/scan.js"(exports, module) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils();
     var {
@@ -632,9 +628,9 @@ var require_scan = __commonJS({
   }
 });
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/parse.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/parse.js"(exports, module) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants();
     var utils = require_utils();
@@ -1647,9 +1643,9 @@ var require_parse = __commonJS({
   }
 });
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/picomatch.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var scan = require_scan();
     var parse = require_parse();
@@ -1787,9 +1783,9 @@ var require_picomatch = __commonJS({
   }
 });
 
-// ../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/index.js
+// ../../../../../dsh-kimi-tower/node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "../../../deepseek-harness/node_modules/.pnpm/picomatch@4.0.7/node_modules/picomatch/index.js"(exports, module) {
+  "../../../../../dsh-kimi-tower/node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     var pico = require_picomatch();
     var utils = require_utils();
@@ -1831,9 +1827,6 @@ var GitError = class extends Error {
     this.exitCode = exitCode;
     this.name = "GitError";
   }
-  args;
-  stderr;
-  exitCode;
 };
 async function git(cwd, args, options = {}) {
   return new Promise((resolve5, reject) => {
@@ -2508,7 +2501,6 @@ var TowerStore = class {
     this.stateLockTimeoutMs = options.stateLockTimeoutMs ?? 1e4;
     this.stateLockPollMs = options.stateLockPollMs ?? 10;
   }
-  repoRoot;
   stateLockTimeoutMs;
   stateLockPollMs;
   async runPrepared(prepare, commit) {
@@ -2759,10 +2751,7 @@ var TowerStore = class {
         `the base checkout has ${String(dirty.length)} uncommitted entries; tower refuses to snapshot this workspace in bulk. Commit or stash the changes, or initialize tower in a dedicated clean worktree (limit ${String(MAX_BASE_WIP_ENTRIES)}).`
       );
     }
-    if (dirty.length === 0) {
-      await commitAllowEmpty(this.repoRoot, "tower: init");
-      return;
-    }
+    if (dirty.length === 0) return;
     await commitPaths(
       this.repoRoot,
       dirty.map((entry) => entry.path),

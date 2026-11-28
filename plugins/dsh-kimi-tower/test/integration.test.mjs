@@ -513,6 +513,24 @@ test('a successful /tower stop does not reactivate the mode on replay', async ()
   }
 })
 
+test('activating twice on a clean checkout adds no empty commit', async () => {
+  const dir = await makeRepo()
+  try {
+    const head = git(dir, ['rev-parse', 'HEAD'])
+    const harness = makeHarness({ cwd: dir })
+    apply(harness.ctx, {})
+    const turnOn = async () => harness.commands.get('tower').handler({ agent: harness.main, rawInput: ' on' })
+    await turnOn()
+    await harness.commands.get('tower').handler({ agent: harness.main, rawInput: ' off' })
+    await turnOn()
+    // Activation used to leave one blank `tower: init` commit per run on the operator's own branch.
+    assert.equal(git(dir, ['rev-parse', 'HEAD']), head)
+    assert.equal(git(dir, ['rev-list', '--count', 'HEAD']), '1')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('tower_init refuses an empty repository before staging files', async () => {
   const dir = realpathSync(await mkdtemp(join(tmpdir(), 'tower-empty-')))
   try {

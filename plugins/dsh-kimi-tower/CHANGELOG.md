@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 — 2026-11-28
+
+修掉"每次激活都往操作者分支塞一个空提交"。
+
+- `ensureRepository()` 在基线检出干净时执行 `git commit --allow-empty -m 'tower: init'`，于是每 `tower_activate` 一次分支上就多一个空提交（实测连开两次留了 3 个）。干净检出本来就不需要提交——基线分支已经带着全队要 fork 的那个提交，现在直接返回；脏检出仍按原逻辑快照必要文件。
+- 集成测试新增 `activating twice on a clean checkout adds no empty commit`：同一仓库开→关→再开，断言 `HEAD` 不变、提交数仍为 1。已验证把修复回退后该用例**必红**。
+- 全套 23 项通过。
+
 ## 0.1.2 — 2026-11-27
 
 让工作区的主 agent 可以自己进入 tower 模式，而不是只能等人敲 `/tower on`。
